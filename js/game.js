@@ -357,7 +357,7 @@ function checkCollisions() {
 
 function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
   // 爆炸标记：在护盾检查之前记录，确保死亡触发时保留最强一次
-  if (b.behavior === "explosion") {
+  if (b.behaviors.has("explosion")) {
     const strength = b.dmg * b.explosionRadius;
     if (!e._deathExplosion || strength > e._deathExplosion.strength) {
       e._deathExplosion = { dmg: b.dmg, radius: b.explosionRadius, strength };
@@ -369,9 +369,9 @@ function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
     e.shieldHp--;
     spawnParticles(b.x, b.y, "#44aaff", 6, 3);
     spawnDamageNumber(b.x, b.y, "护盾", "#44aaff");
-    if (!b.isScatter && b.behavior !== "penetrate") {
+    if (!b.isScatter && !b.behaviors.has("penetrate")) {
       bullets.splice(bulletIdx, 1);
-    } else if (b.behavior === "penetrate" && b.pierceCount < b.maxPierce) {
+    } else if (b.behaviors.has("penetrate") && b.pierceCount < b.maxPierce) {
       b.pierceCount++;
     } else {
       bullets.splice(bulletIdx, 1);
@@ -383,15 +383,15 @@ function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
   e.hitFlash = 1;
   spawnDamageNumber(e.x, e.y, b.isCrit ? b.dmg + "!" : "" + b.dmg, b.isCrit ? "#ff8fa3" : "#fff", b.isCrit);
 
-  // 非穿透、非爆炸的行为（split 等）：只在命中时触发
-  if (b.behavior !== "penetrate" && b.behavior !== "explosion") {
-    handleBulletBehavior(b, e, bulletIdx);
-  }
-
-  // 非穿透、非爆炸的行为（split 等）：只在命中时触发
-  // 爆炸不再在命中时触发 AOE（改到死亡时统一处理）
-  if (b.behavior !== "penetrate" && b.behavior !== "explosion") {
-    handleBulletBehavior(b, e, bulletIdx);
+  // 分裂行为：命中时触发碎片（穿透弹也可叠加分裂）
+  if (b.behaviors.has("split") && !b.isScatter) {
+    const cnt = b.splitCount || 1;
+    for (let k = 0; k < cnt; k++) {
+      const angle = (k / cnt) * Math.PI - Math.PI / 2;
+      const sdmg = Math.max(1, Math.round(b.dmg * BCFG.splitDmgRatio));
+      spawnSplitBullet(b.x, b.y, angle, sdmg, "#a0ffd0", b.r);
+    }
+    sfx.scatter();
   }
 
   // 击毁
@@ -428,12 +428,10 @@ function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
 
     removeEnemy(enemyIdx);
 
-    // 击毁后：穿透弹保持伤害、大小与 穿透 继续飞行；其余行为消失
-    if (b.behavior === "penetrate" && b.pierceCount < b.maxPierce) {
+    // 击毁后：穿透弹保持飞行继续穿透；其余消失
+    if (b.behaviors.has("penetrate") && b.pierceCount < b.maxPierce) {
       b.pierceCount++;
-      const idx = bullets.indexOf(b);
-      if (idx === -1) { /* already removed elsewhere */ }
-    } else if (!b.isScatter && b.behavior !== "penetrate") {
+    } else if (!b.isScatter) {
       const idx = bullets.indexOf(b);
       if (idx !== -1) bullets.splice(idx, 1);
     }
@@ -483,38 +481,6 @@ function orbitHitEnemy(e, ob, enemyIdx) {
   }
 }
 
-function handleBulletBehavior(b, e, bulletIdx) {
-  switch (b.behavior) {
-    // explosion 行为由敌机死亡时统一处理（doEnemyDeathExplosion），命中时不触发
-    case "split": {
-      if (!b.isScatter) {
-        const cnt = b.splitCount || 1;
-        for (let k = 0; k < cnt; k++) {
-          const angle = (k / cnt) * Math.PI - Math.PI / 2;
-          const sdmg = Math.max(1, Math.round(b.dmg * BCFG.splitDmgRatio));
-          spawnSplitBullet(b.x, b.y, angle, sdmg, "#a0ffd0", b.r);
-        }
-        sfx.scatter();
-      }
-      bullets.splice(bulletIdx, 1);
-      break;
-    }
-    case "penetrate": {
-      if (b.pierceCount < b.maxPierce) {
-        b.pierceCount++;
-        // 穿透弹保持伤害与大小不变，仅限制穿透次数
-        sfx.penetrate();
-        spawnParticles(b.x, b.y, "#aa66ff", 3, 2);
-      } else {
-        bullets.splice(bulletIdx, 1);
-      }
-      break;
-    }
-    default: {
-      bullets.splice(bulletIdx, 1);
-    }
-  }
-}
 
 /**
  * 敌机死亡爆炸（玩家爆炸弹触发）
@@ -649,6 +615,7 @@ function bossFire(e) {
           vx: Math.sin(angle) * 3, vy: 3.5,
           r: 6, friendly: false, color: "#ff4488",
           traveled: 0, maxRange: 500, life: 5,
+          behaviors: new Set(),
         });
       }
       break;
@@ -665,6 +632,7 @@ function bossFire(e) {
           vx: Math.cos(a) * 3, vy: Math.sin(a) * 3,
           r: 5, friendly: false, color: "#aa44ff",
           traveled: 0, maxRange: 400, life: 4,
+          behaviors: new Set(),
         });
       }
       break;
@@ -677,6 +645,7 @@ function bossFire(e) {
           vx: 0, vy: 7,
           r: 4, friendly: false, color: "#ff2222",
           traveled: 0, maxRange: 600, life: 3,
+          behaviors: new Set(),
         });
       }
       break;

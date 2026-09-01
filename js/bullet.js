@@ -25,7 +25,7 @@ export function fireBullet(angle, dmg, player, x, y, spd = BULLET.baseSpeed, isE
   // 每级攻击范围自动 +10%（以玩家等级计，初始等级 1 不加成）
   const levelMul = 1 + ((player.level || 1) - 1) * 0.10;
   const maxRange = (BULLET.baseRange + rangeLvl * BULLET.rangePerLevel) * levelMul;
-  const behavior = isExplosion ? "explosion" : getBulletBehavior(player);
+  const behaviors = getBulletBehaviors(player, isExplosion);
   const critLvl = player.skills.crit || 0;
   const isCrit = critLvl > 0 && Math.random() < BULLET.critChance * critLvl;
   const finalDmg = isCrit ? Math.round(dmg * BULLET.critMulti) : dmg;
@@ -38,6 +38,11 @@ export function fireBullet(angle, dmg, player, x, y, spd = BULLET.baseSpeed, isE
   const orbitalLv = player.skills.orbital || 0;
   const accel = orbitalLv > 0 ? BULLET.orbitalAccel + (orbitalLv - 1) * BULLET.orbitalAccelPerLevel : 0;
 
+  // 各行为属性独立设置（不再互斥）
+  const penetrateLv = player.skills.penetrate || 0;
+  const splitLv = player.skills.split || 0;
+  const explosionLv = player.skills.explosion || 0;
+
   bullets.push({
     x: x ?? player.x,
     y: y ?? (player.y - player.h / 2),
@@ -49,14 +54,14 @@ export function fireBullet(angle, dmg, player, x, y, spd = BULLET.baseSpeed, isE
     r: isCrit ? BULLET.critRadius : BULLET.baseRadius,
     baseR: isCrit ? BULLET.critRadius : BULLET.baseRadius,
     friendly: true,
-    color: behaviorColor(behavior, isCrit),
+    color: behaviorColor(behaviors, isCrit),
     traveled: 0,
     maxRange,
-    behavior,
+    behaviors,
     pierceCount: 0,
-    maxPierce: behavior === "penetrate" ? (player.skills.penetrate || 0) : 0,
-    splitCount: behavior === "split" ? (1 + (player.skills.split || 0) * BULLET.splitCountPerLevel) : 0,
-    explosionRadius: behavior === "explosion" ? BULLET.explosionBaseRadius + (player.skills.explosion || 0) * BULLET.explosionRadiusPerLevel : 0,
+    maxPierce: behaviors.has("penetrate") ? penetrateLv : 0,
+    splitCount: behaviors.has("split") ? (1 + splitLv * BULLET.splitCountPerLevel) : 0,
+    explosionRadius: behaviors.has("explosion") ? BULLET.explosionBaseRadius + explosionLv * BULLET.explosionRadiusPerLevel : 0,
     isScatter: false,
     isCrit,
     _refire: false, // 该子弹是否已被用于触发下一波射击（防止同波多弹反复触发）
@@ -76,7 +81,7 @@ export function spawnSplitBullet(x, y, angle, dmg, color, parentR = 4) {
     color: color || "#a0ffd0",
     traveled: 0,
     maxRange: 200,
-    behavior: "normal",
+    behaviors: new Set(),
     pierceCount: 0,
     maxPierce: 0,
     splitCount: 0,
@@ -103,6 +108,7 @@ export function spawnEnemyBullet(e, playerX, playerY, fireScale = 1) {
     traveled: 0,
     maxRange: 600,
     life: 6,
+    behaviors: new Set(),
   });
 }
 
@@ -219,20 +225,30 @@ export function markMainBulletsTriggered() {
 
 // ---------- 内部工具 ----------
 
-function getBulletBehavior(player) {
-  const p = player.skills;
-  if (p.penetrate && p.penetrate > 0) return "penetrate";
-  if (p.explosion && p.explosion > 0) return "explosion";
-  if (p.split && p.split > 0) return "split";
+/** 返回所有激活的行为（可叠加） */
+function getBulletBehaviors(player, isExplosion) {
+  const s = player.skills;
+  const set = new Set();
+  if (isExplosion) set.add("explosion");
+  if (s.penetrate > 0) set.add("penetrate");
+  if (s.explosion > 0) set.add("explosion");
+  if (s.split > 0) set.add("split");
+  return set;
+}
+
+/** 取主行为用于染色（优先级：穿透 > 爆炸 > 分裂） */
+function primaryBehavior(behaviors) {
+  if (behaviors.has("penetrate")) return "penetrate";
+  if (behaviors.has("explosion")) return "explosion";
+  if (behaviors.has("split")) return "split";
   return "normal";
 }
 
-function behaviorColor(behavior, isCrit) {
+function behaviorColor(behaviors, isCrit) {
   if (isCrit) return "#ff8fa3";
-  switch (behavior) {
-    case "explosion":  return "#ff6633";
-    case "split":      return "#7bd67b";
-    case "penetrate":  return "#aa66ff";
-    default:           return "#5ee6ff";
-  }
+  const b = primaryBehavior(behaviors);
+  if (b === "explosion") return "#ff6633";
+  if (b === "split") return "#7bd67b";
+  if (b === "penetrate") return "#aa66ff";
+  return "#5ee6ff";
 }
