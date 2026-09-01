@@ -4,7 +4,6 @@
 
 import { W, H, BULLET } from "./config.js";
 import { hypot } from "./utils.js";
-import { spawnParticles } from "./particles.js";
 
 export let bullets = [];
 
@@ -46,7 +45,6 @@ export function fireBullet(angle, dmg, player, x, y, spd = BULLET.baseSpeed, isE
     vy: -finalSpd,
     baseSpd: finalSpd,    // 天基武器用于加速计算
     accel,
-    trailTimer: 0,        // 天基武器拖尾计时
     dmg: finalDmg,
     r: isCrit ? BULLET.critRadius : BULLET.baseRadius,
     baseR: isCrit ? BULLET.critRadius : BULLET.baseRadius,
@@ -122,12 +120,6 @@ export function updateBullets(dt) {
       b.vy = -newSpd;
       // 子弹随速度变大（视觉效果）
       b.r = b.baseR + (newSpd - b.baseSpd) * 0.12;
-      // 拖尾粒子
-      b.trailTimer = (b.trailTimer || 0) + dt * 60;
-      if (b.trailTimer >= BULLET.orbitalTrailRate) {
-        b.trailTimer = 0;
-        spawnParticles(b.x, b.y + 4, "#fca311", 1, 3);
-      }
     }
 
     const dx = b.vx * dt * 60;
@@ -169,6 +161,13 @@ export function drawBullets(ctx) {
         // 天基武器子弹随速度变大
         const scale = b.baseR ? b.r / b.baseR : 1;
         const bw = 5 * scale, bh = 16 * scale;
+        // 速度轨迹小尾巴
+        if (b.accel && Math.abs(b.vy) > b.baseSpd * 1.3) {
+          const tailLen = Math.min(30, (Math.abs(b.vy) - b.baseSpd) * 0.4);
+          ctx.globalAlpha = 0.35;
+          ctx.fillRect(b.x - bw / 2, b.y + bh / 2, bw, tailLen);
+          ctx.globalAlpha = 1;
+        }
         ctx.fillRect(b.x - bw / 2, b.y - bh / 2, bw, bh);
       }
     }

@@ -71,7 +71,8 @@ export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNee
   // 射程指示（以米为单位，1米 = 25 像素）
   ctx.textAlign = "left";
   const rangeLvl = player.skills.range || 0;
-  const rangeM = Math.round((250 + rangeLvl * 150) / 25);
+  const levelMul = 1 + ((player.level || 1) - 1) * 0.10;
+  const rangeM = Math.round((250 + rangeLvl * 150) * levelMul / 25);
   const rangeText = "射程 " + rangeM + "m";
   ctx.fillStyle = rangeLvl > 0 ? "#88ddff" : "rgba(255,255,255,.35)";
   ctx.fillText(rangeText, 18, H - 56);

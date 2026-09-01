@@ -164,6 +164,17 @@ function update(dt) {
     updateBullets(dt);
     updateEnemies(dt, level, player.x, player.y, player.h);
 
+    // 死亡动画期间跳过玩家输入/射击
+    if (deathTimer > 0 && lives <= 0) {
+      // 仅更新圆弧爆炸波纹
+      for (let i = fxRings.length - 1; i >= 0; i--) {
+        const r = fxRings[i];
+        r.life -= dt;
+        if (r.life <= 0) fxRings.splice(i, 1);
+      }
+      return;
+    }
+
     // 连击计时
     if (comboTime > 0) {
       comboTime -= dt;
@@ -392,7 +403,7 @@ function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
     const comboBonus = combo >= 10;
     if (comboBonus) addScore(500);
     spawnDamageNumber(e.x, e.y - e.r, "+" + Math.round(e.score * (difficulty.scoreScale ?? 1)), comboBonus ? "#ff8fa3" : "#ffd166", comboBonus);
-    spawnParticles(e.x, e.y, e.color, 24, 6);
+    spawnParticles(e.x, e.y, e.color, 8, 4);
     spawnPowerup(e.x, e.y, level);
     sfx.boom();
     addKill();
@@ -451,7 +462,7 @@ function orbitHitEnemy(e, ob, enemyIdx) {
     const comboBonus = combo >= 10;
     if (comboBonus) addScore(500);
     spawnDamageNumber(e.x, e.y - e.r, "+" + Math.round(e.score * (difficulty.scoreScale ?? 1)), comboBonus ? "#ff8fa3" : "#ffd166", comboBonus);
-    spawnParticles(e.x, e.y, e.color, 24, 6);
+    spawnParticles(e.x, e.y, e.color, 8, 4);
     spawnPowerup(e.x, e.y, level);
     sfx.boom();
     addKill();

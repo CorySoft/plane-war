@@ -311,7 +311,8 @@ export function drawPause(ctx, player) {
     const rapidFireRate = baseFireRate * 0.5;
     const dps = Math.round((1 + (player.skills.dmg || 0)) / baseFireRate * 10) / 10;
     const moveSpd = Math.round(player.speed * (1 + 0.12 * (player.skills.move || 0)) * 10) / 10;
-    const rangeM = Math.round((250 + (player.skills.range || 0) * 150 + ((player.level || 1) - 1) * 25) / 25);
+    const levelMul = 1 + ((player.level || 1) - 1) * 0.10;
+    const rangeM = Math.round((250 + (player.skills.range || 0) * 150) * levelMul / 25);
 
     const stats = [
       ["♥ 生命", player._maxLivesUpdate ? (player.baseHp + (player.skills.maxhp || 0)) : player.baseHp, "#ff6b9d"],
