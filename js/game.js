@@ -851,8 +851,8 @@ function draw() {
   drawPowerups(ctx);
   drawBullets(ctx);
   drawEnemies(ctx, frame);
-  // 玩家（含死亡动画期间，不闪烁，保留爆炸特效）
-  if (player && state !== STATE.OVER) {
+  // 玩家（死亡动画期间不绘制，战机即刻消失，只留爆炸特效）
+  if (player && state !== STATE.OVER && !(deathTimer > 0)) {
     drawPlayer(ctx, player, frame);
   }
   drawParticles(ctx);
