@@ -7,6 +7,46 @@ import { hypot } from "./utils.js";
 
 export let bullets = [];
 
+// ---------- 子弹对象池 ----------
+const pool = [];
+
+/** 从池中取一颗子弹对象（无则新建），字段由调用方赋初值 */
+function allocBullet() {
+  if (pool.length > 0) return pool.pop();
+  return {
+    behaviors: new Set(),
+    x: 0, y: 0, vx: 0, vy: 0, baseSpd: 0, accel: 0,
+    dmg: 0, r: 0, baseR: 0, friendly: true, color: "",
+    traveled: 0, maxRange: 0, pierceCount: 0, maxPierce: 0,
+    splitCount: 0, explosionRadius: 0, isScatter: false, isCrit: false,
+    _refire: false, life: 0,
+  };
+}
+
+/** 释放子弹回池（重置动态字段） */
+function freeBullet(b) {
+  b.behaviors.clear();
+  b.traveled = 0;
+  b.pierceCount = 0;
+  b.maxPierce = 0;
+  b.splitCount = 0;
+  b.explosionRadius = 0;
+  b.isScatter = false;
+  b.isCrit = false;
+  b._refire = false;
+  b.life = 0;
+  if (pool.length < 400) pool.push(b); // 防爆量：池上限
+}
+
+function pushBullet(b) { bullets.push(b); }
+
+/** 从数组中移除子弹并释放回池（供碰撞处理调用） */
+export function removeBullet(b) {
+  const idx = bullets.indexOf(b);
+  if (idx !== -1) bullets.splice(idx, 1);
+  freeBullet(b);
+}
+
 /**
  * 创建玩家子弹
  * @param {number} angle  - 偏转角(弧度)
@@ -43,52 +83,54 @@ export function fireBullet(angle, dmg, player, x, y, spd = BULLET.baseSpeed, isE
   const splitLv = player.skills.split || 0;
   const explosionLv = player.skills.explosion || 0;
 
-  bullets.push({
-    x: x ?? player.x,
-    y: y ?? (player.y - player.h / 2),
-    vx: Math.sin(angle) * 3,
-    vy: -finalSpd,
-    baseSpd: finalSpd,    // 天基武器用于加速计算
-    accel,
-    dmg: finalDmg,
-    r: isCrit ? BULLET.critRadius : BULLET.baseRadius,
-    baseR: isCrit ? BULLET.critRadius : BULLET.baseRadius,
-    friendly: true,
-    color: behaviorColor(behaviors, isCrit),
-    traveled: 0,
-    maxRange,
-    behaviors,
-    pierceCount: 0,
-    maxPierce: behaviors.has("penetrate") ? penetrateLv : 0,
-    splitCount: behaviors.has("split") ? (1 + splitLv * BULLET.splitCountPerLevel) : 0,
-    explosionRadius: behaviors.has("explosion") ? BULLET.explosionBaseRadius + explosionLv * BULLET.explosionRadiusPerLevel : 0,
-    isScatter: false,
-    isCrit,
-    _refire: false, // 该子弹是否已被用于触发下一波射击（防止同波多弹反复触发）
-  });
+  const b = allocBullet();
+  b.x = x ?? player.x;
+  b.y = y ?? (player.y - player.h / 2);
+  b.vx = Math.sin(angle) * 3;
+  b.vy = -finalSpd;
+  b.baseSpd = finalSpd;
+  b.accel = accel;
+  b.dmg = finalDmg;
+  b.r = isCrit ? BULLET.critRadius : BULLET.baseRadius;
+  b.baseR = isCrit ? BULLET.critRadius : BULLET.baseRadius;
+  b.friendly = true;
+  b.color = behaviorColor(behaviors, isCrit);
+  b.traveled = 0;
+  b.maxRange = maxRange;
+  b.behaviors = behaviors;
+  b.pierceCount = 0;
+  b.maxPierce = behaviors.has("penetrate") ? penetrateLv : 0;
+  b.splitCount = behaviors.has("split") ? (1 + splitLv * BULLET.splitCountPerLevel) : 0;
+  b.explosionRadius = behaviors.has("explosion") ? BULLET.explosionBaseRadius + explosionLv * BULLET.explosionRadiusPerLevel : 0;
+  b.isScatter = false;
+  b.isCrit = isCrit;
+  b._refire = false;
+  b.life = 0;
+  pushBullet(b);
+  return b;
 }
 
 /** 创建分裂弹碎片（由分裂/爆炸技能触发） */
 export function spawnSplitBullet(x, y, angle, dmg, color, parentR = 4) {
   const spd = BULLET.splitSpeed;
-  bullets.push({
-    x, y,
-    vx: Math.sin(angle) * 2,
-    vy: -spd,
-    dmg,
-    r: Math.max(1.5, parentR * 0.4), // 分裂碎片更小
-    friendly: true,
-    color: color || "#a0ffd0",
-    traveled: 0,
-    maxRange: 200,
-    behaviors: new Set(),
-    pierceCount: 0,
-    maxPierce: 0,
-    splitCount: 0,
-    explosionRadius: 0,
-    isScatter: true,
-    isCrit: false,
-  });
+  const b = allocBullet();
+  b.x = x; b.y = y;
+  b.vx = Math.sin(angle) * 2;
+  b.vy = -spd;
+  b.dmg = dmg;
+  b.r = Math.max(1.5, parentR * 0.4);
+  b.baseR = b.r;
+  b.friendly = true;
+  b.color = color || "#a0ffd0";
+  b.traveled = 0;
+  b.maxRange = 200;
+  b.behaviors.clear();
+  b.pierceCount = 0; b.maxPierce = 0;
+  b.splitCount = 0; b.explosionRadius = 0;
+  b.isScatter = true; b.isCrit = false;
+  b._refire = false; b.life = 0; b.accel = 0;
+  pushBullet(b);
+  return b;
 }
 
 /** 创建敌方子弹 */
@@ -97,19 +139,24 @@ export function spawnEnemyBullet(e, playerX, playerY, fireScale = 1) {
   const dy = playerY - e.y;
   const len = Math.hypot(dx, dy) || 1;
   const sp = (3 + Math.random() * 1.5) * fireScale;
-  bullets.push({
-    x: e.x,
-    y: e.y + e.r * 0.5,
-    vx: (dx / len) * sp,
-    vy: (dy / len) * sp,
-    r: 5,
-    friendly: false,
-    color: "#ff8fa3",
-    traveled: 0,
-    maxRange: 600,
-    life: 6,
-    behaviors: new Set(),
-  });
+  const b = allocBullet();
+  b.x = e.x;
+  b.y = e.y + e.r * 0.5;
+  b.vx = (dx / len) * sp;
+  b.vy = (dy / len) * sp;
+  b.r = 5; b.baseR = 5;
+  b.friendly = false;
+  b.color = "#ff8fa3";
+  b.traveled = 0;
+  b.maxRange = 600;
+  b.life = 6;
+  b.behaviors.clear();
+  b.pierceCount = 0; b.maxPierce = 0;
+  b.splitCount = 0; b.explosionRadius = 0;
+  b.isScatter = false; b.isCrit = false;
+  b._refire = false; b.accel = 0;
+  pushBullet(b);
+  return b;
 }
 
 export function updateBullets(dt) {
@@ -131,12 +178,14 @@ export function updateBullets(dt) {
     b.x += dx;
     b.y += dy;
     b.traveled += Math.hypot(dx, dy);
+    let dead = false;
     if (b.friendly) {
-      if (b.traveled >= b.maxRange || b.y < -20 || b.y > H + 20 || b.x < -20 || b.x > W + 20) continue;
+      if (b.traveled >= b.maxRange || b.y < -30 || b.y > H + 30 || b.x < -30 || b.x > W + 30) dead = true;
     } else {
       b.life = (b.life || 6) - dt;
-      if (b.life <= 0 || b.y < -20 || b.y > H + 20 || b.x < -20 || b.x > W + 20) continue;
+      if (b.life <= 0 || b.y < -30 || b.y > H + 30 || b.x < -30 || b.x > W + 30) dead = true;
     }
+    if (dead) { freeBullet(b); continue; }
     next.push(b);
   }
   bullets = next;
@@ -178,8 +227,15 @@ export function drawBullets(ctx) {
 
 export function clearBullets(keepFriendly = false) {
   if (keepFriendly) {
-    bullets = bullets.filter(b => b.friendly);
+    // 释放敌方子弹回池，保留友方
+    for (let i = bullets.length - 1; i >= 0; i--) {
+      if (!bullets[i].friendly) {
+        freeBullet(bullets[i]);
+        bullets.splice(i, 1);
+      }
+    }
   } else {
+    for (const b of bullets) freeBullet(b);
     bullets = [];
   }
 }

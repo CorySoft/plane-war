@@ -7,6 +7,29 @@ import { rand, pick } from "./utils.js";
 
 export let enemies = [];
 
+// ---------- 敌机对象池 ----------
+const pool = [];
+
+function allocEnemy() {
+  if (pool.length > 0) return pool.pop();
+  return {};
+}
+
+/** 释放敌机回池（重置动态字段） */
+function freeEnemy(e) {
+  if (pool.length < 60) pool.push(e);
+}
+
+function pushEnemy(e) { enemies.push(e); }
+
+/** 从数组中移除敌机并释放回池 */
+export function removeEnemyEx(idx) {
+  const e = enemies[idx];
+  if (!e) return;
+  enemies.splice(idx, 1);
+  freeEnemy(e);
+}
+
 /** 根据难度等级获取可用敌机类型池 */
 function getPool(level) {
   let pool = ["small"];
@@ -22,37 +45,38 @@ function getPool(level) {
 
 export function spawnEnemy(level, diff, enemyLevel = 1) {
   if (enemies.length >= 60) return; // 防爆量：同屏敌机上限
-  const pool = getPool(level);
-  const type = pick(pool);
+  const pool_map = getPool(level);
+  const type = pick(pool_map);
   const cfg = ENEMY_TYPES[type];
   // 敌方等级缩放
   const elvl = Math.max(1, enemyLevel);
   const hpMul = 1 + (elvl - 1) * ENEMY_LEVEL.hpPerLevel;
   const rewardMul = 1 + (elvl - 1) * ENEMY_LEVEL.rewardPerLevel;
   const hp = Math.max(1, Math.round(cfg.hp * (diff?.hpScale ?? 1) * hpMul));
-  const e = {
-    type,
-    r: cfg.r,
-    hp,
-    maxHp: hp,
-    score: Math.round(cfg.score * rewardMul),
-    xp: Math.round(cfg.xp * rewardMul),
-    speed: cfg.speed,
-    color: cfg.color,
-    x: rand(cfg.r + 10, W - cfg.r - 10),
-    y: -cfg.r - 10,
-    vy: cfg.speed * (diff?.speedScale ?? 1) * rand(0.8, 1.25) * (1 + level * DIFFICULTY.speedScalePerLevel),
-    vx: rand(-0.4, 0.4),
-    fireCd: rand(cfg.fireCd[0], cfg.fireCd[1]) * (diff?.fireCdScale ?? 1) * (1 + (elvl - 1) * ENEMY_LEVEL.fireCdPerLevel),
-    t: rand(0, TAU),
-    hitFlash: 0,
-    frozen: 0,
-    shieldHp: type === "shield" ? 3 : 0,     // 护盾敌机自带护盾
-    splitChildren: type === "split" ? 2 : 0, // 分裂敌机子代数
-    laserTimer: type === "laser" ? rand(1, 2) : 0,
-    enemyLevel: elvl,
-  };
-  enemies.push(e);
+  const e = allocEnemy();
+  e.type = type;
+  e.r = cfg.r;
+  e.hp = hp;
+  e.maxHp = hp;
+  e.score = Math.round(cfg.score * rewardMul);
+  e.xp = Math.round(cfg.xp * rewardMul);
+  e.speed = cfg.speed;
+  e.color = cfg.color;
+  e.x = rand(cfg.r + 10, W - cfg.r - 10);
+  e.y = -cfg.r - 10;
+  e.vy = cfg.speed * (diff?.speedScale ?? 1) * rand(0.8, 1.25) * (1 + level * DIFFICULTY.speedScalePerLevel);
+  e.vx = rand(-0.4, 0.4);
+  e.fireCd = rand(cfg.fireCd[0], cfg.fireCd[1]) * (diff?.fireCdScale ?? 1) * (1 + (elvl - 1) * ENEMY_LEVEL.fireCdPerLevel);
+  e.t = rand(0, TAU);
+  e.hitFlash = 0;
+  e.frozen = 0;
+  e.shieldHp = type === "shield" ? 3 : 0;
+  e.splitChildren = type === "split" ? 2 : 0;
+  e.laserTimer = type === "laser" ? rand(1, 2) : 0;
+  e.enemyLevel = elvl;
+  e.isBoss = false;
+  e._deathExplosion = null;
+  pushEnemy(e);
   return e;
 }
 
@@ -81,7 +105,7 @@ export function updateEnemies(dt, level, playerX, playerY, playerH) {
 
     // 飞出屏幕
     if (e.y - e.r > H + 30) {
-      enemies.splice(i, 1);
+      removeEnemyEx(i);
     }
   }
 }
@@ -179,6 +203,7 @@ export function drawEnemies(ctx, frame) {
 }
 
 export function clearEnemies() {
+  for (const e of enemies) freeEnemy(e);
   enemies = [];
 }
 
@@ -187,26 +212,28 @@ export function spawnSplitChildren(parent) {
   for (let i = 0; i < parent.splitChildren; i++) {
     const cfg = ENEMY_TYPES.small;
     const angle = (i / parent.splitChildren) * Math.PI - Math.PI / 2;
-    enemies.push({
-      type: "small",
-      r: cfg.r * 0.7,
-      hp: 1,
-      maxHp: 1,
-      score: 50,
-      xp: 5,
-      speed: cfg.speed * 1.3,
-      color: parent.color,
-      x: parent.x + Math.cos(angle) * 15,
-      y: parent.y + Math.sin(angle) * 15,
-      vy: cfg.speed * 1.3,
-      vx: Math.cos(angle) * 1.5,
-      fireCd: rand(5, 8),
-      t: rand(0, TAU),
-      hitFlash: 0,
-      frozen: 0,
-      shieldHp: 0,
-      splitChildren: 0,
-      laserTimer: 0,
-    });
+    const e = allocEnemy();
+    e.type = "small";
+    e.r = cfg.r * 0.7;
+    e.hp = 1;
+    e.maxHp = 1;
+    e.score = 50;
+    e.xp = 5;
+    e.speed = cfg.speed * 1.3;
+    e.color = parent.color;
+    e.x = parent.x + Math.cos(angle) * 15;
+    e.y = parent.y + Math.sin(angle) * 15;
+    e.vy = cfg.speed * 1.3;
+    e.vx = Math.cos(angle) * 1.5;
+    e.fireCd = rand(5, 8);
+    e.t = rand(0, TAU);
+    e.hitFlash = 0;
+    e.frozen = 0;
+    e.shieldHp = 0;
+    e.splitChildren = 0;
+    e.laserTimer = 0;
+    e.isBoss = false;
+    e._deathExplosion = null;
+    pushEnemy(e);
   }
 }

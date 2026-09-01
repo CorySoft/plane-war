@@ -9,12 +9,12 @@ import { initInput, bindTouchButtons, getStick, isStickActive } from "./input.js
 import { spawnParticles, updateParticles, drawParticles, clearParticles } from "./particles.js";
 import { triggerShake, updateCamera, applyCamera, resetCamera, slowmo } from "./camera.js";
 import {
-  bullets, fireBullet, spawnEnemyBullet, spawnSplitBullet,
+  bullets, fireBullet, spawnEnemyBullet, spawnSplitBullet, removeBullet,
   updateBullets, drawBullets, clearBullets, hasPlayerMainBullet, maxMainBulletTraveled, markMainBulletsTriggered
 } from "./bullet.js";
 import {
   enemies, spawnEnemy, updateEnemies, getEnemyShooters,
-  drawEnemies, clearEnemies, spawnSplitChildren
+  drawEnemies, clearEnemies, spawnSplitChildren, removeEnemyEx
 } from "./enemy.js";
 import { spawnPowerup, updatePowerups, drawPowerups, clearPowerups } from "./powerup.js";
 import { generateSkillChoices, applySkill, getMaxLives } from "./skill.js";
@@ -343,7 +343,7 @@ function checkCollisions() {
     if (player.invincible > 0) continue;
     const dist = hypot(player.x, player.y, b.x, b.y);
     if (dist < 20) {
-      bullets.splice(i, 1);
+      removeBullet(b);
       if (player.shield > 0) {
         player.shield--;
         spawnParticles(b.x, b.y, "#66e0ff", 10, 4);
@@ -370,11 +370,11 @@ function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
     spawnParticles(b.x, b.y, "#44aaff", 6, 3);
     spawnDamageNumber(b.x, b.y, "护盾", "#44aaff");
     if (!b.isScatter && !b.behaviors.has("penetrate")) {
-      bullets.splice(bulletIdx, 1);
+      removeBullet(b);
     } else if (b.behaviors.has("penetrate") && b.pierceCount < b.maxPierce) {
       b.pierceCount++;
     } else {
-      bullets.splice(bulletIdx, 1);
+      removeBullet(b);
     }
     return;
   }
@@ -432,8 +432,12 @@ function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
     if (b.behaviors.has("penetrate") && b.pierceCount < b.maxPierce) {
       b.pierceCount++;
     } else if (!b.isScatter) {
-      const idx = bullets.indexOf(b);
-      if (idx !== -1) bullets.splice(idx, 1);
+      removeBullet(b);
+    }
+  } else {
+    // 敌机存活：非穿透/非散射子弹命中后消失
+    if (!b.behaviors.has("penetrate") && !b.isScatter) {
+      removeBullet(b);
     }
   }
 }
@@ -586,7 +590,7 @@ function removeEnemy(idx) {
     }
     triggerShake(1.5);
   }
-  enemies.splice(idx, 1);
+  removeEnemyEx(idx);
 }
 
 // ---------- Boss AI ----------
@@ -743,7 +747,7 @@ function bombAll() {
     addScore(e.score);
     addXp(e.xp);
     spawnParticles(e.x, e.y, e.color, 14, 5);
-    enemies.splice(i, 1);
+    removeEnemyEx(i);
   }
   clearBullets(true);
   triggerShake(1);
