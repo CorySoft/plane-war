@@ -124,8 +124,6 @@ export function updateBullets(dt) {
       const curSpd = Math.abs(b.vy);
       const newSpd = Math.min(curSpd + b.accel * dt * 60, BULLET.orbitalMaxSpeed);
       b.vy = -newSpd;
-      // 子弹随速度变大（视觉效果）
-      b.r = b.baseR + (newSpd - b.baseSpd) * 0.12;
     }
 
     const dx = b.vx * dt * 60;
@@ -164,16 +162,7 @@ export function drawBullets(ctx) {
     // 友方矩形与敌方圆形分离绘制，减少路径切换
     for (const b of arr) {
       if (b.friendly) {
-        // 天基武器子弹随速度变大
-        const scale = b.baseR ? b.r / b.baseR : 1;
-        const bw = 5 * scale, bh = 16 * scale;
-        // 速度轨迹小尾巴
-        if (b.accel && Math.abs(b.vy) > b.baseSpd * 1.3) {
-          const tailLen = Math.min(30, (Math.abs(b.vy) - b.baseSpd) * 0.4);
-          ctx.globalAlpha = 0.35;
-          ctx.fillRect(b.x - bw / 2, b.y + bh / 2, bw, tailLen);
-          ctx.globalAlpha = 1;
-        }
+        const bw = 5, bh = 16;
         ctx.fillRect(b.x - bw / 2, b.y - bh / 2, bw, bh);
       }
     }
