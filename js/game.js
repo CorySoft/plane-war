@@ -847,10 +847,8 @@ function draw() {
   drawPowerups(ctx);
   drawBullets(ctx);
   drawEnemies(ctx, frame);
-  // 死亡动画期间玩家闪烁
-  if (deathTimer > 0 && player) {
-    if (Math.floor(deathTimer * 10) % 2 === 0) drawPlayer(ctx, player, frame);
-  } else if (state !== STATE.OVER && player) {
+  // 玩家（含死亡动画期间，不闪烁，保留爆炸特效）
+  if (player && state !== STATE.OVER) {
     drawPlayer(ctx, player, frame);
   }
   drawParticles(ctx);
