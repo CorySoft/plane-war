@@ -20,8 +20,8 @@ export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNee
   ctx.fillStyle = "rgba(255,255,255,.55)";
   ctx.fillText("最高 " + String(best).padStart(6, "0"), 16, 76);
 
-  // 难度等级（右侧留出暂停按钮空间）
-  const rEdge = W - 66;
+  // 难度等级（右侧贴边，与左侧得分区对称；暂停按钮已移到顶部居中）
+  const rEdge = W - 16;
   ctx.textAlign = "right";
   setf(ctx, "bold 16px 'sans-serif'");
   ctx.fillStyle = "#ffd166";
@@ -92,10 +92,17 @@ export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNee
   if (player.shield > 0) activeBuffs.push(["shield", "护盾", "#66e0ff", player.maxShield, player.shield]);
   if ((player.skills.magnet || 0) > 0 && player.buffs.magnet <= 0) activeBuffs.push(["magnet", "磁力", "#d0a6ff", 1, 1]);
   if (player.powerTime > 0) activeBuffs.push(["power", "火力", "#ffd166", 15, player.powerTime]);
+  if (player.buffs.madHunt > 0) activeBuffs.push(["madHunt", "追击", "#fca311", 8, player.buffs.madHunt]);
+  if (player.buffs.drop > 0) activeBuffs.push(["drop", "☘爆率", "#ffd93b", 8, player.buffs.drop]);
+  if (player.buffs.critboost > 0) activeBuffs.push(["critboost", "致命", "#ff8fa3", 8, player.buffs.critboost]);
 
   let bx = 16;
+  const len = activeBuffs.length;
+  // 竖屏窄屏(W<480)时压缩条宽，避免 buff 条溢出右侧
+  const slot = len > 0 ? (W - 32 - (len - 1) * 6) / len : 0;
+  const w = Math.min(74, Math.max(44, slot));
   for (const [key, label, color, total, remain] of activeBuffs) {
-    const w = 74;
+    if (bx + w > W - 6) break;
     ctx.fillStyle = "rgba(255,255,255,.1)";
     ctx.fillRect(bx, H - 96, w, 16);
     ctx.fillStyle = color;

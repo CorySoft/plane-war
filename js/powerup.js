@@ -2,16 +2,27 @@
  * powerup.js — 道具系统
  * =========================================================== */
 
-import { W, H, POWERUP_DEFS, POWERUP_WEIGHTS_EARLY, POWERUP_WEIGHTS_LATE, TAU } from "./config.js";
+import { W, H, POWERUP_DEFS, POWERUP_WEIGHTS_EARLY, POWERUP_WEIGHTS_LATE, SKILLS, POWERUP_DROP, TAU } from "./config.js";
 import { rand, weightedPick, setf } from "./utils.js";
 import { spawnParticles } from "./particles.js";
+import { applySkill } from "./skill.js";
 import { sfx } from "./audio.js";
-// bomb/freeze 通过 player 标记由 game.js 消费，无需直接调用
+import { addPowerupCollected } from "./meta.js";
+// freeze 通过 player 标记由 game.js 消费；madHunt/xppack 直接操作 buff/标记，无需直接调用
+
+const XP_PACK_XP = 50;    // 经验包固定经验值
 
 export let powerups = [];
 
-export function spawnPowerup(x, y, level = 1) {
-  if (Math.random() < 0.15) {
+/**
+ * 生成道具
+ * @param {number} x
+ * @param {number} y
+ * @param {number} [level] 难度等级（决定权重重心）
+ * @param {number} [dropBonus] 掉落率加成（爆率技能/+buff/天赋叠加，概率加算）
+ */
+export function spawnPowerup(x, y, level = 1, dropBonus = 0) {
+  if (Math.random() < POWERUP_DROP.base + dropBonus) {
     const weights = level >= 2 ? POWERUP_WEIGHTS_LATE : POWERUP_WEIGHTS_EARLY;
     const type = weightedPick(weights);
     powerups.push({ x, y, vy: 1.8, t: rand(0, TAU), type });
@@ -41,6 +52,7 @@ export function updatePowerups(dt, player, magnetActive) {
     if (d2 < 32) {
       applyPowerup(p, player);
       powerups.splice(i, 1);
+      addPowerupCollected();
     }
   }
 }
@@ -56,8 +68,8 @@ export function applyPowerup(p, player) {
     player._addLife = true;
   } else if (type === "shield") {
     player.shield = Math.min(player.maxShield, player.shield + 1);
-  } else if (type === "bomb") {
-    player._bomb = true;
+  } else if (type === "madHunt") {
+    player.buffs.madHunt = 8; // 疯狂追击：8秒
   } else if (type === "rapid") {
     player.buffs.rapid = 8;
   } else if (type === "speed") {
@@ -68,10 +80,36 @@ export function applyPowerup(p, player) {
     player.buffs.magnet = 8;
   } else if (type === "double") {
     player.buffs.double = 8;
+  } else if (type === "xppack") {
+    player._xp = XP_PACK_XP;
+  } else if (type === "drop") {
+    player.buffs.drop = 8; // 幸运爆率：8秒内掉落率大幅提升
+  } else if (type === "critboost") {
+    player.buffs.critboost = 8; // 致命暴击：8秒内必定暴击且伤害倍率提升
+  } else if (type === "skillup") {
+    const sk = pickUpgradableSkill(player.skills);
+    if (!sk) return;
+    const t = applySkill(sk, player);   // 会播放拾取音效并返回提示
+    player._toast = t;
+    spawnParticles(p.x, p.y, def.color, 16, 4.5);
+    return;
   }
   sfx.pickup();
   spawnParticles(p.x, p.y, def.color, 16, 4.5);
   player._toast = { text: def.name, t: 1.2, color: def.color };
+}
+
+// 随机选择一个“可升级技能”：优先从已拥有的技能里升，若一个没有（或全部满级）
+// 则随机授予一个未满级的新技能，保证道具永远有效。
+function pickUpgradableSkill(playerSkills) {
+  const owned = SKILLS.filter(s => {
+    const cur = playerSkills[s.id] || 0;
+    return cur > 0 && cur < s.max;
+  });
+  if (owned.length > 0) return owned[Math.floor(Math.random() * owned.length)];
+  const pool = SKILLS.filter(s => (playerSkills[s.id] || 0) < s.max);
+  if (pool.length === 0) return null;
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 export function drawPowerups(ctx) {

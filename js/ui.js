@@ -2,19 +2,31 @@
  * ui.js — 菜单 / 结束 / 升级选择 / 暂停 / 伤害飘字
  * =========================================================== */
 
-import { W, H, STATE, TAU } from "./config.js";
+import { W, H, STATE, TAU, SKILLS, ACHIEVEMENTS, DAILY_QUESTS } from "./config.js";
 import { clamp, roundRect, setf } from "./utils.js";
+import { getStardust, getQuestView, getAchievementView } from "./meta.js";
 
 // ---------- 伤害飘字 ----------
 let damageNumbers = [];
 
 export function spawnDamageNumber(x, y, text, color = "#fff", big = false) {
+  const now = performance.now();
+  // 持续密集伤害：同一区域的相同飘字 180ms 内不重复出现，避免叠成一片
+  if (!big) {
+    for (let i = damageNumbers.length - 1; i >= 0; i--) {
+      const d = damageNumbers[i];
+      if (now - d.born < 180 && d.text === text && Math.hypot(d.x - x, d.y - y) < 18) {
+        return;
+      }
+    }
+  }
   if (damageNumbers.length >= 60) damageNumbers.shift(); // 防爆量
   damageNumbers.push({
     x, y, text, color, big,
     vy: -2.5,
     life: 1.0,
     maxLife: 1.0,
+    born: now,
   });
 }
 
@@ -83,8 +95,20 @@ let btnRestartRect = null;
 let btnPauseResumeRect = null;
 let btnPauseQuitRect = null;
 let btnPauseRect = null;
+let btnCodexRect = null;      // 主菜单「技能图鉴」按钮
+let btnCodexBackRect = null;  // 图鉴页「返回」按钮
+let btnAchieveRect = null;      // 主菜单「成就·任务」按钮
+let btnAchieveBackRect = null;  // 成就页「返回」按钮
+let btnReviveYesRect = null;    // 复活面板「复活」按钮
+let btnReviveNoRect = null;     // 复活面板「放弃」按钮
 let skillCards = [];
 let difficultyRects = {};
+let questClaimRects = [];       // 任务页各「领取」按钮
+
+// 主菜单子页面：main=主界面 / codex=技能图鉴 / achieve=成就·每日任务
+let menuPage = "main";
+export const setMenuPage = p => { menuPage = p; };
+export const getMenuPage = () => menuPage;
 
 export function hitTestButton(mx, my, rect) {
   return rect && mx >= rect.x && mx <= rect.x + rect.w && my >= rect.y && my <= rect.y + rect.h;
@@ -97,10 +121,31 @@ export function getPauseResumeButton() { return btnPauseResumeRect; }
 export function getPauseQuitButton() { return btnPauseQuitRect; }
 export function getSkillCards() { return skillCards; }
 export function getDifficultyRects() { return difficultyRects; }
+export function getCodexButton() { return btnCodexRect; }
+export function getCodexBackButton() { return btnCodexBackRect; }
+export function getAchieveButton() { return btnAchieveRect; }
+export function getAchieveBackButton() { return btnAchieveBackRect; }
+export function getQuestClaimButtons() { return questClaimRects; }
+export function getReviveYesButton() { return btnReviveYesRect; }
+export function getReviveNoButton() { return btnReviveNoRect; }
 
-export function drawMenu(ctx, best, difficultyKey, presets) {
+export function drawMenu(ctx, best, difficultyKey, presets, discovered = []) {
   ctx.fillStyle = "rgba(5,7,15,.72)";
   ctx.fillRect(0, 0, W, H);
+
+  // 技能图鉴子页面
+  if (menuPage === "codex") {
+    btnAchieveRect = null;
+    drawSkillCodex(ctx, discovered);
+    return;
+  }
+  // 成就·每日任务子页面
+  if (menuPage === "achieve") {
+    btnCodexRect = null;
+    btnAchieveRect = null;
+    drawAchieve(ctx);
+    return;
+  }
 
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
@@ -116,9 +161,9 @@ export function drawMenu(ctx, best, difficultyKey, presets) {
   // 道具图例
   setf(ctx, "13px 'sans-serif'");
   ctx.fillStyle = "rgba(255,255,255,.6)";
-  ctx.fillText("道具：P火力升级 ♥生命+1 S护盾 B全屏炸弹", W / 2, H * 0.34);
-  ctx.fillText("⚡急速射击 »引擎加速 ❄冰冻全场", W / 2, H * 0.37);
-  ctx.fillText("M磁铁吸引 ×双倍分数", W / 2, H * 0.40);
+  ctx.fillText("道具：P火力升级 ♥生命+1 S护盾 ✦疯狂追击", W / 2, H * 0.34);
+  ctx.fillText("⚡急速射击 »引擎加速 ❄冰冻全场 ☘爆率 ✧致命", W / 2, H * 0.37);
+  ctx.fillText("M磁铁吸引 ×双倍分数 X经验包 +技能+1", W / 2, H * 0.40);
 
   // 新子弹系统说明
   ctx.fillStyle = "rgba(136,221,255,.9)";
@@ -180,6 +225,109 @@ export function drawMenu(ctx, best, difficultyKey, presets) {
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.fillText("开始游戏", W / 2, by + bh / 2);
   btnStartRect = { x: bx, y: by, w: bw, h: bh };
+
+  // 技能图鉴按钮
+  const cbx = W / 2 - 80, cby = H * 0.80, cbw = 160, cbh = 44;
+  ctx.fillStyle = "rgba(255,217,59,.10)";
+  ctx.strokeStyle = "#ffd93b";
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, cbx, cby, cbw, cbh, 11);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#ffd93b";
+  setf(ctx, "bold 17px 'sans-serif'");
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("技能图鉴  " + discovered.length + "/" + SKILLS.length, W / 2, cby + cbh / 2 + 1);
+  btnCodexRect = { x: cbx, y: cby, w: cbw, h: cbh };
+  btnCodexBackRect = null;
+
+  // 成就 · 每日任务按钮
+  const abx = W / 2 - 90, aby = H * 0.885, abw = 180, abh = 44;
+  ctx.fillStyle = "rgba(124,252,0,.08)";
+  ctx.strokeStyle = "#7CFC00";
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, abx, aby, abw, abh, 11);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#7CFC00";
+  setf(ctx, "bold 17px 'sans-serif'");
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("成就 · 每日任务", W / 2, aby + abh / 2 + 1);
+  btnAchieveRect = { x: abx, y: aby, w: abw, h: abh };
+  btnAchieveBackRect = null;
+  questClaimRects = [];
+}
+
+/** 技能图鉴：主菜单子页面，已习得的技能点亮，未习得置灰 */
+function drawSkillCodex(ctx, discovered) {
+  const total = SKILLS.length;
+  const lit = discovered.length;
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#ffd93b";
+  setf(ctx, "bold 32px 'sans-serif'");
+  ctx.fillText("技 能 图 鉴", W / 2, H * 0.06);
+  ctx.fillStyle = lit >= total ? "#7CFC00" : "rgba(255,255,255,.8)";
+  setf(ctx, "bold 15px 'sans-serif'");
+  ctx.fillText("已收录 " + lit + " / " + total + (lit >= total ? " · 全部点亮！" : ""), W / 2, H * 0.11);
+  ctx.fillStyle = "rgba(255,255,255,.45)";
+  setf(ctx, "12px 'sans-serif'");
+  ctx.fillText("在游戏中习得技能，图鉴自动点亮", W / 2, H * 0.145);
+
+  // 网格：窄屏自动减列
+  const cols = W >= 360 ? 4 : 3;
+  const pad = 14, gap = 8;
+  const cardW = Math.floor((W - pad * 2 - gap * (cols - 1)) / cols);
+  const cardH = W >= 360 ? 56 : 48;
+  const startY = H * 0.20;
+  const gx = pad;
+
+  ctx.textBaseline = "middle";
+  for (let i = 0; i < SKILLS.length; i++) {
+    const s = SKILLS[i];
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = gx + col * (cardW + gap);
+    const y = startY + row * (cardH + gap);
+    const got = discovered.includes(s.id);
+
+    // 卡片
+    ctx.fillStyle = got ? "rgba(24,32,52,.92)" : "rgba(13,16,26,.85)";
+    ctx.strokeStyle = got ? s.color : "rgba(255,255,255,.22)";
+    ctx.lineWidth = got ? 2 : 1.2;
+    roundRect(ctx, x, y, cardW, cardH, 9);
+    ctx.fill(); ctx.stroke();
+
+    // 点亮标记
+    if (got) {
+      ctx.fillStyle = s.color;
+      ctx.beginPath();
+      ctx.arc(x + cardW - 10, y + 10, 4, 0, TAU);
+      ctx.fill();
+    }
+
+    // 名称
+    ctx.fillStyle = got ? s.color : "rgba(255,255,255,.30)";
+    setf(ctx, "bold 13px 'sans-serif'");
+    ctx.fillText(s.name, x + cardW / 2, y + cardH * 0.32);
+    // 描述 / 未点亮
+    ctx.fillStyle = got ? "rgba(255,255,255,.55)" : "rgba(255,255,255,.22)";
+    setf(ctx, "10px 'sans-serif'");
+    ctx.fillText(got ? s.desc : "未点亮", x + cardW / 2, y + cardH * 0.76);
+  }
+
+  // 返回按钮
+  const bw = 180, bx = W / 2 - bw / 2, by = H * 0.90, bh = 44;
+  ctx.fillStyle = "rgba(94,230,255,.12)";
+  ctx.strokeStyle = "#5ee6ff";
+  ctx.lineWidth = 2;
+  roundRect(ctx, bx, by, bw, bh, 11);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#5ee6ff";
+  setf(ctx, "bold 17px 'sans-serif'");
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("← 返回主菜单", W / 2, by + bh / 2 + 1);
+  btnCodexBackRect = { x: bx, y: by, w: bw, h: bh };
+  btnCodexRect = null;
 }
 
 export function drawGameOver(ctx, score, best, isNewBest = false) {
@@ -255,10 +403,21 @@ export function drawLevelUp(ctx, choices, playerSkills) {
     ctx.arc(cx - cardW / 2 + 26, cy + cardH / 2, 17, 0, TAU);
     ctx.fill();
     ctx.fillStyle = "#05070f";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "alphabetic";
     setf(ctx, "bold 18px 'Courier New', monospace");
-    ctx.fillText(String(i + 1), cx - cardW / 2 + 26, cy + cardH / 2 + 6);
+    // 用字形实际边界精确垂直居中（textBaseline=middle 基于字体行盒，数字会偏高）
+    const ncx = cx - cardW / 2 + 26;
+    const ncy = cy + cardH / 2;
+    const numStr = String(i + 1);
+    const tm = ctx.measureText(numStr);
+    const aHeight = (tm.actualBoundingBoxAscent != null && tm.actualBoundingBoxDescent != null)
+      ? (tm.actualBoundingBoxAscent - tm.actualBoundingBoxDescent) / 2
+      : 0;
+    ctx.fillText(numStr, ncx, ncy + aHeight);
     // 技能名
     ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
     ctx.fillStyle = s.color;
     setf(ctx, "bold 19px 'sans-serif'");
     const cur = playerSkills[s.id] || 0;
@@ -267,13 +426,14 @@ export function drawLevelUp(ctx, choices, playerSkills) {
     setf(ctx, "14px 'sans-serif'");
     ctx.fillText(s.desc, cx - cardW / 2 + 54, cy + 58);
     ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
     skillCards.push({ id: s.id, x: cx - cardW / 2, y: cy, w: cardW, h: cardH });
   }
 }
 
-// 游戏内右上角暂停按钮
+// 游戏内顶部居中暂停按钮
 export function drawPauseButton(ctx) {
-  const bx = W - 52, by = 14, bw = 38, bh = 38;
+  const bx = W / 2 - 19, by = 14, bw = 38, bh = 38;
   ctx.save();
   ctx.globalAlpha = 0.85;
   ctx.fillStyle = "rgba(5,7,15,.35)";
@@ -344,7 +504,7 @@ export function drawPause(ctx, player) {
       shield:"护盾", crit:"暴击", dual:"侧翼", explosion:"爆炸", volley:"连射",
       scatter:"散射", split:"分裂", penetrate:"穿透", guard:"护体",
       lifesteal:"吸取", xpboost:"经验", magnet:"磁力", score:"金币",
-      bulletSpeed:"弹速", orbital:"天基",
+      bulletSpeed:"弹速", orbital:"天基", drop:"爆率", critdmg:"致命",
     };
     const learned = [];
     for (const [id, lv] of Object.entries(player.skills)) {
@@ -405,4 +565,177 @@ export function drawToast(ctx, toast) {
   ctx.fillText(toast.text, W / 2, H * 0.38);
   ctx.shadowBlur = 0;
   ctx.globalAlpha = 1;
+}
+
+/** 复活面板：死亡后花星尘立即续命 */
+export function drawRevive(ctx, stardust, cost) {
+  ctx.fillStyle = "rgba(5,7,15,.82)";
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffd166";
+  setf(ctx, "bold 40px 'sans-serif'");
+  ctx.shadowBlur = 24;
+  ctx.shadowColor = "#ffd166";
+  ctx.fillText("再战一次？", W / 2, H * 0.28);
+  ctx.shadowBlur = 0;
+
+  ctx.fillStyle = "rgba(255,255,255,.85)";
+  setf(ctx, "17px 'sans-serif'");
+  ctx.fillText("死亡后消耗 " + cost + " 星尘原地复活 1 次", W / 2, H * 0.37);
+  ctx.fillStyle = "rgba(255,255,255,.6)";
+  setf(ctx, "14px 'sans-serif'");
+  ctx.fillText("复活后拥有 1 条命 · 短暂无敌 · 仅限本局 1 次", W / 2, H * 0.42);
+
+  ctx.fillStyle = "#d0a6ff";
+  setf(ctx, "bold 20px 'sans-serif'");
+  ctx.fillText("当前星尘  " + stardust, W / 2, H * 0.50);
+
+  // 复活按钮
+  const bw = 150, bh = 54, by = H * 0.60;
+  const bx1 = W / 2 - 160;
+  ctx.fillStyle = "rgba(255,217,59,.14)";
+  ctx.strokeStyle = "#ffd93b";
+  ctx.lineWidth = 2;
+  roundRect(ctx, bx1, by, bw, bh, 12);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#ffd93b";
+  setf(ctx, "bold 20px 'Courier New', monospace");
+  ctx.fillText("复活  -" + cost, bx1 + bw / 2, by + bh / 2);
+  btnReviveYesRect = { x: bx1, y: by, w: bw, h: bh };
+
+  // 放弃按钮
+  const bx2 = W / 2 + 10;
+  ctx.fillStyle = "rgba(255,107,107,.14)";
+  ctx.strokeStyle = "#ff6b6b";
+  ctx.lineWidth = 2;
+  roundRect(ctx, bx2, by, bw, bh, 12);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#ff6b6b";
+  ctx.fillText("放弃", bx2 + bw / 2, by + bh / 2);
+  btnReviveNoRect = { x: bx2, y: by, w: bw, h: bh };
+
+  ctx.fillStyle = "rgba(255,255,255,.4)";
+  setf(ctx, "13px 'sans-serif'");
+  ctx.fillText("星尘可在每局结算时获得，也可通过成就与每日任务获取", W / 2, H * 0.72);
+}
+
+/** 成就 · 每日任务面板：上半部分每日任务（可领取），下半部分成就图鉴 */
+function drawAchieve(ctx) {
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#7CFC00";
+  setf(ctx, "bold 30px 'sans-serif'");
+  ctx.fillText("成就 · 每日任务", W / 2, H * 0.05);
+  ctx.fillStyle = "#d0a6ff";
+  setf(ctx, "bold 16px 'sans-serif'");
+  ctx.fillText("星尘  ✦ " + getStardust(), W / 2, H * 0.105);
+
+  // ===== 每日任务 =====
+  ctx.textAlign = "left";
+  ctx.fillStyle = "rgba(255,255,255,.75)";
+  setf(ctx, "bold 15px 'sans-serif'");
+  ctx.fillText("每日任务", 16, H * 0.145);
+  ctx.fillStyle = "rgba(255,255,255,.4)";
+  setf(ctx, "11px 'sans-serif'");
+  ctx.fillText("每日 0 点刷新 · 领取后发放星尘", 16 + 76, H * 0.15);
+
+  const qv = getQuestView();
+  const rowH = 46;
+  questClaimRects = [];
+  for (let i = 0; i < qv.items.length; i++) {
+    const it = qv.items[i];
+    const ry = H * 0.19 + i * rowH;
+    ctx.fillStyle = "rgba(20,28,48,.85)";
+    ctx.strokeStyle = "rgba(255,255,255,.18)";
+    ctx.lineWidth = 1;
+    roundRect(ctx, 10, ry, W - 20, rowH - 6, 10);
+    ctx.fill(); ctx.stroke();
+
+    // 名称
+    ctx.textAlign = "left"; ctx.textBaseline = "top";
+    ctx.fillStyle = "#fff";
+    setf(ctx, "bold 13px 'sans-serif'");
+    ctx.fillText(it.def.name, 20, ry + 6);
+    // 进度
+    ctx.fillStyle = "rgba(255,255,255,.55)";
+    setf(ctx, "12px 'sans-serif'");
+    ctx.fillText(it.def.desc + "   " + Math.min(it.cur, it.def.target) + "/" + it.def.target, 20, ry + 23);
+
+    // 进度条
+    const bx = 20, byy = ry + 40, bw = W - 176, bbh = 4;
+    ctx.fillStyle = "rgba(255,255,255,.12)";
+    roundRect(ctx, bx, byy, bw, bbh, 2);
+    ctx.fill();
+    const p = clamp(it.cur / it.def.target, 0, 1);
+    ctx.fillStyle = it.claimed ? "rgba(255,255,255,.4)" : "#7CFC00";
+    if (p > 0) { roundRect(ctx, bx, byy, bw * p, bbh, 2); ctx.fill(); }
+
+    // 领取按钮
+    const cbtn = { x: W - 142, y: ry + 7, w: 124, h: 28 };
+    let label, style;
+    if (it.claimed) { label = "已领取"; style = "rgba(255,255,255,.35)"; }
+    else if (it.cur >= it.def.target) { label = "领取 +" + it.def.reward; style = "#7CFC00"; }
+    else { label = "未完成"; style = "rgba(255,255,255,.28)"; }
+    ctx.fillStyle = it.claimed ? "rgba(255,255,255,.08)" : "rgba(124,252,0,.10)";
+    ctx.strokeStyle = style;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); roundRect(ctx, cbtn.x, cbtn.y, cbtn.w, cbtn.h, 8); ctx.stroke();
+    ctx.fillStyle = style;
+    setf(ctx, it.claimed ? "12px 'sans-serif'" : "bold 12px 'sans-serif'");
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(label, cbtn.x + cbtn.w / 2, cbtn.y + cbtn.h / 2);
+    questClaimRects.push(cbtn);
+  }
+
+  // ===== 成就 =====
+  ctx.textAlign = "left"; ctx.textBaseline = "top";
+  ctx.fillStyle = "rgba(255,255,255,.75)";
+  setf(ctx, "bold 15px 'sans-serif'");
+  ctx.fillText("成就", 16, H * 0.535);
+  const done = ACHIEVEMENTS.filter(a => getAchievementView().find(v => v.def.id === a.id).achieved).length;
+  ctx.fillStyle = "rgba(255,255,255,.45)";
+  setf(ctx, "12px 'sans-serif'");
+  ctx.fillText("已达成 " + done + " / " + ACHIEVEMENTS.length, 16, H * 0.555);
+
+  const cols = 3;
+  const pad = 14, gap = 8;
+  const cardW = Math.floor((W - pad * 2 - gap * (cols - 1)) / cols);
+  const cardH = W >= 360 ? 48 : 40;
+  const startY = H * 0.585;
+  const views = getAchievementView();
+  ctx.textBaseline = "middle";
+  for (let i = 0; i < views.length; i++) {
+    const v = views[i];
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = pad + col * (cardW + gap);
+    const y = startY + row * (cardH + 6);
+    ctx.fillStyle = v.achieved ? "rgba(24,32,52,.92)" : "rgba(13,16,26,.85)";
+    ctx.strokeStyle = v.achieved ? v.def.color : "rgba(255,255,255,.22)";
+    ctx.lineWidth = v.achieved ? 2 : 1.2;
+    roundRect(ctx, x, y, cardW, cardH, 9);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = v.achieved ? v.def.color : "rgba(255,255,255,.30)";
+    setf(ctx, "bold 12px 'sans-serif'");
+    ctx.fillText(v.def.name, x + cardW / 2, y + cardH * 0.3);
+    ctx.fillStyle = "rgba(255,255,255,.5)";
+    setf(ctx, "9px 'sans-serif'");
+    ctx.fillText(v.def.desc.length > 10 ? v.def.desc.slice(0, 10) + "…" : v.def.desc, x + cardW / 2, y + cardH * 0.72);
+  }
+
+  // 返回按钮
+  const bw = 180, bx = W / 2 - bw / 2, by = H * 0.935, bh = 40;
+  ctx.fillStyle = "rgba(94,230,255,.12)";
+  ctx.strokeStyle = "#5ee6ff";
+  ctx.lineWidth = 2;
+  roundRect(ctx, bx, by, bw, bh, 11);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "#5ee6ff";
+  setf(ctx, "bold 16px 'sans-serif'");
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("← 返回主菜单", W / 2, by + bh / 2 + 1);
+  btnAchieveBackRect = { x: bx, y: by, w: bw, h: bh };
+  btnCodexBackRect = null;
 }

@@ -2,7 +2,7 @@
  * meta.js — 元进度系统（星尘货币 / 飞机解锁 / 天赋树）
  * =========================================================== */
 
-import { META } from "./config.js";
+import { META, ACHIEVEMENTS, DAILY_QUESTS, SKILLS, todayKey } from "./config.js";
 
 const STORAGE_KEY = "planeWarMeta";
 
@@ -13,7 +13,13 @@ let metaData = {
   purchasedTalents: [],
   totalRuns: 0,
   totalKills: 0,
+  totalBosses: 0,
+  totalPowerups: 0,
+  totalStardustEarned: 0,
   selectedAircraft: "falcon",
+  discoveredSkills: [],   // 技能图鉴：历史上习得过的技能 id
+  achievements: [],       // 已达成成就 id（一次性）
+  quests: null,           // { date, progress:{kills,score,runs,boss,powerups}, claimed:[] }
 };
 
 export function loadMeta() {
@@ -33,14 +39,48 @@ export function saveMeta() {
 export function earnStardust(score) {
   const amount = Math.floor(score / META.stardustPerScore);
   metaData.stardust += amount;
+  metaData.totalStardustEarned += amount;
   if (score > metaData.best) metaData.best = score;
   metaData.totalRuns++;
+  // 每日任务：本局次数与得分
+  questEvent("runs", 1);
+  questEvent("score", score);
   saveMeta();
   return amount;
 }
 
+/** 额外发放星尘（成就/任务奖励），不折算次数 */
+export function bonusStardust(amount) {
+  if (amount <= 0) return;
+  metaData.stardust += amount;
+  metaData.totalStardustEarned += amount;
+  saveMeta();
+}
+
+/** 扣除星尘，余额不足返回 false */
+export function spendStardust(amount) {
+  if (amount <= 0) return true;
+  if (metaData.stardust < amount) return false;
+  metaData.stardust -= amount;
+  saveMeta();
+  return true;
+}
+
 export function getStardust() { return metaData.stardust; }
 export function getBest() { return metaData.best; }
+
+// ---------- 技能图鉴 ----------
+/** 记录一个已习得技能（幂等，仅首次新增时保存） */
+export function discoverSkill(id) {
+  if (!metaData.discoveredSkills.includes(id)) {
+    metaData.discoveredSkills.push(id);
+    saveMeta();
+    return true;
+  }
+  return false;
+}
+export function getDiscoveredSkills() { return metaData.discoveredSkills; }
+export function getDiscoveredSkillCount() { return metaData.discoveredSkills.length; }
 
 // ---------- 飞机解锁 ----------
 export function isAircraftUnlocked(id) {
@@ -116,15 +156,116 @@ export function getPurchasedTalentIds() { return metaData.purchasedTalents; }
 // ---------- 统计 ----------
 export function addKill() {
   metaData.totalKills++;
+  questEvent("kills", 1);
   saveMeta();
 }
+
+export function addBossKill() {
+  metaData.totalBosses++;
+  questEvent("boss", 1);
+  saveMeta();
+}
+
+export function addPowerupCollected() {
+  metaData.totalPowerups++;
+  questEvent("powerups", 1);
+  saveMeta();
+}
+
 export function getStats() {
   return {
     stardust: metaData.stardust,
     best: metaData.best,
     totalRuns: metaData.totalRuns,
     totalKills: metaData.totalKills,
+    totalBosses: metaData.totalBosses,
+    totalPowerups: metaData.totalPowerups,
     aircraftCount: metaData.unlockedAircraft.length,
     talentCount: metaData.purchasedTalents.length,
   };
+}
+
+// ---------- 每日任务 ----------
+/** 确保今日任务数据存在（跨天自动重置） */
+export function ensureQuests() {
+  const today = todayKey();
+  if (!metaData.quests || metaData.quests.date !== today) {
+    metaData.quests = {
+      date: today,
+      progress: { kills: 0, score: 0, runs: 0, boss: 0, powerups: 0 },
+      claimed: [],
+    };
+    saveMeta();
+  }
+  return metaData.quests;
+}
+
+/** 记录一次任务进度事件（type 对应 DAILY_QUESTS.type） */
+export function questEvent(type, amount = 1) {
+  ensureQuests();
+  if (metaData.quests.progress[type] === undefined) return;
+  metaData.quests.progress[type] += amount;
+  saveMeta();
+}
+
+/** 图鉴/面板展示用：{ date, items:[{def, cur, target, claimed}] } */
+export function getQuestView() {
+  ensureQuests();
+  const q = metaData.quests;
+  return {
+    date: q.date,
+    items: DAILY_QUESTS.map(def => ({
+      def,
+      cur: q.progress[def.type] || 0,
+      claimed: q.claimed.includes(def.id),
+    })),
+  };
+}
+
+/** 领取已完成的任务奖励；未达标/已领取返回 0 */
+export function claimQuest(id) {
+  ensureQuests();
+  const q = metaData.quests;
+  if (q.claimed.includes(id)) return 0;
+  const def = DAILY_QUESTS.find(d => d.id === id);
+  if (!def) return 0;
+  if ((q.progress[def.type] || 0) < def.target) return 0;
+  q.claimed.push(id);
+  bonusStardust(def.reward);
+  return def.reward;
+}
+
+// ---------- 成就 ----------
+/** 检查并解锁新成就（run 传本局属性），返回本次新达成列表 [{id,name,reward}] */
+export function checkAchievements(run = {}) {
+  const view = {
+    totalKills: metaData.totalKills,
+    totalBosses: metaData.totalBosses,
+    totalPowerups: metaData.totalPowerups,
+    totalRuns: metaData.totalRuns,
+    totalStardustEarned: metaData.totalStardustEarned,
+    discoveredCount: metaData.discoveredSkills.length,
+    runScore: run.runScore,
+    runLevel: run.runLevel,
+    runCombo: run.runCombo,
+    reviveUsed: !!run.reviveUsed,
+  };
+  const newly = [];
+  for (const a of ACHIEVEMENTS) {
+    if (metaData.achievements.includes(a.id)) continue;
+    if (a.cond(view)) {
+      metaData.achievements.push(a.id);
+      bonusStardust(a.reward);
+      newly.push({ id: a.id, name: a.name, reward: a.reward });
+    }
+  }
+  return newly;
+}
+
+/** 面板展示用：成就定义 + 是否已达成 */
+export function getAchievementView() {
+  return ACHIEVEMENTS.map(def => ({
+    def,
+    achieved: metaData.achievements.includes(def.id),
+  }));
 }

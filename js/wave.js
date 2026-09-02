@@ -68,35 +68,41 @@ export const BOSS_TYPES = {
   },
 };
 
-export function spawnBoss(type) {
+export function spawnBoss(type, level = 1) {
   const cfg = BOSS_TYPES[type];
+  // Boss 实力随难度等级成长（每超过基础召唤等级 5 级再 +15% 血量/奖励），
+  // 让第 5、10 级召唤的 Boss 不断压迫感递增。
+  const lvlScale = 1 + 0.15 * Math.max(0, level - DIFFICULTY.bossInterval);
+  const hp = Math.round(cfg.hp * lvlScale);
+  const firstPhase = cfg.phases[0];
   const e = {
     type: "boss",
     bossType: type,
     name: cfg.name,
     r: cfg.r,
-    hp: cfg.hp,
-    maxHp: cfg.hp,
-    score: 2000,
-    xp: 100,
+    hp,
+    maxHp: hp,
+    score: Math.round(2000 * lvlScale),
+    xp: Math.round(100 * lvlScale),
     speed: 0.8,
     color: cfg.color,
     x: W / 2,
     y: -cfg.r - 10,
     vy: 0.8,
     vx: 0,
-    fireCd: 2,
+    fireCd: firstPhase?.fireInterval ?? 2,
     t: 0,
     hitFlash: 0,
     frozen: 0,
-    shieldHp: 0,
+    shieldHp: firstPhase?.shieldGens || 0,
     splitChildren: 0,
     laserTimer: 0,
     isBoss: true,
     phaseIdx: 0,
     phases: cfg.phases,
-    spawnTimer: 0,
-    teleportTimer: cfg.phases[0]?.teleportInterval || 999,
+    spawnTimer: firstPhase?.spawnInterval || 0,
+    teleportTimer: firstPhase?.teleportInterval || 999,
+    _phaseHpPct: firstPhase?.hpPct ?? 1,
   };
   enemies.push(e);
   return e;

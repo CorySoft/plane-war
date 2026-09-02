@@ -6,6 +6,7 @@
 export let W = 480;
 export let H = 720;
 
+
 const BASE_W = 480;   // 横屏/桌面基准
 const BASE_H = 720;
 const MIN_W = 320;    // 竖屏下逻辑宽度下限，避免过度压窄
@@ -37,7 +38,7 @@ export function setViewport(w, h) {
 export const TAU = Math.PI * 2;
 
 // 游戏状态
-export const STATE = { MENU: 0, PLAYING: 1, OVER: 2, LEVELUP: 3, PAUSED: 4, TUTORIAL: 5 };
+export const STATE = { MENU: 0, PLAYING: 1, OVER: 2, LEVELUP: 3, PAUSED: 4, TUTORIAL: 5, REVIVE: 6 };
 
 // ---------- 玩家 ----------
 export const PLAYER_BASE = {
@@ -54,8 +55,10 @@ export const PLAYER_BASE = {
 // ---------- 子弹 ----------
 export const BULLET = {
   baseSpeed: 6,
-  baseRange: 250,       // 起始射程(像素)
-  rangePerLevel: 150,   // 每级射程+6m（1m=25px）
+  baseRange: 250,          // 起始射程(像素)
+  rangePerLevel: 50,       // 射程延伸技能：每级射程+2m（1m=25px）
+levelRangePerLevel: 2.5,   // 升级加成：玩家每升1级射程+0.1m（线性，避免指数放大）
+  rangeCapMargin: 80,      // 射程硬上限 = 屏幕高度 + 80，防止溢出屏外
   refireDist: 250,      // 再次发射所需子弹飞行距离（10m，1m=25px）：子弹飞超此距离或销毁即可再射
   baseRadius: 4,
   critRadius: 5.5,
@@ -87,9 +90,9 @@ export const BULLET = {
 
 // ---------- 敌方等级 ----------
 export const ENEMY_LEVEL = {
-  scorePerLevel: 3000,    // 每3000分敌方升1级
-  hpPerLevel: 0.15,       // 每级HP +15%
-  fireCdPerLevel: -0.05,  // 每级开火间隔 -5%（越快）
+  scorePerLevel: 8000,    // 每8000分敌方升1级（玩家每5000分升难度级，敌方不再过快）
+  hpPerLevel: 0.10,       // 每级HP +10%
+  fireCdPerLevel: -0.03,  // 每级开火间隔 -3%（越快）
   rewardPerLevel: 0.10,   // 每级得分/经验 +10%
 };
 
@@ -108,46 +111,62 @@ export const POWERUP_DEFS = {
   power:  { icon: "P", color: "#ffd166", name: "火力升级" },
   life:   { icon: "♥", color: "#7CFC00", name: "生命+1" },
   shield: { icon: "S", color: "#66e0ff", name: "护盾+1" },
-  bomb:   { icon: "B", color: "#ff6b6b", name: "全屏炸弹" },
+  madHunt: { icon: "✦", color: "#fca311", name: "疯狂追击" },
   rapid:  { icon: "⚡", color: "#ffe066", name: "急速射击" },
   speed:  { icon: "»", color: "#9be8ff", name: "引擎加速" },
   freeze: { icon: "❄", color: "#8ad4ff", name: "冰冻全场" },
   magnet: { icon: "M", color: "#d0a6ff", name: "磁铁吸引" },
   double: { icon: "×", color: "#ffa8d9", name: "双倍分数" },
+  xppack: { icon: "X", color: "#8ad4ff", name: "经验包" },
+  skillup: { icon: "+", color: "#fca311", name: "技能+1" },
+  drop: { icon: "☘", color: "#ffd93b", name: "幸运爆率" },
+  critboost: { icon: "✧", color: "#ff8fa3", name: "致命暴击" },
+};
+
+// ---------- 道具掉落率 ----------
+export const POWERUP_DROP = {
+  base: 0.15,            // 击杀基础掉落率
+  skillPerLevel: 0.05,   // 爆率技能每级 +5%
+  buffBonus: 0.10,        // 幸运爆率 buff 期间额外 +10%
 };
 
 // 道具权重分早期/后期两套（随难度等级切换）：
 // 早期(level 1)：加血拔高，急速/火力/加速/双倍等影响平衡的道具压低
 // 后期(level>=2)：加血仍略高于默认，平衡道具整体下调，磁铁上调保证后期可用
+// 经验包：前后期都常见；技能+1：后期稍高但保持稀有
 export const POWERUP_WEIGHTS_EARLY = [
   ["power", 16], ["rapid", 7], ["shield", 14], ["life", 30],
-  ["speed", 5], ["double", 5], ["freeze", 6], ["magnet", 12], ["bomb", 3],
+  ["speed", 5], ["double", 5], ["freeze", 6], ["magnet", 12], ["madHunt", 3],
+  ["xppack", 12], ["skillup", 4], ["drop", 7], ["critboost", 5],
 ];
 export const POWERUP_WEIGHTS_LATE = [
   ["power", 20], ["rapid", 9], ["shield", 14], ["life", 16],
-  ["speed", 6], ["double", 6], ["freeze", 7], ["magnet", 11], ["bomb", 4],
+  ["speed", 6], ["double", 6], ["freeze", 7], ["magnet", 11], ["madHunt", 4],
+  ["xppack", 10], ["skillup", 6], ["drop", 6], ["critboost", 7],
 ];
 
 // ---------- 技能 ----------
 export const SKILLS = [
   { id: "dmg",       name: "火力强化",   desc: "子弹伤害 +1",             color: "#ffd166", max: 5 },
   { id: "rate",      name: "射速提升",   desc: "射击间隔 -8%",            color: "#ffe066", max: 3 },
-  { id: "range",     name: "射程延伸",   desc: "子弹射程 +6m",            color: "#88ddff", max: 5 },
+  { id: "range",     name: "射程延伸",   desc: "子弹射程 +2m",            color: "#88ddff", max: 5 },
   { id: "move",      name: "机动强化",   desc: "移动速度 +10%",           color: "#9be8ff", max: 3 },
   { id: "maxhp",     name: "生命强化",   desc: "最大生命 +1 并立即 +1",   color: "#7CFC00", max: 2 },
   { id: "shield",    name: "护盾强化",   desc: "获得 1 层护盾",           color: "#66e0ff", max: 2 },
   { id: "crit",      name: "精准打击",   desc: "12% 概率造成 2.5 倍伤害", color: "#ff8fa3", max: 3 },
+  { id: "critdmg",   name: "致命暴击",   desc: "暴击伤害倍率 +0.5（每级）",   color: "#ff4d7d", max: 3 },
   { id: "dual",      name: "侧翼炮",     desc: "增加 2 发侧翼子弹",       color: "#c8a6ff", max: 2 },
   { id: "explosion", name: "爆炸弹",     desc: "子弹命中产生范围爆炸",     color: "#ff6633", max: 3 },
-  { id: "volley",    name: "连射",       desc: "每轮多射出一发连射子弹（一前一后）", color: "#ffe066", max: 4 },
+  { id: "volley",    name: "连射",       desc: "每轮多射出一发连射子弹", color: "#ffe066", max: 4 },
   { id: "scatter",   name: "散射",       desc: "每次发射同时增加一发散射子弹", color: "#44ee88", max: 4 },
   { id: "split",     name: "分裂弹",     desc: "子弹命中后分裂，等级越高分裂越多", color: "#7bd67b", max: 3 },
-  { id: "penetrate", name: "穿透弹",     desc: "子弹可穿透 +1 个敌人（伤害不衰减）", color: "#aa66ff", max: 3 },
-  { id: "guard",     name: "护体弹",     desc: "特殊子弹围绕己方旋转，命中后消失", color: "#7bf1a8", max: 3 },
-  { id: "lifesteal", name: "能量吸取",   desc: "击毁敌机 15% 回复生命",   color: "#ff6b9d", max: 2 },
+  { id: "penetrate", name: "穿透弹",     desc: "子弹可穿透 +1 个敌人", color: "#aa66ff", max: 3 },
+  { id: "guard",     name: "护体弹",     desc: "神秘子弹", color: "#7bf1a8", max: 3 },
+  { id: "lifesteal", name: "能量吸取",   desc: "每击毁敌机 15% 概率回复 1 生命", color: "#ff6b9d", max: 2 },
   { id: "xpboost",   name: "经验增幅",   desc: "获得经验 +15%",           color: "#8ad4ff", max: 3 },
   { id: "magnet",    name: "磁力核心",   desc: "永久吸引道具",            color: "#d0a6ff", max: 1 },
   { id: "score",     name: "幸运金币",   desc: "得分 +10%",               color: "#f4c95d", max: 3 },
+  { id: "drop",      name: "爆率提升",   desc: "道具掉落率 +5%（每级）",   color: "#ffd93b", max: 3 },
   { id: "bulletSpeed", name: "子弹加速", desc: "子弹飞行速度 +20%",       color: "#74c0fc", max: 3 },
   { id: "orbital",   name: "天基武器",   desc: "子弹射出后不断加速，威力递增", color: "#fca311", max: 3 },
 ];
@@ -175,7 +194,7 @@ export const DIFFICULTY_PRESETS = {
     spawnScale: 0.7,     // 生成率
     enemyFireScale: 0.6, // 敌方子弹速度
     fireCdScale: 1.4,    // 敌机开火间隔
-    scoreScale: 1.2,     // 得分加成
+    scoreScale: 0.8,     // 得分加成（简单模式得分对应减少）
     playerSpeedScale: 1.0,
     startSkills: { orbital: 1 },
   },
@@ -208,6 +227,7 @@ export const DIFFICULTY_PRESETS = {
 // ---------- 元进度 ----------
 export const META = {
   stardustPerScore: 100,    // 每100分=1星尘
+  reviveCost: 50,           // 死亡后立即复活所需星尘（对局内 1 次）
   aircraft: {
     falcon:  { name: "战隼", desc: "均衡型", speed: 6.2, baseDmg: 1, fireRate: 1, startHp: 3, cost: 0 },
     blaze:   { name: "烈焰", desc: "高射速", speed: 5.8, baseDmg: 0.8, fireRate: 1.3, startHp: 2, cost: 500 },
@@ -231,3 +251,36 @@ export const META = {
     { id: "t_range1", name: "射程强化I",   desc: "起始射程+80",          branch: "utility", cost: 200, effect: { startRange: 80 } },
   ],
 };
+
+// ---------- 成就（一次性，达成后发放星尘奖励） ----------
+// cond 入参 s：{totalKills,totalBosses,totalPowerups,totalRuns,totalStardustEarned,
+//              discoveredCount, runScore, runLevel, runCombo, reviveUsed}
+export const ACHIEVEMENTS = [
+  { id: "a_kills1",  name: "神枪手",     desc: "累计击落敌机 100 架",     color: "#ff6b6b", reward: 100, cond: s => s.totalKills >= 100 },
+  { id: "a_kills2",  name: "王牌飞行员", desc: "累计击落敌机 350 架",     color: "#ffa94d", reward: 200, cond: s => s.totalKills >= 350 },
+  { id: "a_kills3",  name: "空战之王",   desc: "累计击落敌机 1000 架",    color: "#ffd166", reward: 400, cond: s => s.totalKills >= 1000 },
+  { id: "a_score1",  name: "初破千分",   desc: "单局得分达到 1000",       color: "#74c0fc", reward: 100, cond: s => s.runScore >= 1000 },
+  { id: "a_score2",  name: "分数破万",   desc: "单局得分达到 10000",      color: "#66d9e8", reward: 300, cond: s => s.runScore >= 10000 },
+  { id: "a_combo",   name: "连击大师",   desc: "单局连击达到 30",         color: "#ff8787", reward: 150, cond: s => s.runCombo >= 30 },
+  { id: "a_boss",    name: "Boss杀手",   desc: "累计击落 Boss 10 个",     color: "#d0bfff", reward: 250, cond: s => s.totalBosses >= 10 },
+  { id: "a_level",   name: "少年军官",   desc: "单局等级达到 10 级",      color: "#8ad4ff", reward: 200, cond: s => s.runLevel >= 10 },
+  { id: "a_skills",  name: "全技能大师", desc: "点亮全部技能图鉴",        color: "#ffd93b", reward: 500, cond: s => s.discoveredCount >= SKILLS.length },
+  { id: "a_revive",  name: "凤凰涅槃",   desc: "使用复活续命一次",        color: "#ffa8d7", reward: 150, cond: s => s.reviveUsed },
+  { id: "a_runs",    name: "老练飞行员", desc: "累计完成 30 局",          color: "#63e6be", reward: 200, cond: s => s.totalRuns >= 30 },
+  { id: "a_stardust",name: "星尘富豪",   desc: "累计获得 2000 星尘",      color: "#d0a6ff", reward: 400, cond: s => s.totalStardustEarned >= 2000 },
+];
+
+// ---------- 每日任务（按自然日刷新，progress 字段与 questEvent 的 type 对应） ----------
+export const DAILY_QUESTS = [
+  { id: "q_kills",    name: "歼灭作战", desc: "今日击落 50 架敌机",  type: "kills",    target: 50,   reward: 100 },
+  { id: "q_score",    name: "横扫千军", desc: "今日累计得分 5000",    type: "score",    target: 5000, reward: 150 },
+  { id: "q_runs",     name: "愈战愈勇", desc: "今日完成 3 局",        type: "runs",     target: 3,    reward: 60 },
+  { id: "q_boss",     name: "猎杀时刻", desc: "今日击落 2 个 Boss",  type: "boss",     target: 2,    reward: 120 },
+  { id: "q_powerups", name: "补给达人", desc: "今日拾取 10 个道具",  type: "powerups", target: 10,   reward: 80 },
+];
+
+// 每日任务刷新用的本地存储 date 键（含时区感知性：按本地日期字符串）
+export function todayKey() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}

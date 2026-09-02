@@ -5,6 +5,7 @@
 import { SKILLS } from "./config.js";
 import { sfx } from "./audio.js";
 import { spawnParticles } from "./particles.js";
+import { discoverSkill } from "./meta.js";
 
 export function getMaxLives(baseHp, skillMaxHp) {
   return baseHp + (skillMaxHp || 0);
@@ -50,6 +51,7 @@ export function generateSkillChoices(playerSkills) {
  */
 export function applySkill(skill, player) {
   player.skills[skill.id] = (player.skills[skill.id] || 0) + 1;
+  discoverSkill(skill.id);   // 收录进技能图鉴
   if (skill.id === "maxhp") {
     player._heal = (player._heal || 0) + 1;
     player._maxLivesUpdate = true;  // 通知 game.js 更新 maxLives

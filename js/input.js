@@ -15,6 +15,12 @@ const keyMap = {
 
 export const pressed = { left: false, right: false, up: false, down: false, fire: false };
 
+// 简单模式（休闲）关闭摇杆：手指点哪战机直接到哪
+export let easyMode = false;
+// 简单模式触摸跟随目标
+export let easyTouchActive = false;
+export let easyTouchX = 0;
+
 // ---------- 虚拟摇杆状态 ----------
 const STICK_RADIUS = 50;        // 摇杆最大偏移（像素）
 const STICK_MAX_DX = 50;        // 满速所需偏移
@@ -34,8 +40,28 @@ export function getStick() { return stick; }
 
 // 供 updatePlayer 移动：返回归一化水平方向（-1 左 ~ 1 右）
 export function getStickDir() {
-  if (!stick.active) return 0;
+  // 简单模式下强制摇杆失效（无延迟、无跟随目标，直接瞬移）
+  if (easyMode || !stick.active) return 0;
   return stick.nx;
+}
+
+// 简单模式下是否应忽略虚拟摇杆（用于绘制隐藏）
+export function isEasyMode() { return easyMode; }
+
+/** 简单模式触摸跟随：返回 {active, x}，x 为逻辑坐标 */
+export function getEasyTouch() { return { active: easyTouchActive, x: easyTouchX }; }
+
+/** 切换难度：simple=true 时关闭摇杆、重置残留状态 */
+export function setDifficulty(key) {
+  easyMode = (key === "easy");
+  if (easyMode) {
+    stick.active = false;
+    touchId = null;
+    stick.dx = 0; stick.dy = 0;
+    stick.nx = 0; stick.ny = 0;
+    stick.intensity = 0;
+    easyTouchActive = false;
+  }
 }
 
 /** 是否遥杆激活（用于绘制摇杆） */
@@ -83,6 +109,14 @@ function onPointerDown(e) {
   try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
   const p = toLogic(e, e.target);
   touchId = e.pointerId;
+
+  if (easyMode) {
+    // 简单模式：手指直接控制战机 X 位置，无摇杆
+    easyTouchActive = true;
+    easyTouchX = p.x;
+    return;
+  }
+
   stick.active = true;
   stick.baseX = p.x;
   stick.baseY = p.y;
@@ -91,12 +125,22 @@ function onPointerDown(e) {
   stick.intensity = 0;
 }
 function onPointerMove(e) {
-  if (e.pointerType !== "touch" || !stick.active || e.pointerId !== touchId) return;
+  if (e.pointerType !== "touch" || e.pointerId !== touchId) return;
+  if (easyMode) {
+    easyTouchX = toLogic(e, e.target).x;
+    return;
+  }
+  if (!stick.active) return;
   const p = toLogic(e, e.target);
   updateStick(p);
 }
 function onPointerUp(e) {
   if (e.pointerType !== "touch" || e.pointerId !== touchId) return;
+  if (easyMode) {
+    easyTouchActive = false;
+    touchId = null;
+    return;
+  }
   resetStick();
 }
 function resetStick() {

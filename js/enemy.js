@@ -43,7 +43,7 @@ function getPool(level) {
   return pool;
 }
 
-export function spawnEnemy(level, diff, enemyLevel = 1) {
+export function spawnEnemy(level, diff, enemyLevel = 1, atX, atY) {
   if (enemies.length >= 60) return; // 防爆量：同屏敌机上限
   const pool_map = getPool(level);
   const type = pick(pool_map);
@@ -62,8 +62,8 @@ export function spawnEnemy(level, diff, enemyLevel = 1) {
   e.xp = Math.round(cfg.xp * rewardMul);
   e.speed = cfg.speed;
   e.color = cfg.color;
-  e.x = rand(cfg.r + 10, W - cfg.r - 10);
-  e.y = -cfg.r - 10;
+  e.x = atX ?? rand(cfg.r + 10, W - cfg.r - 10);
+  e.y = atY ?? -cfg.r - 10;
   e.vy = cfg.speed * (diff?.speedScale ?? 1) * rand(0.8, 1.25) * (1 + level * DIFFICULTY.speedScalePerLevel);
   e.vx = rand(-0.4, 0.4);
   e.fireCd = rand(cfg.fireCd[0], cfg.fireCd[1]) * (diff?.fireCdScale ?? 1) * (1 + (elvl - 1) * ENEMY_LEVEL.fireCdPerLevel);
@@ -83,6 +83,14 @@ export function spawnEnemy(level, diff, enemyLevel = 1) {
 export function updateEnemies(dt, level, playerX, playerY, playerH) {
   for (let i = enemies.length - 1; i >= 0; i--) {
     const e = enemies[i];
+
+    // Boss 的移动/部署由 game.js 的 updateBossAI 负责，这里只累计时间，
+    // 避免普通敌机推进逻辑（如原生 vy 下坠）把 Boss 一路带出屏幕。
+    if (e.isBoss) {
+      if (e.frozen > 0) e.frozen -= dt;
+      e.t += dt;
+      continue;
+    }
 
     if (e.frozen > 0) {
       e.frozen -= dt;
@@ -110,17 +118,44 @@ export function updateEnemies(dt, level, playerX, playerY, playerH) {
   }
 }
 
-/** 获取需要发射子弹的敌机 */
-export function getEnemyShooters(playerX, playerY) {
+/** 取敌方Boss当前的相位配置（按剩余血量百分比） */
+function bossPhaseOf(e) {
+  const pct = e.hp / e.maxHp;
+  let ph = e.phases[0];
+  for (const p of e.phases) {
+    if (pct <= p.hpPct) ph = p;
+  }
+  return ph;
+}
+
+/**
+ * 获取需要发射子弹的敌机
+ * @param {number} playerX
+ * @param {number} playerY
+ * @param {number} dt
+ * @param {number} [fireCdScale] 难度开火间隔缩放（Boss 享受同款难度倍率）
+ */
+export function getEnemyShooters(playerX, playerY, dt, fireCdScale = 1) {
   const shooters = [];
   for (const e of enemies) {
     if (e.frozen > 0) continue;
     if (e.y <= 10 || e.y >= H * 0.7) continue;
-    e.fireCd -= 1 / 60; // 近似每帧
+    // Boss：按相位配置的开火间隔射击；无枪相位（如母舰空军召唤）跳过
+    if (e.isBoss) {
+      const ph = bossPhaseOf(e);
+      if (!ph || (ph.fireInterval ?? 0) >= 50) continue;
+      e.fireCd -= dt;
+      if (e.fireCd <= 0) {
+        shooters.push(e);
+        e.fireCd = ph.fireInterval * fireCdScale;
+      }
+      continue;
+    }
+    e.fireCd -= dt;
     if (e.fireCd <= 0) {
       shooters.push(e);
       const cd = e.type === "big" ? 2.2 : e.type === "mid" ? 3.2 : e.type === "laser" ? 2.5 : e.type === "shield" ? 3.5 : rand(4, 6);
-      e.fireCd = cd;
+      e.fireCd = cd * fireCdScale;
     }
   }
   return shooters;

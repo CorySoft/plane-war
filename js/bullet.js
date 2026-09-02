@@ -19,7 +19,7 @@ function allocBullet() {
     dmg: 0, r: 0, baseR: 0, friendly: true, color: "",
     traveled: 0, maxRange: 0, pierceCount: 0, maxPierce: 0,
     splitCount: 0, explosionRadius: 0, isScatter: false, isCrit: false,
-    _refire: false, life: 0,
+    _refire: false, life: 0, homing: 0,
   };
 }
 
@@ -35,6 +35,7 @@ function freeBullet(b) {
   b.isCrit = false;
   b._refire = false;
   b.life = 0;
+  b.homing = 0;
   if (pool.length < 400) pool.push(b); // 防爆量：池上限
 }
 
@@ -60,15 +61,24 @@ export function removeBullet(b) {
  * @param {boolean} [isExplosion] - 已弃用：爆炸行为现由 getBulletBehavior 判定
  *                                  （player.skills.explosion>0 时全部爆炸）
  */
-export function fireBullet(angle, dmg, player, x, y, spd = BULLET.baseSpeed, isExplosion) {
+export function fireBullet(angle, dmg, player, x, y, spd = BULLET.baseSpeed, isExplosion, isHoming) {
   const rangeLvl = player.skills.range || 0;
-  // 每级攻击范围自动 +10%（以玩家等级计，初始等级 1 不加成）
-  const levelMul = 1 + ((player.level || 1) - 1) * 0.10;
-  const maxRange = (BULLET.baseRange + rangeLvl * BULLET.rangePerLevel) * levelMul;
+  // 升级加成：每升1级 +1m 射程（线性），叠加技能后取整成距屏幕一屏的硬上限
+  const levelBonus = ((player.level || 1) - 1) * BULLET.levelRangePerLevel;
+  const maxRange = Math.min(
+    BULLET.baseRange + rangeLvl * BULLET.rangePerLevel + levelBonus,
+    H + BULLET.rangeCapMargin
+  );
   const behaviors = getBulletBehaviors(player, isExplosion);
   const critLvl = player.skills.crit || 0;
-  const isCrit = critLvl > 0 && Math.random() < BULLET.critChance * critLvl;
-  const finalDmg = isCrit ? Math.round(dmg * BULLET.critMulti) : dmg;
+  const critBuff = (player.buffs?.critboost || 0) > 0;
+  // 致命暴击 buff 期间必定暴击
+  const isCrit = critBuff || (critLvl > 0 && Math.random() < BULLET.critChance * critLvl);
+  // 暴击倍率：基础 2.5 + 致命暴击技能每级 +0.5 + 致命 buff 额外 +0.5
+  const critMulti = BULLET.critMulti
+    + 0.5 * (player.skills.critdmg || 0)
+    + (critBuff ? 0.5 : 0);
+  const finalDmg = isCrit ? Math.round(dmg * critMulti) : dmg;
 
   // 子弹速度加成
   const speedMul = 1 + (player.skills.bulletSpeed || 0) * 0.20;
@@ -95,6 +105,8 @@ export function fireBullet(angle, dmg, player, x, y, spd = BULLET.baseSpeed, isE
   b.baseR = isCrit ? BULLET.critRadius : BULLET.baseRadius;
   b.friendly = true;
   b.color = behaviorColor(behaviors, isCrit);
+  b.homing = isHoming ? 1 : 0;
+  if (isHoming) b.color = "#fca311"; // 疯狂追击弹专属橙色
   b.traveled = 0;
   b.maxRange = maxRange;
   b.behaviors = behaviors;

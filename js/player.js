@@ -41,7 +41,8 @@ export function createPlayer(aircraftCfg, talentEffects) {
     baseDmgMul *= (1 + (talentEffects.baseDmg || 0));
     fireRateMul *= (talentEffects.fireRateMul || 1);
     if (talentEffects.startRange) {
-      startSkills.range = (startSkills.range || 0) + Math.round(talentEffects.startRange / 150);
+      // 起始射程天赋折算为射程技能等级（按每级射程 2m 换算）
+      startSkills.range = (startSkills.range || 0) + Math.round(talentEffects.startRange / BULLET.rangePerLevel);
     }
   }
 
@@ -63,13 +64,12 @@ export function createPlayer(aircraftCfg, talentEffects) {
     baseHp: base.startHp,
     baseDmgMul,
     fireRateMul,
-    buffs: { rapid: 0, speed: 0, freeze: 0, magnet: 0, double: 0 },
+    buffs: { rapid: 0, speed: 0, freeze: 0, magnet: 0, double: 0, madHunt: 0, drop: 0, critboost: 0 },
     skills: { ...startSkills },
     orbit: [],   // 护体弹：围绕玩家旋转的特殊子弹
 
     // 内部事件标记（由 update 消费）
     _addLife: false,
-    _bomb: false,
     _freeze: false,
     _heal: 0,
     _toast: null,
@@ -94,9 +94,13 @@ export function updatePlayer(dt, player, refireDist = 0, maxTraveled = 0) {
 
   // 射击冷却（应用飞机/天赋射速倍率）
   const frMul = player.fireRateMul || 1;
-  const fireRate = player.buffs.rapid > 0
+  const rapid = player.buffs.rapid > 0;
+  const mad = player.buffs.madHunt > 0;
+  const fireRate = rapid
     ? 0.055 * frMul
-    : (0.16 - player.power * 0.012) * (1 - 0.08 * (player.skills.rate || 0)) * frMul;
+    : mad
+      ? 0.1 * frMul
+      : (0.16 - player.power * 0.012) * (1 - 0.08 * (player.skills.rate || 0)) * frMul;
   if (player.fireCd > 0) player.fireCd -= dt;
   // 距离/销毁触发：上一发主弹飞行超过 refireDist(10m) 或已销毁（无主弹在屏），
   // 且冷却结束即可再射。形成连续弹幕而非单发锁死。
@@ -116,7 +120,7 @@ export function updatePlayer(dt, player, refireDist = 0, maxTraveled = 0) {
   }
 
   // 计时类buff
-  for (const k of ["rapid", "speed", "magnet", "double"]) {
+  for (const k of ["rapid", "speed", "magnet", "double", "madHunt", "drop", "critboost"]) {
     if (player.buffs[k] > 0) {
       player.buffs[k] -= dt;
       if (player.buffs[k] < 0) player.buffs[k] = 0;
@@ -139,23 +143,47 @@ export function updatePlayer(dt, player, refireDist = 0, maxTraveled = 0) {
 const ORBIT_RADIUS = 46;       // 轨道半径
 const ORBIT_SPEED = 2.2;       // 角速度(弧度/秒)
 const ORBIT_RESPAWN = 2.5;     // 被击毁后重生秒数
+const ORBIT_GROW_INTERVAL = 30; // 无技能时每 30 秒增长一颗
+const ORBIT_MAX_BASE = 2;      // 护体弹数量上限基础值
+const ORBIT_MAX_PER_LEVEL = 2; // 每级护体技能 +2 上限
 
-/** 维护护体弹：根据技能等级补充数量并绕玩家旋转 */
+/** 生成一颗护体弹 */
+function makeOrbitBullet(player) {
+  return {
+    angle: Math.random() * TAU,
+    respawn: 0,
+    dmg: Math.max(1, Math.round(player.power)),
+  };
+}
+
+/**
+ * 维护护体弹：
+ * - 初始 1 颗；之后每 ORBIT_GROW_INTERVAL 秒自动 +1 颗（直到上限）
+ * - 护体技能每升 1 级，增长间隔减半（30→15→7.5→3.75s），上限 +2
+ */
 function updateOrbit(player, dt) {
   const guard = player.skills.guard || 0;
-  const desired = guard * 2;
   const orbit = player.orbit;
   if (!Array.isArray(orbit)) player.orbit = [];
+  if (player.orbitGrowTimer === undefined) player.orbitGrowTimer = 0;
 
-  // 补充至应有数量
-  while (player.orbit.length < desired) {
-    player.orbit.push({
-      angle: Math.random() * TAU,
-      respawn: 0,
-      dmg: Math.max(1, Math.round(player.power)),
-    });
+  // 保底 1 颗
+  if (player.orbit.length === 0) {
+    player.orbit.push(makeOrbitBullet(player));
   }
-  if (player.orbit.length > desired) player.orbit.length = desired;
+
+  // 随时间增长（技能等级越高间隔越短）
+  const maxOrbit = ORBIT_MAX_BASE + guard * ORBIT_MAX_PER_LEVEL;
+  if (player.orbit.length < maxOrbit) {
+    const interval = ORBIT_GROW_INTERVAL / Math.pow(2, guard);
+    player.orbitGrowTimer += dt;
+    while (player.orbit.length < maxOrbit && player.orbitGrowTimer >= interval) {
+      player.orbit.push(makeOrbitBullet(player));
+      player.orbitGrowTimer -= interval;
+    }
+  } else {
+    player.orbitGrowTimer = 0;
+  }
 
   for (const ob of player.orbit) {
     if (ob.respawn > 0) {
@@ -194,6 +222,17 @@ export function getShootPattern(player) {
   // 爆炸弹行为由 getBulletBehavior(player) 决定（只要 player.skills.explosion>0 全部爆炸），
   // 真正的爆炸在 enemyDeathExplosion 中触发（敌机死亡时按实力缩放），这里不再做预算限制
   const patterns = [];
+
+  // 疯狂追击：全屏散弹 + 连射，子弹向四周 360° 散发并追踪敌机
+  if (player.buffs.madHunt > 0) {
+    const N = 8;
+    for (let k = 0; k < N; k++) {
+      const ang = (k / N) * TAU;
+      addBullet({ angle: ang, dmg: baseDmg * 2, homing: true });
+    }
+    return patterns; // 主打全屏追踪弹，不再叠加散射/连射/侧翼，控制弹量
+  }
+
   let dirs;
   if (lvl === 1) dirs = [0];
   else if (lvl === 2) dirs = [-0.06, 0.06];
