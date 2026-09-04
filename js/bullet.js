@@ -18,8 +18,8 @@ function allocBullet() {
     x: 0, y: 0, vx: 0, vy: 0, baseSpd: 0, accel: 0,
     dmg: 0, r: 0, baseR: 0, friendly: true, color: "",
     traveled: 0, maxRange: 0, pierceCount: 0, maxPierce: 0,
-    splitCount: 0, explosionRadius: 0, isScatter: false, isCrit: false,
-    _refire: false, life: 0, homing: 0,
+    splitCount: 0, explosionRadius: 0, expChance: 0, expDmgRatio: 0, isScatter: false, isCrit: false,
+    _refire: false, life: 0, homing: 0, knockback: 0,
   };
 }
 
@@ -31,11 +31,10 @@ function freeBullet(b) {
   b.maxPierce = 0;
   b.splitCount = 0;
   b.explosionRadius = 0;
+  b.expDmgRatio = 0;
   b.isScatter = false;
   b.isCrit = false;
-  b._refire = false;
-  b.life = 0;
-  b.homing = 0;
+  b._refire = false; b.life = 0; b.homing = 0; b.knockback = 0;
   if (pool.length < 400) pool.push(b); // 防爆量：池上限
 }
 
@@ -91,7 +90,9 @@ export function fireBullet(angle, dmg, player, x, y, spd = BULLET.baseSpeed, isE
   // 各行为属性独立设置（不再互斥）
   const penetrateLv = player.skills.penetrate || 0;
   const splitLv = player.skills.split || 0;
-  const explosionLv = player.skills.explosion || 0;
+  const isExplosionBullet = behaviors.has("explosion");
+  const expRangeLv = player.skills.expRange || 0;
+  const expDmgLv = player.skills.expDmg || 0;
 
   const b = allocBullet();
   b.x = x ?? player.x;
@@ -106,18 +107,23 @@ export function fireBullet(angle, dmg, player, x, y, spd = BULLET.baseSpeed, isE
   b.friendly = true;
   b.color = behaviorColor(behaviors, isCrit);
   b.homing = isHoming ? 1 : 0;
-  if (isHoming) b.color = "#fca311"; // 疯狂追击弹专属橙色
+  if (isHoming) b.color = "#fca311";
   b.traveled = 0;
   b.maxRange = maxRange;
   b.behaviors = behaviors;
   b.pierceCount = 0;
   b.maxPierce = behaviors.has("penetrate") ? penetrateLv : 0;
   b.splitCount = behaviors.has("split") ? (1 + splitLv * BULLET.splitCountPerLevel) : 0;
-  b.explosionRadius = behaviors.has("explosion") ? BULLET.explosionBaseRadius + explosionLv * BULLET.explosionRadiusPerLevel : 0;
+  b.explosionRadius = isExplosionBullet ? BULLET.explosionBaseRadius + expRangeLv * BULLET.explosionRadiusPerLevel : 0;
+  b.expDmgRatio = isExplosionBullet ? (BULLET.explosionBaseDmgRatio + expDmgLv * BULLET.explosionDmgRatioPerLevel) : 0;
   b.isScatter = false;
   b.isCrit = isCrit;
   b._refire = false;
   b.life = 0;
+  // 击退力：技能每级 +30% 伤害，buff 期间额外 +30%
+  const kbLvl = player.skills.knockback || 0;
+  const kbBuff = (player.buffs?.knockback || 0) > 0;
+  b.knockback = (kbLvl > 0 || kbBuff) ? b.dmg * (BULLET.knockbackPerLevel * kbLvl + (kbBuff ? 0.3 : 0)) : 0;
   pushBullet(b);
   return b;
 }
@@ -138,7 +144,7 @@ export function spawnSplitBullet(x, y, angle, dmg, color, parentR = 4) {
   b.maxRange = 200;
   b.behaviors.clear();
   b.pierceCount = 0; b.maxPierce = 0;
-  b.splitCount = 0; b.explosionRadius = 0;
+  b.splitCount = 0; b.explosionRadius = 0; b.expDmgRatio = 0;
   b.isScatter = true; b.isCrit = false;
   b._refire = false; b.life = 0; b.accel = 0;
   pushBullet(b);
@@ -282,13 +288,15 @@ export function markMainBulletsTriggered() {
 
 // ---------- 内部工具 ----------
 
-/** 返回所有激活的行为（可叠加） */
+/** 返回所有激活行为（可叠加） */
 function getBulletBehaviors(player, isExplosion) {
   const s = player.skills;
   const set = new Set();
   if (isExplosion) set.add("explosion");
   if (s.penetrate > 0) set.add("penetrate");
-  if (s.explosion > 0) set.add("explosion");
+  if (s.explosion > 0 && Math.random() < (BULLET.explosionBaseChance + (s.expChance || 0) * BULLET.explosionChancePerLevel)) {
+    set.add("explosion");
+  }
   if (s.split > 0) set.add("split");
   return set;
 }

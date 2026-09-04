@@ -111,9 +111,7 @@ function onPointerDown(e) {
   touchId = e.pointerId;
 
   if (easyMode) {
-    // 简单模式：手指直接控制战机 X 位置，无摇杆
-    easyTouchActive = true;
-    easyTouchX = p.x;
+    // 简单模式：仅拖动时跟随手指，点击不闪现
     return;
   }
 
@@ -127,6 +125,7 @@ function onPointerDown(e) {
 function onPointerMove(e) {
   if (e.pointerType !== "touch" || e.pointerId !== touchId) return;
   if (easyMode) {
+    easyTouchActive = true;
     easyTouchX = toLogic(e, e.target).x;
     return;
   }
@@ -169,7 +168,7 @@ export function initInput(canvas) {
 /** 左右虚拟按钮（补充控制，可作为摇杆之外的备用） */
 export function bindTouchButtons(btnLeft, btnRight) {
   function bind(btn, on) {
-    const f = ev => { ev.preventDefault(); initAudio(); on(); };
+    const f = ev => { ev.preventDefault(); ev.stopPropagation(); initAudio(); on(); };
     btn.addEventListener("touchstart", f, { passive: false });
     btn.addEventListener("mousedown", f);
   }

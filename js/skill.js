@@ -20,6 +20,10 @@ export function generateSkillChoices(playerSkills) {
   for (const s of SKILLS) {
     const cur = playerSkills[s.id] || 0;
     if (cur < s.max) {
+      // 前置条件：requires 字段指定的技能等级 > 0 才可选
+      if (s.requires) {
+        if ((playerSkills[s.requires] || 0) <= 0) continue;
+      }
       pool.push([s, cur === 0 ? 15 : 5]);
     }
   }

@@ -6,7 +6,7 @@ import { W, H, PLAYER_BASE, BULLET, TAU } from "./config.js";
 import { clamp, rand, setf } from "./utils.js";
 import { pressed, getStickDir } from "./input.js";
 
-export function createPlayer(aircraftCfg, talentEffects) {
+export function createPlayer(aircraftCfg, talentEffects, shopEffects) {
   const base = { ...PLAYER_BASE };
   // 属性倍率（飞机 / 天赋叠加）
   let baseDmgMul = 1;
@@ -41,14 +41,23 @@ export function createPlayer(aircraftCfg, talentEffects) {
     baseDmgMul *= (1 + (talentEffects.baseDmg || 0));
     fireRateMul *= (talentEffects.fireRateMul || 1);
     if (talentEffects.startRange) {
-      // 起始射程天赋折算为射程技能等级（按每级射程 2m 换算）
       startSkills.range = (startSkills.range || 0) + Math.round(talentEffects.startRange / BULLET.rangePerLevel);
     }
   }
 
+  // 应用商店加成
+  if (shopEffects) {
+    base.startHp += (shopEffects.startHp || 0);
+    base.invincibleTime += (shopEffects.invTime || 0);
+    if (shopEffects.maxShield) base.maxShield += shopEffects.maxShield;
+    baseDmgMul += (shopEffects.baseDmg || 0);
+    fireRateMul *= (shopEffects.fireRateMul || 1);
+    if (shopEffects.expDmgBonus) startSkills._shopExpDmgBonus = shopEffects.expDmgBonus;
+  }
+
   return {
     x: W / 2,
-    y: H - 100,
+    y: H - 160,
     w: base.width,
     h: base.height,
     speed: base.speed,
@@ -64,7 +73,7 @@ export function createPlayer(aircraftCfg, talentEffects) {
     baseHp: base.startHp,
     baseDmgMul,
     fireRateMul,
-    buffs: { rapid: 0, speed: 0, freeze: 0, magnet: 0, double: 0, madHunt: 0, drop: 0, critboost: 0 },
+    buffs: { rapid: 0, speed: 0, freeze: 0, magnet: 0, double: 0, madHunt: 0, drop: 0, critboost: 0, knockback: 0 },
     skills: { ...startSkills },
     orbit: [],   // 护体弹：围绕玩家旋转的特殊子弹
 
@@ -73,11 +82,12 @@ export function createPlayer(aircraftCfg, talentEffects) {
     _freeze: false,
     _heal: 0,
     _toast: null,
+    _skillAnim: null,
   };
 }
 
 export function updatePlayer(dt, player, refireDist = 0, maxTraveled = 0) {
-  player.y = H - 100;
+  player.y = H - 160;
   const sp = player.speed
     * (1 + 0.12 * (player.skills.move || 0))
     * (player.buffs.speed > 0 ? 1.5 : 1);
@@ -99,7 +109,7 @@ export function updatePlayer(dt, player, refireDist = 0, maxTraveled = 0) {
   const fireRate = rapid
     ? 0.055 * frMul
     : mad
-      ? 0.1 * frMul
+      ? 0.045 * frMul
       : (0.16 - player.power * 0.012) * (1 - 0.08 * (player.skills.rate || 0)) * frMul;
   if (player.fireCd > 0) player.fireCd -= dt;
   // 距离/销毁触发：上一发主弹飞行超过 refireDist(10m) 或已销毁（无主弹在屏），
@@ -120,7 +130,7 @@ export function updatePlayer(dt, player, refireDist = 0, maxTraveled = 0) {
   }
 
   // 计时类buff
-  for (const k of ["rapid", "speed", "magnet", "double", "madHunt", "drop", "critboost"]) {
+  for (const k of ["rapid", "speed", "magnet", "double", "madHunt", "drop", "critboost", "knockback"]) {
     if (player.buffs[k] > 0) {
       player.buffs[k] -= dt;
       if (player.buffs[k] < 0) player.buffs[k] = 0;
@@ -131,6 +141,12 @@ export function updatePlayer(dt, player, refireDist = 0, maxTraveled = 0) {
   if (player._toast) {
     player._toast.t -= dt;
     if (player._toast.t <= 0) player._toast = null;
+  }
+
+  // 技能过场动画衰减
+  if (player._skillAnim) {
+    player._skillAnim.t -= dt;
+    if (player._skillAnim.t <= 0) player._skillAnim = null;
   }
 
   // 护体弹旋转与补充
@@ -144,7 +160,7 @@ const ORBIT_RADIUS = 46;       // 轨道半径
 const ORBIT_SPEED = 2.2;       // 角速度(弧度/秒)
 const ORBIT_RESPAWN = 2.5;     // 被击毁后重生秒数
 const ORBIT_GROW_INTERVAL = 30; // 无技能时每 30 秒增长一颗
-const ORBIT_MAX_BASE = 2;      // 护体弹数量上限基础值
+const ORBIT_MAX_BASE = 0;      // 无护体技能时不生成护体弹
 const ORBIT_MAX_PER_LEVEL = 2; // 每级护体技能 +2 上限
 
 /** 生成一颗护体弹 */
@@ -158,7 +174,8 @@ function makeOrbitBullet(player) {
 
 /**
  * 维护护体弹：
- * - 初始 1 颗；之后每 ORBIT_GROW_INTERVAL 秒自动 +1 颗（直到上限）
+ * - 无护体技能时不生成；有技能时立即生成 1 颗保底
+ * - 之后每 ORBIT_GROW_INTERVAL 秒自动 +1 颗（直到上限）
  * - 护体技能每升 1 级，增长间隔减半（30→15→7.5→3.75s），上限 +2
  */
 function updateOrbit(player, dt) {
@@ -167,13 +184,13 @@ function updateOrbit(player, dt) {
   if (!Array.isArray(orbit)) player.orbit = [];
   if (player.orbitGrowTimer === undefined) player.orbitGrowTimer = 0;
 
-  // 保底 1 颗
-  if (player.orbit.length === 0) {
+  const maxOrbit = ORBIT_MAX_BASE + guard * ORBIT_MAX_PER_LEVEL;
+
+  // 保底：仅在有护体技能时才初始生成
+  if (maxOrbit > 0 && player.orbit.length === 0) {
     player.orbit.push(makeOrbitBullet(player));
   }
 
-  // 随时间增长（技能等级越高间隔越短）
-  const maxOrbit = ORBIT_MAX_BASE + guard * ORBIT_MAX_PER_LEVEL;
   if (player.orbit.length < maxOrbit) {
     const interval = ORBIT_GROW_INTERVAL / Math.pow(2, guard);
     player.orbitGrowTimer += dt;
@@ -223,14 +240,28 @@ export function getShootPattern(player) {
   // 真正的爆炸在 enemyDeathExplosion 中触发（敌机死亡时按实力缩放），这里不再做预算限制
   const patterns = [];
 
-  // 疯狂追击：全屏散弹 + 连射，子弹向四周 360° 散发并追踪敌机
+  // 疯狂追击：全屏散弹 + 连射 + 追踪，子弹向四周 360° 散发并追踪敌机
   if (player.buffs.madHunt > 0) {
-    const N = 8;
-    for (let k = 0; k < N; k++) {
-      const ang = (k / N) * TAU;
-      addBullet({ angle: ang, dmg: baseDmg * 2, homing: true });
+    // 基础方向数：基础 8 方向 + 每级散射 +2 方向
+    const baseDirs = 8 + scatterLv * 2;
+    // 连射：每个方向额外发射 volleyLv 发子弹（前后间距）
+    const volleyCount = volleyLv;
+    
+    for (let k = 0; k < baseDirs; k++) {
+      const ang = (k / baseDirs) * TAU;
+      // 主弹
+      addBullet({ angle: ang, dmg: baseDmg * 3, homing: true });
+      // 连射子弹
+      for (let v = 1; v <= volleyCount; v++) {
+        addBullet({ 
+          angle: ang, 
+          dmg: baseDmg * 2, 
+          homing: true, 
+          y: player.y + BULLET.volleySpacing * v 
+        });
+      }
     }
-    return patterns; // 主打全屏追踪弹，不再叠加散射/连射/侧翼，控制弹量
+    return patterns;
   }
 
   let dirs;
@@ -268,11 +299,23 @@ export function getShootPattern(player) {
     }
   }
 
+  const sideBulletsLv = player.skills.sideBullets || 0;
+
   if (dualLv > 0) {
     const ox = player.w * 0.6;
     for (let k = 1; k <= dualLv; k++) {
       addBullet({ angle: 0.05, dmg: baseDmg, x: player.x - ox * k, y: player.y + 8 });
       addBullet({ angle: -0.05, dmg: baseDmg, x: player.x + ox * k, y: player.y + 8 });
+    }
+  }
+
+  // 左右护法：学习后每次射击额外向左右各发射一发子弹（从机身两侧射出）
+  if (sideBulletsLv > 0) {
+    const sideDmg = Math.round(baseDmg * (1 + 0.2 * sideBulletsLv));
+    const ox = player.w * 0.55;
+    for (let k = 1; k <= sideBulletsLv; k++) {
+      addBullet({ angle: -0.15, dmg: sideDmg, x: player.x - ox * k, y: player.y + 4 });
+      addBullet({ angle: 0.15, dmg: sideDmg, x: player.x + ox * k, y: player.y + 4 });
     }
   }
 

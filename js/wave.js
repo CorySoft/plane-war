@@ -16,6 +16,10 @@ export function getSpawnRate(level, spawnScale = 1) {
 
 let eliteTimer = 0;
 let bossWave = 0;
+let swarmTimer = 0;
+let swarmWarned = false;
+let bossWarnPending = false;
+let bossWarnTimer = 0;
 
 export function updateWaves(dt, level, now, diff) {
   // 精英波计时
@@ -26,18 +30,51 @@ export function updateWaves(dt, level, now, diff) {
     for (let i = 0; i < count; i++) spawnEnemy(level, diff);
   }
 
-  // Boss 波次（每5个难度等级）
+  // Boss 预警（等级达标后先提示 2 秒）
   const expectedBossWave = Math.floor(level / DIFFICULTY.bossInterval);
-  if (expectedBossWave > bossWave && level >= DIFFICULTY.bossInterval) {
-    bossWave = expectedBossWave;
-    return "boss";
+  if (level >= DIFFICULTY.bossInterval && expectedBossWave > bossWave && !bossWarnPending) {
+    bossWarnPending = true;
+    bossWarnTimer = 0;
+    return "bossWarn";
   }
-  return null;
+  if (bossWarnPending) {
+    bossWarnTimer += dt;
+    if (bossWarnTimer >= 2.0) {
+      bossWarnPending = false;
+      bossWave = expectedBossWave;
+      return "boss";
+    }
+    return null;
+  }
+
+  // 虫群波（每 swarmInterval 秒，最低 swarmMinLevel 级）
+  if (level >= DIFFICULTY.swarmMinLevel) {
+    swarmTimer += dt;
+    if (!swarmWarned && swarmTimer >= DIFFICULTY.swarmInterval - DIFFICULTY.swarmWarnTime) {
+      swarmWarned = true;
+      return "swarmWarn";
+    }
+    if (swarmTimer >= DIFFICULTY.swarmInterval) {
+      swarmTimer = 0;
+      swarmWarned = false;
+      return "swarm";
+    }
+  }
+return null;
+}
+
+export function spawnSwarm(level, diff, enemyLevel) {
+  const count = 8 + Math.min(level * 2, 16);
+  for (let i = 0; i < count; i++) {
+    spawnEnemy(level, diff, enemyLevel, rand(30, W - 30), -30 - i * 25);
+  }
 }
 
 export function resetWaves() {
   eliteTimer = 0;
   bossWave = 0;
+  swarmTimer = 0;
+  swarmWarned = false;
 }
 
 // ---------- Boss 定义 ----------

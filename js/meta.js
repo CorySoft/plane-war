@@ -2,7 +2,7 @@
  * meta.js — 元进度系统（星尘货币 / 飞机解锁 / 天赋树）
  * =========================================================== */
 
-import { META, ACHIEVEMENTS, DAILY_QUESTS, SKILLS, todayKey } from "./config.js";
+import { META, ACHIEVEMENTS, DAILY_QUESTS, SKILLS, SHOP_ITEMS, getShopItemCost, todayKey } from "./config.js";
 
 const STORAGE_KEY = "planeWarMeta";
 
@@ -18,6 +18,8 @@ let metaData = {
   totalStardustEarned: 0,
   selectedAircraft: "falcon",
   discoveredSkills: [],   // 技能图鉴：历史上习得过的技能 id
+  discoveredPowerups: [], // 道具图鉴：历史上拾取过的道具 id
+  shopLevels: {},        // 系统商城：各道具已购买等级 { id: level }
   achievements: [],       // 已达成成就 id（一次性）
   quests: null,           // { date, progress:{kills,score,runs,boss,powerups}, claimed:[] }
 };
@@ -81,6 +83,18 @@ export function discoverSkill(id) {
 }
 export function getDiscoveredSkills() { return metaData.discoveredSkills; }
 export function getDiscoveredSkillCount() { return metaData.discoveredSkills.length; }
+
+// ---------- 道具图鉴 ----------
+export function discoverPowerup(id) {
+  if (!metaData.discoveredPowerups.includes(id)) {
+    metaData.discoveredPowerups.push(id);
+    saveMeta();
+    return true;
+  }
+  return false;
+}
+export function getDiscoveredPowerups() { return metaData.discoveredPowerups; }
+export function getDiscoveredPowerupCount() { return metaData.discoveredPowerups.length; }
 
 // ---------- 飞机解锁 ----------
 export function isAircraftUnlocked(id) {
@@ -268,4 +282,40 @@ export function getAchievementView() {
     def,
     achieved: metaData.achievements.includes(def.id),
   }));
+}
+
+// ---------- 系统商城 ----------
+export function getShopLevels() { return metaData.shopLevels || {}; }
+export function getShopLevel(id) { return metaData.shopLevels?.[id] || 0; }
+
+export function purchaseShopItem(id) {
+  const item = SHOP_ITEMS.find(s => s.id === id);
+  if (!item) return false;
+  const lv = getShopLevel(id);
+  if (lv >= item.max) return false;
+  const cost = getShopItemCost(item, lv);
+  if (metaData.stardust < cost) return false;
+  metaData.stardust -= cost;
+  if (!metaData.shopLevels) metaData.shopLevels = {};
+  metaData.shopLevels[id] = lv + 1;
+  saveMeta();
+  return true;
+}
+
+export function getShopEffects() {
+  const levels = metaData.shopLevels || {};
+  const merged = {};
+  for (const item of SHOP_ITEMS) {
+    const lv = levels[item.id] || 0;
+    if (lv <= 0) continue;
+    const fx = item.effect(lv);
+    for (const [k, v] of Object.entries(fx)) {
+      if (typeof v === "number" && typeof merged[k] === "number") {
+        merged[k] += v;
+      } else {
+        merged[k] = v;
+      }
+    }
+  }
+  return merged;
 }

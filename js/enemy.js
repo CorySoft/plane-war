@@ -76,6 +76,7 @@ export function spawnEnemy(level, diff, enemyLevel = 1, atX, atY) {
   e.enemyLevel = elvl;
   e.isBoss = false;
   e._deathExplosion = null;
+  e.kx = 0; e.ky = 0; e.kbTimer = 0;
   pushEnemy(e);
   return e;
 }
@@ -96,6 +97,12 @@ export function updateEnemies(dt, level, playerX, playerY, playerH) {
       e.frozen -= dt;
       e.t += dt;
     } else {
+      // 击退生效：叠加击退位移
+      if (e.kbTimer > 0) {
+        e.kbTimer -= dt;
+        e.x += e.kx * dt * 60;
+        e.y += e.ky * dt * 60;
+      }
       e.y += e.vy * dt * 60;
       e.x += e.vx * dt * 60 + Math.sin(e.t * 1.5) * 0.4;
       e.t += dt;
@@ -269,6 +276,7 @@ export function spawnSplitChildren(parent) {
     e.laserTimer = 0;
     e.isBoss = false;
     e._deathExplosion = null;
+    e.kx = 0; e.ky = 0; e.kbTimer = 0;
     pushEnemy(e);
   }
 }

@@ -95,6 +95,7 @@ export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNee
   if (player.buffs.madHunt > 0) activeBuffs.push(["madHunt", "追击", "#fca311", 8, player.buffs.madHunt]);
   if (player.buffs.drop > 0) activeBuffs.push(["drop", "☘爆率", "#ffd93b", 8, player.buffs.drop]);
   if (player.buffs.critboost > 0) activeBuffs.push(["critboost", "致命", "#ff8fa3", 8, player.buffs.critboost]);
+  if (player.buffs.knockback > 0) activeBuffs.push(["knockback", "»击退", "#5ee6ff", 8, player.buffs.knockback]);
 
   let bx = 16;
   const len = activeBuffs.length;
@@ -122,7 +123,10 @@ function getBehaviorLabel(player) {
   const s = player.skills;
   let label = null;
   if (s.penetrate > 0) label = { label: "◆穿透 " + s.penetrate + "级", color: "#aa66ff" };
-  else if (s.explosion > 0) label = { label: "◆爆炸 " + s.explosion + "级", color: "#ff6633" };
+  else if (s.explosion > 0) {
+    const ch = s.expChance || 0, dm = s.expDmg || 0, rn = s.expRange || 0;
+    label = { label: "◆爆炸 " + ch + "/" + dm + "/" + rn, color: "#ff6633" };
+  }
   else if (s.split > 0) label = { label: "◆分裂 " + s.split + "级", color: "#7bd67b" };
   const extras = [];
   if ((s.orbital || 0) > 0) extras.push("天基" + s.orbital + "级");
@@ -132,6 +136,7 @@ function getBehaviorLabel(player) {
   if (extras.length > 0) {
     if (!label) label = { label: "", color: "#fff" };
     label.label = (label.label ? label.label + "  " : "") + extras.join(" ");
+    if ((s.sideBullets || 0) > 0) label.label += " 左右护法" + s.sideBullets + "级";
   }
   return label;
 }
