@@ -2,7 +2,7 @@
  * hud.js — HUD 绘制
  * =========================================================== */
 
-import { W, H, TAU } from "./config.js";
+import { W, H } from "./config.js";
 import { clamp, roundRect, setf } from "./utils.js";
 
 export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNeed, lives, maxLives, combo, player, frame }) {
@@ -71,8 +71,9 @@ export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNee
   // 射程指示（以米为单位，1米 = 25 像素）
   ctx.textAlign = "left";
   const rangeLvl = player.skills.range || 0;
-  const levelMul = 1 + ((player.level || 1) - 1) * 0.10;
-  const rangeM = Math.round((250 + rangeLvl * 150) * levelMul / 25);
+  const levelBonus = ((player.level || 1) - 1) * 2.5;
+  const rangePx = Math.min(250 + rangeLvl * 50 + levelBonus, H + 80);
+  const rangeM = Math.round(rangePx / 25);
   const rangeText = "射程 " + rangeM + "m";
   ctx.fillStyle = rangeLvl > 0 ? "#88ddff" : "rgba(255,255,255,.35)";
   ctx.fillText(rangeText, 18, H - 56);

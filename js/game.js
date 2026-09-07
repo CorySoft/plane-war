@@ -4,12 +4,13 @@
 
 import { W, H, STATE, BULLET as BCFG, TAU, DIFFICULTY_PRESETS, ENEMY_LEVEL, POWERUP_DROP, META, computeViewport, setViewport } from "./config.js";
 import { clamp, rand, hypot, setf } from "./utils.js";
-import { sfx, startMusic, stopMusic, initAudio } from "./audio.js";
+import { sfx, startMusic, stopMusic, initAudio, setSfxMuted, setMusicMuted } from "./audio.js";
 import { initInput, bindTouchButtons, getStick, isStickActive, setDifficulty as setPlayerDifficulty, isEasyMode, getEasyTouch } from "./input.js";
 import { spawnParticles, updateParticles, drawParticles, clearParticles } from "./particles.js";
 import { triggerShake, updateCamera, applyCamera, resetCamera, slowmo } from "./camera.js";
 import {
-  bullets, fireBullet, spawnEnemyBullet, spawnSplitBullet, removeBullet,
+  bullets, fireBullet, spawnEnemyBullet, spawnSplitBullet, spawnLaserVolley,
+  spawnHostileBullet, applyPierceOrRemove, removeBullet,
   updateBullets, drawBullets, clearBullets, hasPlayerMainBullet, maxMainBulletTraveled, markMainBulletsTriggered
 } from "./bullet.js";
 import {
@@ -36,6 +37,9 @@ import {
   getCodexButton, getCodexBackButton, getPowerupCodexButton, getPowerupCodexBackButton, getAchieveButton, getAchieveBackButton, getQuestClaimButtons,
   getShopButton, getShopBackButton, getShopBuyButtons,
   getReviveYesButton, getReviveNoButton, setMenuPage, getMenuPage,
+  getHangarButton, getHangarBackButton, getHangarCards,
+  getTalentButton, getTalentBackButton, getTalentCards,
+  getSettingsButton, getSettingsBackButton, getSettingToggles,
   getClearCacheButton, drawClearCacheConfirm, getClearYesButton, getClearNoButton, getShowClearCache, setShowClearCache,
 } from "./ui.js";
 
@@ -44,7 +48,8 @@ const DEBUG_MODE = true;
 import {
   loadMeta, earnStardust, getBest, getTalentEffects, getShopEffects, purchaseShopItem, addKill, getSelectedAircraftConfig,
   discoverSkill, getDiscoveredSkills, spendStardust, getStardust,
-  checkAchievements, getQuestView, claimQuest, addBossKill
+  checkAchievements, getQuestView, claimQuest, addBossKill,
+  getSettings, toggleSetting, unlockAircraft, setSelectedAircraft, purchaseTalent,
 } from "./meta.js";
 
 // ---------- 画布初始化 ----------
@@ -122,6 +127,7 @@ try {
     document.getElementById("btnRight")
   );
   loadMeta();
+  applyAudioSettings();
   initStars();
   resetCamera();
 } catch (e) {
@@ -175,6 +181,11 @@ function loop() {
   try {
     // 星空始终动画（含菜单/结束画面）
     updateStars(dt);
+
+    if (toast) {
+      toast.t -= rawDt;
+      if (toast.t <= 0) toast = null;
+    }
 
     if (state === STATE.PLAYING) {
       update(dt);
@@ -376,6 +387,9 @@ function update(dt) {
     for (const e of shooters) {
       if (e.type === "boss") {
         bossFire(e);
+      } else if (e.type === "laser" || e._laserShot) {
+        e._laserShot = false;
+        spawnLaserVolley(e, player.x, player.y, difficulty.enemyFireScale);
       } else {
         spawnEnemyBullet(e, player.x, player.y, difficulty.enemyFireScale);
       }
@@ -472,18 +486,11 @@ function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
     applyKnockback(e, b);
   }
 
-  // 护盾敌机
   if (e.shieldHp > 0) {
     e.shieldHp--;
     spawnParticles(b.x, b.y, "#44aaff", 6, 3);
     spawnDamageNumber(b.x, b.y, "护盾", "#44aaff");
-    if (!b.isScatter && !b.behaviors.has("penetrate")) {
-      removeBullet(b);
-    } else if (b.behaviors.has("penetrate") && b.pierceCount < b.maxPierce) {
-      b.pierceCount++;
-    } else {
-      removeBullet(b);
-    }
+    applyPierceOrRemove(b);
     return;
   }
 
@@ -541,18 +548,9 @@ function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
     }
 
     removeEnemy(enemyIdx);
-
-    // 击毁后：穿透弹保持飞行继续穿透；其余消失
-    if (b.behaviors.has("penetrate") && b.pierceCount < b.maxPierce) {
-      b.pierceCount++;
-    } else if (!b.isScatter) {
-      removeBullet(b);
-    }
+    applyPierceOrRemove(b);
   } else {
-    // 敌机存活：非穿透/非散射子弹命中后消失
-    if (!b.behaviors.has("penetrate") && !b.isScatter) {
-      removeBullet(b);
-    }
+    applyPierceOrRemove(b);
   }
 }
 
@@ -663,6 +661,12 @@ function doEnemyDeathExplosion(e, info, depth = 0) {
     if (other === e) continue;
     const d = hypot(other.x, other.y, e.x, e.y);
     if (d < r) {
+      if (other.shieldHp > 0) {
+        other.shieldHp = Math.max(0, other.shieldHp - 1);
+        spawnDamageNumber(other.x, other.y, "护盾", "#44aaff");
+        spawnParticles(other.x, other.y, "#44aaff", Math.max(1, Math.round(4 * depthVisualFactor)), 3);
+        continue;
+      }
       other.hp -= aoeDmg;
       other.hitFlash = 1;
       spawnDamageNumber(other.x, other.y, "" + aoeDmg, "#ff6633");
@@ -713,7 +717,8 @@ function doEnemyDeathExplosion(e, info, depth = 0) {
     if (v.isBoss && !isDeepChain) {
       addScore(3000);
       triggerShake(1.5);
-      for (let k = 0; k < 3; k++) spawnPowerup(v.x + rand(-30, 30), v.y + rand(-20, 20), level);
+      addBossKill();
+      for (let k = 0; k < 3; k++) spawnPowerup(v.x + rand(-30, 30), v.y + rand(-20, 20), level, getDropBonus());
     }
     // 连锁深度的敌机继续触发下一级连锁（深度上限之外只算伤害不再递归）
     if (v._deathExplosion && !isDeepChain) {
@@ -802,53 +807,37 @@ function updateBossAI(e, dt, level, diff) {
 function bossFire(e) {
   const phase = getCurrentBossPhase(e);
   if (!phase) return;
+  const scale = difficulty.enemyFireScale || 1;
 
   switch (phase.pattern) {
     case "spread": {
       for (let i = -2; i <= 2; i++) {
         const angle = i * 0.3;
-        bullets.push({
-          x: e.x, y: e.y + e.r * 0.5,
-          vx: Math.sin(angle) * 3, vy: 3.5,
-          r: 6, friendly: false, color: "#ff4488",
-          traveled: 0, maxRange: 500, life: 5,
-          behaviors: new Set(),
+        spawnHostileBullet(e.x, e.y + e.r * 0.5, Math.sin(angle) * 3 * scale, 3.5 * scale, {
+          r: 6, color: "#ff4488", maxRange: 500, life: 5,
         });
       }
       break;
     }
     case "homing": {
-      spawnEnemyBullet(e, player.x, player.y, difficulty.enemyFireScale);
+      spawnEnemyBullet(e, player.x, player.y, scale);
       break;
     }
     case "burst": {
       for (let i = 0; i < 8; i++) {
         const a = (i / 8) * TAU;
-        bullets.push({
-          x: e.x, y: e.y,
-          vx: Math.cos(a) * 3, vy: Math.sin(a) * 3,
-          r: 5, friendly: false, color: "#aa44ff",
-          traveled: 0, maxRange: 400, life: 4,
-          behaviors: new Set(),
+        spawnHostileBullet(e.x, e.y, Math.cos(a) * 3 * scale, Math.sin(a) * 3 * scale, {
+          r: 5, color: "#aa44ff", maxRange: 400, life: 4,
         });
       }
       break;
     }
     case "laser": {
-      // 简化激光：快速直线弹
-      for (let i = -1; i <= 1; i++) {
-        bullets.push({
-          x: e.x + i * 15, y: e.y + e.r,
-          vx: 0, vy: 7,
-          r: 4, friendly: false, color: "#ff2222",
-          traveled: 0, maxRange: 600, life: 3,
-          behaviors: new Set(),
-        });
-      }
+      spawnLaserVolley(e, player.x, player.y, scale);
       break;
     }
     default: {
-      spawnEnemyBullet(e, player.x, player.y, difficulty.enemyFireScale);
+      spawnEnemyBullet(e, player.x, player.y, scale);
     }
   }
 }
@@ -993,6 +982,12 @@ function doRevive() {
   musicStarted = true;
 }
 
+function applyAudioSettings() {
+  const s = getSettings();
+  setSfxMuted(!!s.sfxMuted);
+  setMusicMuted(!!s.musicMuted);
+}
+
 function freezeAll() {
   const freezeline = player.y - player.h / 2; // 我方子弹发射线
   for (const e of enemies) {
@@ -1049,15 +1044,15 @@ function resetGame() {
   frame = 0;
   toast = null;
 
-  if (showTutorial) {
-    // 先进入教程界面，等玩家点击后再正式开始
-    state = STATE.TUTORIAL;
-    tutorialTimer = 1;
-  } else {
+  const skipTutorial = !showTutorial || !!getSettings().skipTutorial;
+  if (skipTutorial) {
     state = STATE.PLAYING;
     startMusic();
     musicStarted = true;
     tutorialTimer = 0;
+  } else {
+    state = STATE.TUTORIAL;
+    tutorialTimer = 1;
   }
 
   initStars();
@@ -1193,9 +1188,8 @@ function draw() {
     ctx.globalAlpha = 1;
   }
 
-  // HUD（不受震动影响）
-  if (state === STATE.PLAYING || state === STATE.OVER) {
-    if (player) drawHUD(ctx, {
+  if (player && state !== STATE.MENU && state !== STATE.REVIVE) {
+    drawHUD(ctx, {
       score, best: getBest(), level, enemyLevel, pLevel, xp, xpNeed,
       lives, maxLives, combo, player, frame,
     });
@@ -1279,12 +1273,16 @@ window.addEventListener("keydown", e => {
   }
   if (e.code === "Space" || e.code === "Enter") {
     if (state === STATE.MENU) {
-      if (getMenuPage() === "codex" || getMenuPage() === "achieve") { setMenuPage("main"); return; }
+      if (getMenuPage() !== "main") { setMenuPage("main"); return; }
       resetGame();
     }
     else if (state === STATE.OVER) resetGame();
     else if (state === STATE.REVIVE) doRevive();
     else if (state === STATE.TUTORIAL) startPlaying();
+  }
+  if (state === STATE.REVIVE && (e.code === "Escape" || e.code === "KeyQ" || e.code === "KeyN")) {
+    gameOver();
+    return;
   }
   if (state === STATE.LEVELUP) {
     const idx = ["Digit1", "Digit2", "Digit3"].indexOf(e.code);
@@ -1394,7 +1392,55 @@ canvas.addEventListener("pointerdown", e => {
       }
       return;
     }
-    // 进入技能图鉴
+    const page = getMenuPage();
+    if (page === "hangar") {
+      if (hitTestButton(mx, my, getHangarBackButton())) { setMenuPage("main"); return; }
+      for (const card of getHangarCards()) {
+        if (!hitTestButton(mx, my, card)) continue;
+        if (card.unlocked) {
+          setSelectedAircraft(card.id);
+          toast = { text: "已选择战机", color: "#66e0ff", t: 1.4 };
+        } else if (unlockAircraft(card.id)) {
+          toast = { text: "解锁成功", color: "#7CFC00", t: 1.6 };
+          sfx.power();
+        } else {
+          toast = { text: "星尘不足", color: "#ff8fa3", t: 1.4 };
+        }
+        return;
+      }
+      return;
+    }
+    if (page === "talent") {
+      if (hitTestButton(mx, my, getTalentBackButton())) { setMenuPage("main"); return; }
+      for (const card of getTalentCards()) {
+        if (!hitTestButton(mx, my, card)) continue;
+        if (card.bought) {
+          toast = { text: "已解锁", color: "#c8a6ff", t: 1.2 };
+        } else if (card.locked) {
+          toast = { text: "需要前置天赋", color: "#ff8fa3", t: 1.4 };
+        } else if (purchaseTalent(card.id)) {
+          toast = { text: "天赋已解锁", color: "#7CFC00", t: 1.6 };
+          sfx.power();
+        } else {
+          toast = { text: "星尘不足", color: "#ff8fa3", t: 1.4 };
+        }
+        return;
+      }
+      return;
+    }
+    if (page === "settings") {
+      if (hitTestButton(mx, my, getSettingsBackButton())) { setMenuPage("main"); return; }
+      for (const row of getSettingToggles()) {
+        if (hitTestButton(mx, my, row)) {
+          toggleSetting(row.key);
+          applyAudioSettings();
+          return;
+        }
+      }
+      return;
+    }
+    if (hitTestButton(mx, my, getHangarButton())) { setMenuPage("hangar"); return; }
+    if (hitTestButton(mx, my, getTalentButton())) { setMenuPage("talent"); return; }
     if (hitTestButton(mx, my, getCodexButton())) { setMenuPage("codex"); return; }
     // 进入道具图鉴
     if (hitTestButton(mx, my, getPowerupCodexButton())) { setMenuPage("powerupCodex"); return; }
@@ -1402,6 +1448,7 @@ canvas.addEventListener("pointerdown", e => {
     if (hitTestButton(mx, my, getShopButton())) { setMenuPage("shop"); return; }
     // 进入成就·每日任务
     if (hitTestButton(mx, my, getAchieveButton())) { setMenuPage("achieve"); return; }
+    if (hitTestButton(mx, my, getSettingsButton())) { setMenuPage("settings"); return; }
     // 清除缓存按钮（调试模式）
     if (hitTestButton(mx, my, getClearCacheButton())) {
       if (DEBUG_MODE) { setShowClearCache(true); return; }
@@ -1446,11 +1493,7 @@ canvas.addEventListener("pointerdown", e => {
   if (state === STATE.PAUSED) {
     if (hitTestButton(mx, my, getPauseResumeButton())) { state = STATE.PLAYING; return; }
     if (hitTestButton(mx, my, getPauseQuitButton())) {
-      earnStardust(score);
-      state = STATE.MENU;
-      setMenuPage("main");
-      stopMusic();
-      musicStarted = false;
+      gameOver();
       return;
     }
   }

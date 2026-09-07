@@ -112,10 +112,7 @@ export function updateEnemies(dt, level, playerX, playerY, playerH) {
       if (e.x < e.r) { e.x = e.r; e.vx = Math.abs(e.vx); }
       if (e.x > W - e.r) { e.x = W - e.r; e.vx = -Math.abs(e.vx); }
 
-      // 激光敌机蓄力
-      if (e.type === "laser") {
-        e.laserTimer -= dt;
-      }
+      if (e.type === "laser" && e.laserTimer > 0) e.laserTimer -= dt;
     }
 
     // 飞出屏幕
@@ -158,10 +155,18 @@ export function getEnemyShooters(playerX, playerY, dt, fireCdScale = 1) {
       }
       continue;
     }
+    if (e.type === "laser") {
+      if (e.laserTimer <= 0) {
+        e._laserShot = true;
+        shooters.push(e);
+        e.laserTimer = rand(2.4, 3.6) * fireCdScale;
+      }
+      continue;
+    }
     e.fireCd -= dt;
     if (e.fireCd <= 0) {
       shooters.push(e);
-      const cd = e.type === "big" ? 2.2 : e.type === "mid" ? 3.2 : e.type === "laser" ? 2.5 : e.type === "shield" ? 3.5 : rand(4, 6);
+      const cd = e.type === "big" ? 2.2 : e.type === "mid" ? 3.2 : e.type === "shield" ? 3.5 : rand(4, 6);
       e.fireCd = cd * fireCdScale;
     }
   }
@@ -212,6 +217,15 @@ export function drawEnemies(ctx, frame) {
     }
     ctx.closePath();
     ctx.fill();
+
+    if (e.type === "laser" && e.laserTimer > 0 && e.laserTimer < 0.55) {
+      ctx.strokeStyle = `rgba(255,68,68,${0.45 + Math.sin(frame * 0.4) * 0.25})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, r);
+      ctx.lineTo(0, r + 18 + (0.55 - e.laserTimer) * 40);
+      ctx.stroke();
+    }
 
     // 护盾敌机护盾环
     if (e.shieldHp > 0) {

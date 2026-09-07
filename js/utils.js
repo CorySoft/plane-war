@@ -22,14 +22,27 @@ export function roundRect(ctx, x, y, w, h, r) {
 }
 
 export function weightedPick(weights) {
+  if (!weights || weights.length === 0) return undefined;
   let total = 0;
   for (const [, w] of weights) total += w;
+  if (total <= 0) return weights[0][0];
   let r = Math.random() * total;
   for (const [t, w] of weights) {
     r -= w;
     if (r <= 0) return t;
   }
-  return weights[0][0];
+  return weights[weights.length - 1][0];
+}
+
+export function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = a[i];
+    a[i] = a[j];
+    a[j] = tmp;
+  }
+  return a;
 }
 
 /**

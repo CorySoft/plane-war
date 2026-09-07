@@ -3,6 +3,15 @@
  * =========================================================== */
 
 let audioCtx = null;
+let sfxMuted = false;
+let musicMuted = false;
+
+export function isSfxMuted() { return sfxMuted; }
+export function isMusicMuted() { return musicMuted; }
+
+export function setSfxMuted(muted) {
+  sfxMuted = !!muted;
+}
 
 export function initAudio() {
   if (!audioCtx) {
@@ -12,7 +21,7 @@ export function initAudio() {
 }
 
 function beep(freq, dur, type = "square", vol = 0.12, slideTo = null) {
-  if (!audioCtx) return;
+  if (sfxMuted || !audioCtx) return;
   const t = audioCtx.currentTime;
   const osc = audioCtx.createOscillator();
   const g = audioCtx.createGain();
@@ -59,6 +68,7 @@ function playbackNote(freq, t, dur, vol, type = "triangle") {
 /** 开始背景音乐（无音频上下文的浏览器自动静默） */
 export function startMusic() {
   stopMusic();
+  if (musicMuted) return;
   if (!audioCtx) initAudio();
   if (!audioCtx) return;
   if (audioCtx.state !== "running") audioCtx.resume();
@@ -85,6 +95,6 @@ export function stopMusic() {
 }
 
 export function setMusicMuted(muted) {
-  if (muted) stopMusic();
-  else startMusic();
+  musicMuted = !!muted;
+  if (musicMuted) stopMusic();
 }

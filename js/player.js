@@ -7,16 +7,18 @@ import { clamp, rand, setf } from "./utils.js";
 import { pressed, getStickDir } from "./input.js";
 
 export function createPlayer(aircraftCfg, talentEffects, shopEffects) {
-  const base = { ...PLAYER_BASE };
+  const base = { ...PLAYER_BASE, startHp: PLAYER_BASE.startLives };
   // 属性倍率（飞机 / 天赋叠加）
   let baseDmgMul = 1;
   let fireRateMul = 1;
+  let talentDmg = 0;
+  let talentCrit = 0;
   const startSkills = {};
 
   // 应用飞机加成
   if (aircraftCfg) {
     base.speed = aircraftCfg.speed;
-    base.startHp = aircraftCfg.startHp;
+    base.startHp = aircraftCfg.startHp ?? PLAYER_BASE.startLives;
     baseDmgMul *= (aircraftCfg.baseDmg ?? 1);
     fireRateMul *= (aircraftCfg.fireRate ?? 1);
     const armSkills = aircraftCfg.startSkills;
@@ -38,7 +40,8 @@ export function createPlayer(aircraftCfg, talentEffects, shopEffects) {
     base.startHp += (talentEffects.startHp || 0);
     base.invincibleTime += (talentEffects.invTime || 0);
     if (talentEffects.maxShield) base.maxShield += talentEffects.maxShield;
-    baseDmgMul *= (1 + (talentEffects.baseDmg || 0));
+    talentDmg += talentEffects.baseDmg || 0;
+    talentCrit += talentEffects.critAdd || 0;
     fireRateMul *= (talentEffects.fireRateMul || 1);
     if (talentEffects.startRange) {
       startSkills.range = (startSkills.range || 0) + Math.round(talentEffects.startRange / BULLET.rangePerLevel);
@@ -72,6 +75,8 @@ export function createPlayer(aircraftCfg, talentEffects, shopEffects) {
     maxShield: base.maxShield,
     baseHp: base.startHp,
     baseDmgMul,
+    talentDmg,
+    talentCrit,
     fireRateMul,
     buffs: { rapid: 0, speed: 0, freeze: 0, magnet: 0, double: 0, madHunt: 0, drop: 0, critboost: 0, knockback: 0 },
     skills: { ...startSkills },
@@ -231,7 +236,7 @@ export function removeOrbitBullet(player, ob) {
 export function getShootPattern(player) {
   const lvl = player.power;
   const dmgLv = player.skills.dmg || 0;
-  const baseDmg = Math.round((1 + dmgLv) * (player.baseDmgMul || 1));
+  const baseDmg = Math.round((1 + dmgLv + (player.talentDmg || 0)) * (player.baseDmgMul || 1));
   const dualLv = player.skills.dual || 0;
   const rapid = player.buffs.rapid > 0;
   const scatterLv = player.skills.scatter || 0;   // 散射：每次发射同时多发

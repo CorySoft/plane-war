@@ -71,8 +71,8 @@ export function fireBullet(angle, dmg, player, x, y, spd = BULLET.baseSpeed, isE
   const behaviors = getBulletBehaviors(player, isExplosion);
   const critLvl = player.skills.crit || 0;
   const critBuff = (player.buffs?.critboost || 0) > 0;
-  // 致命暴击 buff 期间必定暴击
-  const isCrit = critBuff || (critLvl > 0 && Math.random() < BULLET.critChance * critLvl);
+  const critChance = BULLET.critChance * critLvl + (player.talentCrit || 0);
+  const isCrit = critBuff || (critChance > 0 && Math.random() < critChance);
   // 暴击倍率：基础 2.5 + 致命暴击技能每级 +0.5 + 致命 buff 额外 +0.5
   const critMulti = BULLET.critMulti
     + 0.5 * (player.skills.critdmg || 0)
@@ -151,30 +151,72 @@ export function spawnSplitBullet(x, y, angle, dmg, color, parentR = 4) {
   return b;
 }
 
+/** 从对象池取出一发敌方子弹 */
+export function spawnHostileBullet(x, y, vx, vy, opts = {}) {
+  const b = allocBullet();
+  b.x = x; b.y = y;
+  b.vx = vx; b.vy = vy;
+  b.r = opts.r ?? 5;
+  b.baseR = b.r;
+  b.friendly = false;
+  b.color = opts.color || "#ff8fa3";
+  b.traveled = 0;
+  b.maxRange = opts.maxRange ?? 600;
+  b.life = opts.life ?? 6;
+  b.behaviors.clear();
+  b.pierceCount = 0; b.maxPierce = 0;
+  b.splitCount = 0; b.explosionRadius = 0;
+  b.isScatter = false; b.isCrit = false;
+  b._refire = false; b.accel = 0; b.homing = 0;
+  b.dmg = opts.dmg || 0;
+  pushBullet(b);
+  return b;
+}
+
 /** 创建敌方子弹 */
 export function spawnEnemyBullet(e, playerX, playerY, fireScale = 1) {
   const dx = playerX - e.x;
   const dy = playerY - e.y;
   const len = Math.hypot(dx, dy) || 1;
   const sp = (3 + Math.random() * 1.5) * fireScale;
-  const b = allocBullet();
-  b.x = e.x;
-  b.y = e.y + e.r * 0.5;
-  b.vx = (dx / len) * sp;
-  b.vy = (dy / len) * sp;
-  b.r = 5; b.baseR = 5;
-  b.friendly = false;
-  b.color = "#ff8fa3";
-  b.traveled = 0;
-  b.maxRange = 600;
-  b.life = 6;
-  b.behaviors.clear();
-  b.pierceCount = 0; b.maxPierce = 0;
-  b.splitCount = 0; b.explosionRadius = 0;
-  b.isScatter = false; b.isCrit = false;
-  b._refire = false; b.accel = 0;
-  pushBullet(b);
-  return b;
+  return spawnHostileBullet(e.x, e.y + e.r * 0.5, (dx / len) * sp, (dy / len) * sp, {
+    r: 5, color: "#ff8fa3", maxRange: 600, life: 6,
+  });
+}
+
+/** 激光敌机：三发平行快弹朝向玩家 */
+export function spawnLaserVolley(e, playerX, playerY, fireScale = 1) {
+  const dx = playerX - e.x;
+  const dy = playerY - e.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = dx / len, ny = dy / len;
+  const px = -ny, py = nx;
+  const sp = (8.5 + Math.random() * 1.2) * fireScale;
+  const shots = [];
+  for (let i = -1; i <= 1; i++) {
+    shots.push(spawnHostileBullet(
+      e.x + px * i * 11,
+      e.y + e.r * 0.5 + py * i * 11,
+      nx * sp, ny * sp,
+      { r: 3.5, color: "#ff4444", maxRange: 720, life: 2.4 },
+    ));
+  }
+  return shots;
+}
+
+/**
+ * 穿透弹命中后消耗一层穿透；耗尽或非穿透则销毁。
+ * @returns {boolean} 子弹是否已移除
+ */
+export function applyPierceOrRemove(b) {
+  if (!b) return true;
+  if (b.behaviors.has("penetrate") && b.pierceCount < b.maxPierce) {
+    b.pierceCount++;
+    return false;
+  }
+  if (b.isScatter) return false;
+  removeBullet(b);
+  return true;
 }
 
 export function updateBullets(dt) {

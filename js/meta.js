@@ -6,28 +6,84 @@ import { META, ACHIEVEMENTS, DAILY_QUESTS, SKILLS, SHOP_ITEMS, getShopItemCost, 
 
 const STORAGE_KEY = "planeWarMeta";
 
-let metaData = {
-  stardust: 0,
-  best: 0,
-  unlockedAircraft: ["falcon"],
-  purchasedTalents: [],
-  totalRuns: 0,
-  totalKills: 0,
-  totalBosses: 0,
-  totalPowerups: 0,
-  totalStardustEarned: 0,
-  selectedAircraft: "falcon",
-  discoveredSkills: [],   // 技能图鉴：历史上习得过的技能 id
-  discoveredPowerups: [], // 道具图鉴：历史上拾取过的道具 id
-  shopLevels: {},        // 系统商城：各道具已购买等级 { id: level }
-  achievements: [],       // 已达成成就 id（一次性）
-  quests: null,           // { date, progress:{kills,score,runs,boss,powerups}, claimed:[] }
-};
+function defaultMeta() {
+  return {
+    stardust: 0,
+    best: 0,
+    unlockedAircraft: ["falcon"],
+    purchasedTalents: [],
+    totalRuns: 0,
+    totalKills: 0,
+    totalBosses: 0,
+    totalPowerups: 0,
+    totalStardustEarned: 0,
+    selectedAircraft: "falcon",
+    discoveredSkills: [],   // 技能图鉴：历史上习得过的技能 id
+    discoveredPowerups: [], // 道具图鉴：历史上拾取过的道具 id
+    shopLevels: {},         // 系统商城：各道具已购买等级 { id: level }
+    achievements: [],       // 已达成成就 id（一次性）
+    quests: null,           // { date, progress:{kills,score,runs,boss,powerups}, claimed:[] }
+    settings: { sfxMuted: false, musicMuted: false, skipTutorial: false },
+  };
+}
+
+let metaData = defaultMeta();
+
+function sanitizeMeta(raw) {
+  const next = defaultMeta();
+  if (!raw || typeof raw !== "object") return next;
+  Object.assign(next, raw);
+  if (!Array.isArray(next.unlockedAircraft) || next.unlockedAircraft.length === 0) {
+    next.unlockedAircraft = ["falcon"];
+  }
+  if (!next.unlockedAircraft.includes("falcon")) next.unlockedAircraft.unshift("falcon");
+  if (!Array.isArray(next.purchasedTalents)) next.purchasedTalents = [];
+  if (!Array.isArray(next.discoveredSkills)) next.discoveredSkills = [];
+  if (!Array.isArray(next.discoveredPowerups)) next.discoveredPowerups = [];
+  if (!next.shopLevels || typeof next.shopLevels !== "object" || Array.isArray(next.shopLevels)) next.shopLevels = {};
+  if (!Array.isArray(next.achievements)) next.achievements = [];
+  if (typeof next.stardust !== "number" || !Number.isFinite(next.stardust) || next.stardust < 0) next.stardust = 0;
+  if (typeof next.best !== "number" || !Number.isFinite(next.best) || next.best < 0) next.best = 0;
+  const s = next.settings && typeof next.settings === "object" ? next.settings : {};
+  next.settings = {
+    sfxMuted: !!s.sfxMuted,
+    musicMuted: !!s.musicMuted,
+    skipTutorial: !!s.skipTutorial,
+  };
+  return next;
+}
+
+export function getSettings() {
+  if (!metaData.settings) metaData.settings = { sfxMuted: false, musicMuted: false, skipTutorial: false };
+  return metaData.settings;
+}
+
+export function setSetting(key, value) {
+  const s = getSettings();
+  if (!(key in s)) return false;
+  s[key] = !!value;
+  saveMeta();
+  return true;
+}
+
+export function toggleSetting(key) {
+  const s = getSettings();
+  if (!(key in s)) return false;
+  s[key] = !s[key];
+  saveMeta();
+  return s[key];
+}
+
+export function resetMeta() {
+  metaData = defaultMeta();
+  try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+  return metaData;
+}
 
 export function loadMeta() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) Object.assign(metaData, JSON.parse(raw));
+    if (raw) metaData = sanitizeMeta(JSON.parse(raw));
   } catch (e) {}
   return metaData;
 }

@@ -2,9 +2,12 @@
  * ui.js — 菜单 / 结束 / 升级选择 / 暂停 / 伤害飘字
  * =========================================================== */
 
-import { W, H, STATE, TAU, SKILLS, POWERUP_DEFS, SHOP_ITEMS, getShopItemCost, ACHIEVEMENTS, DAILY_QUESTS } from "./config.js";
+import { W, H, STATE, TAU, SKILLS, POWERUP_DEFS, SHOP_ITEMS, getShopItemCost, ACHIEVEMENTS, DAILY_QUESTS, META } from "./config.js";
 import { clamp, roundRect, setf } from "./utils.js";
-import { getStardust, getQuestView, getAchievementView, getDiscoveredPowerups, getShopLevels, getShopLevel } from "./meta.js";
+import {
+  getStardust, getQuestView, getAchievementView, getDiscoveredPowerups, getShopLevels, getShopLevel,
+  isAircraftUnlocked, getSelectedAircraft, isTalentPurchased, getSettings,
+} from "./meta.js";
 
 // ---------- 伤害飘字 ----------
 let damageNumbers = [];
@@ -108,9 +111,18 @@ let btnShopRect = null;          // 主菜单「系统商城」按钮
 let btnShopBackRect = null;      // 商城页「返回」按钮
 let btnShopBuyRects = [];        // 商城页购买按钮
 let btnClearCacheRect = null;    // 主菜单「清除缓存」按钮
+let btnHangarRect = null;
+let btnHangarBackRect = null;
+let btnTalentRect = null;
+let btnTalentBackRect = null;
+let btnSettingsRect = null;
+let btnSettingsBackRect = null;
 let skillCards = [];
 let difficultyRects = {};
 let questClaimRects = [];       // 任务页各「领取」按钮
+let hangarCardRects = [];
+let talentCardRects = [];
+let settingToggleRects = [];
 
 // 详情卡片：点击图鉴卡片时弹出详细信息
 let detailCard = null;  // { type, data }
@@ -131,7 +143,7 @@ let codexCardRects = [];        // 技能图鉴 [{rect, skill, got}]
 let powerupCardRects = [];      // 道具图鉴 [{rect, key, def, got}]
 let achieveCardRects = [];      // 成就 [{rect, def, achieved}]
 
-// 主菜单子页面：main=主界面 / codex=技能图鉴 / achieve=成就·每日任务
+// 主菜单子页面：main / codex / achieve / powerupCodex / shop / hangar / talent / settings
 let menuPage = "main";
 export const setMenuPage = p => { menuPage = p; };
 export const getMenuPage = () => menuPage;
@@ -164,46 +176,50 @@ export function getClearCacheButton() { return btnClearCacheRect; }
 export function getCodexCardRects() { return codexCardRects; }
 export function getPowerupCardRects() { return powerupCardRects; }
 export function getAchieveCardRects() { return achieveCardRects; }
+export function getHangarButton() { return btnHangarRect; }
+export function getHangarBackButton() { return btnHangarBackRect; }
+export function getTalentButton() { return btnTalentRect; }
+export function getTalentBackButton() { return btnTalentBackRect; }
+export function getSettingsButton() { return btnSettingsRect; }
+export function getSettingsBackButton() { return btnSettingsBackRect; }
+export function getHangarCards() { return hangarCardRects; }
+export function getTalentCards() { return talentCardRects; }
+export function getSettingToggles() { return settingToggleRects; }
 
 export function drawMenu(ctx, best, difficultyKey, presets, discovered = []) {
   ctx.fillStyle = "rgba(5,7,15,.72)";
   ctx.fillRect(0, 0, W, H);
 
-  // 技能图鉴子页面
-  if (menuPage === "codex") {
-    btnAchieveRect = null;
-    drawSkillCodex(ctx, discovered);
-    return;
-  }
-  // 成就·每日任务子页面
-  if (menuPage === "achieve") {
-    btnCodexRect = null;
-    btnAchieveRect = null;
-    drawAchieve(ctx);
-    return;
-  }
-  // 道具图鉴子页面
-  if (menuPage === "powerupCodex") {
-    btnCodexRect = null;
-    btnAchieveRect = null;
-    btnPowerupCodexRect = null;
-    drawPowerupCodex(ctx, getDiscoveredPowerups());
-    return;
-  }
-  // 系统商城子页面
-  if (menuPage === "shop") {
-    btnCodexRect = null;
-    btnAchieveRect = null;
-    btnShopRect = null;
-    drawShop(ctx);
-    return;
-  }
+  hangarCardRects = [];
+  talentCardRects = [];
+  settingToggleRects = [];
+  questClaimRects = [];
+  codexCardRects = [];
+  powerupCardRects = [];
+  achieveCardRects = [];
+  btnHangarRect = btnHangarBackRect = null;
+  btnTalentRect = btnTalentBackRect = null;
+  btnSettingsRect = btnSettingsBackRect = null;
+  btnCodexRect = btnCodexBackRect = null;
+  btnAchieveRect = btnAchieveBackRect = null;
+  btnPowerupCodexRect = btnPowerupCodexBackRect = null;
+  btnShopRect = btnShopBackRect = null;
+  btnShopBuyRects = [];
+  btnClearCacheRect = null;
+
+  if (menuPage === "codex") { drawSkillCodex(ctx, discovered); return; }
+  if (menuPage === "achieve") { drawAchieve(ctx); return; }
+  if (menuPage === "hangar") { drawHangar(ctx); return; }
+  if (menuPage === "talent") { drawTalent(ctx); return; }
+  if (menuPage === "settings") { drawSettings(ctx); return; }
+  if (menuPage === "powerupCodex") { drawPowerupCodex(ctx, getDiscoveredPowerups()); return; }
+  if (menuPage === "shop") { drawShop(ctx); return; }
 
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   ctx.fillStyle = "#5ee6ff";
-  setf(ctx, "bold 56px 'Courier New', monospace");
-  ctx.fillText("飞机大战", W / 2, H * 0.16);
+  setf(ctx, "bold 52px 'Courier New', monospace");
+  ctx.fillText("飞机大战", W / 2, H * 0.08);
 
   // 清除缓存按钮（右上角）
   const ccx = W - 60, ccy = 20, ccw = 40, cch = 30;
@@ -218,54 +234,54 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = []) {
   ctx.fillText("清除缓存", ccx + ccw / 2, ccy + cch / 2 + 1);
   btnClearCacheRect = { x: ccx, y: ccy, w: ccw, h: cch };
 
-  ctx.fillStyle = "rgba(255,255,255,.75)";
-  setf(ctx, "15px 'sans-serif'");
-  ctx.fillText("方向键 / A D 移动　·　自动射击", W / 2, H * 0.27);
+  ctx.fillStyle = "rgba(255,255,255,.7)";
+  setf(ctx, "14px 'sans-serif'");
+  ctx.fillText("方向键 / A D 移动 · 自动射击 · 升级三选一", W / 2, H * 0.175);
 
-  ctx.fillStyle = "rgba(255,255,255,.6)";
-  setf(ctx, "13px 'sans-serif'");
-  ctx.fillText("技能与道具详情 → 图鉴", W / 2, H * 0.31);
+  ctx.fillStyle = "#d0a6ff";
+  setf(ctx, "bold 15px 'sans-serif'");
+  ctx.fillText("星尘  " + getStardust(), W / 2, H * 0.215);
 
   if (best > 0) {
     ctx.fillStyle = "#ffd166";
-    setf(ctx, "bold 16px 'Courier New', monospace");
-    ctx.fillText("最高分  " + best, W / 2, H * 0.37);
+    setf(ctx, "bold 15px 'Courier New', monospace");
+    ctx.fillText("最高分  " + best, W / 2, H * 0.25);
   }
 
-  // ---- 难度选择 ----
+  const craft = META.aircraft[getSelectedAircraft()] || META.aircraft.falcon;
+  ctx.fillStyle = "rgba(94,230,255,.85)";
+  setf(ctx, "13px 'sans-serif'");
+  ctx.fillText("出战  " + craft.name + " · " + craft.desc, W / 2, H * 0.285);
+
   const keys = Object.keys(presets);
   const dw = 80, dh = 30, gap = 8;
   const totalW = keys.length * dw + (keys.length - 1) * gap;
   const startX = W / 2 - totalW / 2;
-  const dy = H * 0.44;
+  const dy = H * 0.33;
   difficultyRects = {};
   for (let i = 0; i < keys.length; i++) {
     const k = keys[i];
     const p = presets[k];
     const x = startX + i * (dw + gap);
     const selected = k === difficultyKey;
-    // 背景
     ctx.fillStyle = selected ? p.color : "rgba(20,28,48,.85)";
     ctx.strokeStyle = p.color;
     ctx.lineWidth = selected ? 2.5 : 1.5;
     roundRect(ctx, x, dy, dw, dh, 10);
     ctx.fill(); ctx.stroke();
-    // 文字
     ctx.fillStyle = selected ? "#05070f" : p.color;
     setf(ctx, "bold 15px 'sans-serif'");
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText(p.name, x + dw / 2, dy + dh / 2 + 1);
     difficultyRects[k] = { x, y: dy, w: dw, h: dh };
   }
-  // 难度说明
   const cur = presets[difficultyKey];
   ctx.textAlign = "center"; ctx.textBaseline = "top";
   ctx.fillStyle = "rgba(255,255,255,.55)";
   setf(ctx, "12px 'sans-serif'");
-  ctx.fillText(cur.desc, W / 2, dy + dh + 8);
+  ctx.fillText(cur.desc, W / 2, dy + dh + 10);
 
-  // 开始按钮
-  const bx = W / 2 - 80, by = H * 0.55, bw = 160, bh = 42;
+  const bx = W / 2 - 90, by = H * 0.46, bw = 180, bh = 50;
   ctx.fillStyle = "rgba(76,201,240,.15)";
   ctx.strokeStyle = "#4cc9f0";
   ctx.lineWidth = 2;
@@ -277,63 +293,41 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = []) {
   ctx.fillText("开始游戏", W / 2, by + bh / 2);
   btnStartRect = { x: bx, y: by, w: bw, h: bh };
 
-  // 技能图鉴按钮
-  const cbx = W / 2 - 80, cby = H * 0.63, cbw = 160, cbh = 38;
-  ctx.fillStyle = "rgba(255,217,59,.10)";
-  ctx.strokeStyle = "#ffd93b";
-  ctx.lineWidth = 1.5;
-  roundRect(ctx, cbx, cby, cbw, cbh, 11);
-  ctx.fill(); ctx.stroke();
-  ctx.fillStyle = "#ffd93b";
-  setf(ctx, "bold 16px 'sans-serif'");
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText("技能图鉴  " + discovered.length + "/" + SKILLS.length, W / 2, cby + cbh / 2 + 1);
-  btnCodexRect = { x: cbx, y: cby, w: cbw, h: cbh };
-  btnCodexBackRect = null;
-
-  // 道具图鉴按钮
-  const pwx = W / 2 - 80, pwy = H * 0.71, pw = 160, ph = 38;
-  ctx.fillStyle = "rgba(255,107,107,.10)";
-  ctx.strokeStyle = "#ff6b6b";
-  ctx.lineWidth = 1.5;
-  roundRect(ctx, pwx, pwy, pw, ph, 11);
-  ctx.fill(); ctx.stroke();
-  ctx.fillStyle = "#ff6b6b";
-  setf(ctx, "bold 16px 'sans-serif'");
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  const _allP = Object.keys(POWERUP_DEFS).length;
-  ctx.fillText("道具图鉴  " + (getDiscoveredPowerups().length) + "/" + _allP, W / 2, pwy + ph / 2 + 1);
-  btnPowerupCodexRect = { x: pwx, y: pwy, w: pw, h: ph };
-  btnPowerupCodexBackRect = null;
-
-  // 系统商城按钮
-  const spx = W / 2 - 80, spy = H * 0.80, spw = 160, sph = 38;
-  ctx.fillStyle = "rgba(208,166,255,.10)";
-  ctx.strokeStyle = "#d0a6ff";
-  ctx.lineWidth = 1.5;
-  roundRect(ctx, spx, spy, spw, sph, 11);
-  ctx.fill(); ctx.stroke();
-  ctx.fillStyle = "#d0a6ff";
-  setf(ctx, "bold 16px 'sans-serif'");
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText("系统商城", W / 2, spy + sph / 2 + 1);
-  btnShopRect = { x: spx, y: spy, w: spw, h: sph };
-  btnShopBackRect = null;
-
-  // 成就 · 每日任务按钮
-  const abx = W / 2 - 90, aby = H * 0.88, abw = 180, abh = 38;
-  ctx.fillStyle = "rgba(124,252,0,.08)";
-  ctx.strokeStyle = "#7CFC00";
-  ctx.lineWidth = 1.5;
-  roundRect(ctx, abx, aby, abw, abh, 11);
-  ctx.fill(); ctx.stroke();
-  ctx.fillStyle = "#7CFC00";
-  setf(ctx, "bold 17px 'sans-serif'");
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText("成就 · 每日任务", W / 2, aby + abh / 2 + 1);
-  btnAchieveRect = { x: abx, y: aby, w: abw, h: abh };
-  btnAchieveBackRect = null;
-  questClaimRects = [];
+  // 导航瓦片：机库 / 天赋 / 图鉴 / 成就 / 设置 / 道具图鉴 / 商城
+  const nav = [
+    ["hangar", "机库", "#66e0ff"],
+    ["talent", "天赋", "#c8a6ff"],
+    ["codex", "图鉴 " + discovered.length + "/" + SKILLS.length, "#ffd93b"],
+    ["achieve", "成就任务", "#7CFC00"],
+    ["settings", "设置", "#9be8ff"],
+    ["powerupCodex", "道具图鉴", "#ff6b6b"],
+    ["shop", "系统商城", "#d0a6ff"],
+  ];
+  const nw = 148, nh = 40, ng = 8;
+  const nStartY = H * 0.56;
+  for (let i = 0; i < nav.length; i++) {
+    const [id, label, color] = nav[i];
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const nx = i === nav.length - 1 ? W / 2 - nw / 2 : W / 2 - nw - ng / 2 + col * (nw + ng);
+    const ny = nStartY + row * (nh + ng);
+    ctx.fillStyle = "rgba(20,28,48,.88)";
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, nx, ny, nw, nh, 10);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = color;
+    setf(ctx, "bold 15px 'sans-serif'");
+    ctx.fillText(label, nx + nw / 2, ny + nh / 2 + 1);
+    const rect = { x: nx, y: ny, w: nw, h: nh };
+    if (id === "hangar") btnHangarRect = rect;
+    else if (id === "talent") btnTalentRect = rect;
+    else if (id === "codex") btnCodexRect = rect;
+    else if (id === "achieve") btnAchieveRect = rect;
+    else if (id === "settings") btnSettingsRect = rect;
+    else if (id === "powerupCodex") btnPowerupCodexRect = rect;
+    else btnShopRect = rect;
+  }
 }
 
 /** 技能图鉴：主菜单子页面，已习得的技能点亮，未习得置灰 */
@@ -482,19 +476,22 @@ function drawShop(ctx) {
     if (!maxed) btnShopBuyRects.push({ x, y, w: cardW, h: cardH, id: item.id });
   }
 
-  // 返回按钮
-  const bw = 180, bx = W / 2 - bw / 2, by = H * 0.90, bh = 44;
+  btnShopBackRect = drawBackButton(ctx);
+  btnShopRect = null;
+}
+
+function drawBackButton(ctx, label = "← 返回主菜单") {
+  const bw = 180, bx = W / 2 - bw / 2, by = H * 0.92, bh = 40;
   ctx.fillStyle = "rgba(94,230,255,.12)";
   ctx.strokeStyle = "#5ee6ff";
   ctx.lineWidth = 2;
   roundRect(ctx, bx, by, bw, bh, 11);
   ctx.fill(); ctx.stroke();
   ctx.fillStyle = "#5ee6ff";
-  setf(ctx, "bold 17px 'sans-serif'");
+  setf(ctx, "bold 16px 'sans-serif'");
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText("← 返回主菜单", W / 2, by + bh / 2 + 1);
-  btnShopBackRect = { x: bx, y: by, w: bw, h: bh };
-  btnShopRect = null;
+  ctx.fillText(label, W / 2, by + bh / 2 + 1);
+  return { x: bx, y: by, w: bw, h: bh };
 }
 
 /** 道具图鉴：主菜单子页面，已拾取的道具点亮，未拾取置灰 */
@@ -560,17 +557,7 @@ function drawPowerupCodex(ctx, discovered) {
     powerupCardRects.push({ x: { x, y, w: cardW, h: cardH }, key: k, def, got });
   }
 
-  const bw = 180, bx = W / 2 - bw / 2, by = H * 0.90, bh = 44;
-  ctx.fillStyle = "rgba(255,107,107,.12)";
-  ctx.strokeStyle = "#ff6b6b";
-  ctx.lineWidth = 2;
-  roundRect(ctx, bx, by, bw, bh, 11);
-  ctx.fill(); ctx.stroke();
-  ctx.fillStyle = "#ff6b6b";
-  setf(ctx, "bold 17px 'sans-serif'");
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText("← 返回主菜单", W / 2, by + bh / 2 + 1);
-  btnPowerupCodexBackRect = { x: bx, y: by, w: bw, h: bh };
+  btnPowerupCodexBackRect = drawBackButton(ctx);
   btnPowerupCodexRect = null;
 }
 
@@ -612,6 +599,143 @@ export function powerupDescFull(k) {
     critboost: "8 秒内必定暴击且暴击倍率提升",
     knockback: "8 秒内子弹附带击退效果",
   }[k] || "";
+}
+
+function drawHangar(ctx) {
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#66e0ff";
+  setf(ctx, "bold 32px 'sans-serif'");
+  ctx.fillText("机  库", W / 2, H * 0.05);
+  ctx.fillStyle = "#d0a6ff";
+  setf(ctx, "bold 15px 'sans-serif'");
+  ctx.fillText("星尘  " + getStardust(), W / 2, H * 0.105);
+
+  const ids = Object.keys(META.aircraft);
+  const selected = getSelectedAircraft();
+  hangarCardRects = [];
+  const cols = 2, pad = 14, gap = 8;
+  const cardW = (W - pad * 2 - gap) / cols;
+  const cardH = 118;
+  const startY = H * 0.15;
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    const cfg = META.aircraft[id];
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = pad + col * (cardW + gap);
+    const y = startY + row * (cardH + gap);
+    const unlocked = isAircraftUnlocked(id);
+    const on = selected === id;
+    ctx.fillStyle = on ? "rgba(24,48,72,.95)" : "rgba(16,22,38,.9)";
+    ctx.strokeStyle = on ? "#66e0ff" : unlocked ? "rgba(255,255,255,.28)" : "rgba(255,255,255,.14)";
+    ctx.lineWidth = on ? 2.2 : 1.2;
+    roundRect(ctx, x, y, cardW, cardH, 12);
+    ctx.fill(); ctx.stroke();
+
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillStyle = on ? "#66e0ff" : unlocked ? "#fff" : "rgba(255,255,255,.4)";
+    setf(ctx, "bold 16px 'sans-serif'");
+    ctx.fillText(cfg.name, x + cardW / 2, y + 10);
+    ctx.fillStyle = "rgba(255,255,255,.55)";
+    setf(ctx, "11px 'sans-serif'");
+    ctx.fillText(cfg.desc, x + cardW / 2, y + 34);
+    ctx.fillText("速" + cfg.speed + " 伤×" + cfg.baseDmg + " 射×" + cfg.fireRate, x + cardW / 2, y + 54);
+    ctx.fillText("生命 " + cfg.startHp, x + cardW / 2, y + 72);
+    ctx.fillStyle = unlocked ? (on ? "#7CFC00" : "#ffd166") : "#d0a6ff";
+    setf(ctx, "bold 13px 'sans-serif'");
+    let tag;
+    if (on) tag = "出战中";
+    else if (unlocked) tag = "选择";
+    else tag = cfg.cost + " 星尘";
+    ctx.fillText(tag, x + cardW / 2, y + 92);
+    hangarCardRects.push({ id, x, y, w: cardW, h: cardH, unlocked, cost: cfg.cost });
+  }
+  btnHangarBackRect = drawBackButton(ctx);
+}
+
+function drawTalent(ctx) {
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#c8a6ff";
+  setf(ctx, "bold 32px 'sans-serif'");
+  ctx.fillText("天  赋", W / 2, H * 0.04);
+  ctx.fillStyle = "#d0a6ff";
+  setf(ctx, "bold 15px 'sans-serif'");
+  ctx.fillText("星尘  " + getStardust(), W / 2, H * 0.09);
+
+  const branches = [
+    ["offense", "进攻", "#ffd166"],
+    ["defense", "防御", "#66e0ff"],
+    ["utility", "辅助", "#8ad4ff"],
+  ];
+  talentCardRects = [];
+  const colW = (W - 28) / 3;
+  for (let c = 0; c < branches.length; c++) {
+    const [branch, title, color] = branches[c];
+    const x = 10 + c * colW;
+    ctx.fillStyle = color;
+    setf(ctx, "bold 14px 'sans-serif'");
+    ctx.fillText(title, x + colW / 2, H * 0.135);
+    const list = META.talents.filter(t => t.branch === branch);
+    for (let i = 0; i < list.length; i++) {
+      const t = list[i];
+      const y = H * 0.17 + i * 112;
+      const bought = isTalentPurchased(t.id);
+      const locked = t.requires && !isTalentPurchased(t.requires);
+      ctx.fillStyle = bought ? "rgba(28,36,58,.95)" : "rgba(13,16,26,.9)";
+      ctx.strokeStyle = bought ? color : locked ? "rgba(255,255,255,.18)" : color;
+      ctx.lineWidth = bought ? 2 : 1.2;
+      roundRect(ctx, x + 4, y, colW - 12, 104, 10);
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = bought ? color : locked ? "rgba(255,255,255,.35)" : "#fff";
+      setf(ctx, "bold 12px 'sans-serif'");
+      ctx.fillText(t.name, x + colW / 2, y + 12);
+      ctx.fillStyle = "rgba(255,255,255,.55)";
+      setf(ctx, "10px 'sans-serif'");
+      ctx.fillText(t.desc, x + colW / 2, y + 36);
+      ctx.fillStyle = bought ? "#7CFC00" : locked ? "rgba(255,255,255,.3)" : "#ffd166";
+      setf(ctx, "bold 12px 'sans-serif'");
+      ctx.fillText(bought ? "已解锁" : (locked ? "需前置" : t.cost + " 星尘"), x + colW / 2, y + 72);
+      talentCardRects.push({ id: t.id, x: x + 4, y, w: colW - 12, h: 104, bought, locked, cost: t.cost });
+    }
+  }
+  btnTalentBackRect = drawBackButton(ctx);
+}
+
+function drawSettings(ctx) {
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#9be8ff";
+  setf(ctx, "bold 32px 'sans-serif'");
+  ctx.fillText("设  置", W / 2, H * 0.08);
+  const s = getSettings();
+  const rows = [
+    ["sfxMuted", "音效", s.sfxMuted ? "关闭" : "开启"],
+    ["musicMuted", "音乐", s.musicMuted ? "关闭" : "开启"],
+    ["skipTutorial", "跳过教程", s.skipTutorial ? "是" : "否"],
+  ];
+  settingToggleRects = [];
+  for (let i = 0; i < rows.length; i++) {
+    const [key, label, val] = rows[i];
+    const y = H * 0.22 + i * 90;
+    const x = 40, w = W - 80, h = 72;
+    ctx.fillStyle = "rgba(20,28,48,.92)";
+    ctx.strokeStyle = "rgba(155,232,255,.45)";
+    ctx.lineWidth = 1.5;
+    roundRect(ctx, x, y, w, h, 12);
+    ctx.fill(); ctx.stroke();
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#fff";
+    setf(ctx, "bold 18px 'sans-serif'");
+    ctx.fillText(label, x + 22, y + 16);
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#9be8ff";
+    ctx.fillText(val, x + w - 22, y + 16);
+    settingToggleRects.push({ key, x, y, w, h });
+  }
+  btnSettingsBackRect = drawBackButton(ctx);
 }
 
 export function drawGameOver(ctx, score, best, isNewBest = false) {
@@ -839,8 +963,8 @@ export function drawPause(ctx, player) {
     const rapidFireRate = baseFireRate * 0.5;
     const dps = Math.round((1 + (player.skills.dmg || 0)) / baseFireRate * 10) / 10;
     const moveSpd = Math.round(player.speed * (1 + 0.12 * (player.skills.move || 0)) * 10) / 10;
-    const levelMul = 1 + ((player.level || 1) - 1) * 0.10;
-    const rangeM = Math.round((250 + (player.skills.range || 0) * 150) * levelMul / 25);
+    const rangePx = Math.min(250 + (player.skills.range || 0) * 50 + ((player.level || 1) - 1) * 2.5, H + 80);
+    const rangeM = Math.round(rangePx / 25);
 
     const stats = [
       ["♥ 生命", player._maxLivesUpdate ? (player.baseHp + (player.skills.maxhp || 0)) : player.baseHp, "#ff6b9d"],
@@ -848,7 +972,7 @@ export function drawPause(ctx, player) {
       ["🔥 射速", (baseFireRate * 1000).toFixed(0) + "ms", "#ffe066"],
       ["🚀 移速", moveSpd, "#9be8ff"],
       ["📏 射程", rangeM + "m", "#88ddff"],
-      ["🎯 暴击", ((player.skills.crit || 0) * 12) + "%", "#ff8fa3"],
+      ["🎯 暴击", Math.round(((player.skills.crit || 0) * 12 + (player.talentCrit || 0) * 100)) + "%", "#ff8fa3"],
     ];
 
     let sy = py;

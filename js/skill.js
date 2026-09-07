@@ -3,6 +3,7 @@
  * =========================================================== */
 
 import { SKILLS } from "./config.js";
+import { shuffle } from "./utils.js";
 import { sfx } from "./audio.js";
 import { spawnParticles } from "./particles.js";
 import { discoverSkill } from "./meta.js";
@@ -31,8 +32,8 @@ export function generateSkillChoices(playerSkills) {
 
   const fresh = pool.filter(([s]) => (playerSkills[s.id] || 0) === 0);
   const rest = pool.filter(([s]) => (playerSkills[s.id] || 0) > 0);
-  const freshShuffled = [...fresh].sort(() => Math.random() - 0.5);
-  const restShuffled = [...rest].sort(() => Math.random() - 0.5);
+  const freshShuffled = shuffle(fresh);
+  const restShuffled = shuffle(rest);
 
   const choices = [];
   const used = new Set();
