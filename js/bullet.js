@@ -225,6 +225,7 @@ export function updateBullets(dt) {
   const next = [];
   for (let i = 0; i < bullets.length; i++) {
     const b = bullets[i];
+    if (!b) continue;
 
     // 天基武器：子弹出膛后不断加速
     if (b.accel > 0 && b.friendly && !b.isScatter) {
@@ -261,6 +262,7 @@ export function drawBullets(ctx) {
   // 按颜色分组：同色子弹共享一次 fillStyle / shadowColor 设置
   const groups = new Map();
   for (const b of bullets) {
+    if (!b) continue;
     let arr = groups.get(b.color);
     if (!arr) { arr = []; groups.set(b.color, arr); }
     arr.push(b);
@@ -270,6 +272,7 @@ export function drawBullets(ctx) {
     if (useShadow) ctx.shadowColor = color;
     // 友方矩形与敌方圆形分离绘制，减少路径切换
     for (const b of arr) {
+      if (!b) continue;
       if (b.friendly) {
         const bw = 5, bh = 16;
         ctx.fillRect(b.x - bw / 2, b.y - bh / 2, bw, bh);
@@ -278,6 +281,7 @@ export function drawBullets(ctx) {
     ctx.beginPath();
     let hasArc = false;
     for (const b of arr) {
+      if (!b) continue;
       if (!b.friendly) { ctx.moveTo(b.x + b.r, b.y); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); hasArc = true; }
     }
     if (hasArc) ctx.fill();
@@ -289,13 +293,15 @@ export function clearBullets(keepFriendly = false) {
   if (keepFriendly) {
     // 释放敌方子弹回池，保留友方
     for (let i = bullets.length - 1; i >= 0; i--) {
-      if (!bullets[i].friendly) {
-        freeBullet(bullets[i]);
+      const b = bullets[i];
+      if (!b) continue;
+      if (!b.friendly) {
+        freeBullet(b);
         bullets.splice(i, 1);
       }
     }
   } else {
-    for (const b of bullets) freeBullet(b);
+    for (const b of bullets) { if (b) freeBullet(b); }
     bullets = [];
   }
 }
@@ -303,6 +309,7 @@ export function clearBullets(keepFriendly = false) {
 /** 屏上是否仍有玩家主弹（非散射弹）在飞行 */
 export function hasPlayerMainBullet() {
   for (const b of bullets) {
+    if (!b) continue;
     if (b.friendly && !b.isScatter) return true;
   }
   return false;
@@ -316,6 +323,7 @@ export function hasPlayerMainBullet() {
 export function maxMainBulletTraveled() {
   let m = 0;
   for (const b of bullets) {
+    if (!b) continue;
     if (b.friendly && !b.isScatter && !b._refire && b.traveled > m) m = b.traveled;
   }
   return m;
@@ -324,6 +332,7 @@ export function maxMainBulletTraveled() {
 /** 把当前所有尚未触发的主弹标记为「已触发」（下一波射击发出后调用） */
 export function markMainBulletsTriggered() {
   for (const b of bullets) {
+    if (!b) continue;
     if (b.friendly && !b.isScatter && !b._refire) b._refire = true;
   }
 }

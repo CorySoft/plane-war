@@ -4,6 +4,7 @@
 
 import { W, H, STATE, BULLET as BCFG, TAU, DIFFICULTY_PRESETS, ENEMY_LEVEL, POWERUP_DROP, META, computeViewport, setViewport } from "./config.js";
 import { clamp, rand, hypot, setf } from "./utils.js";
+import { glowText } from "./theme.js";
 import { sfx, startMusic, stopMusic, initAudio, setSfxMuted, setMusicMuted } from "./audio.js";
 import { initInput, bindTouchButtons, getStick, isStickActive, setDifficulty as setPlayerDifficulty, isEasyMode, getEasyTouch } from "./input.js";
 import { spawnParticles, updateParticles, drawParticles, clearParticles } from "./particles.js";
@@ -83,6 +84,7 @@ function resize() {
 }
 window.addEventListener("resize", resize);
 resize();
+initStars();   // 启动即铺好星野，主菜单背后不是死黑
 
 // ---------- 游戏变量 ----------
 let score = 0;
@@ -238,6 +240,7 @@ function update(dt) {
     // 疯狂追击：全屏追踪弹转向最近敌机
     if (player.buffs.madHunt > 0 && enemies.length > 0) {
       for (const b of bullets) {
+        if (!b) continue;
         if (!b.friendly || !b.homing) continue;
         let best = null, bd = Infinity;
         for (const e of enemies) {
@@ -409,6 +412,7 @@ function update(dt) {
 function checkCollisions() {
   for (let i = enemies.length - 1; i >= 0; i--) {
     const e = enemies[i];
+    if (!e) continue;
 
     // 玩家 vs 敌机（冰冻中的敌机冻结不动、不造成伤害，但仍可被击毁）
     if (e.frozen <= 0 && player.invincible <= 0) {
@@ -433,6 +437,7 @@ function checkCollisions() {
     // 子弹 vs 敌机
     for (let j = bullets.length - 1; j >= 0; j--) {
       const b = bullets[j];
+      if (!b) continue;
       if (!b.friendly) continue;
       const dist = hypot(b.x, b.y, e.x, e.y);
       if (dist < e.r + b.r) {
@@ -448,8 +453,10 @@ function checkCollisions() {
   if (orbit.length > 0) {
     outer: for (let oi = orbit.length - 1; oi >= 0; oi--) {
       const ob = orbit[oi];
+      if (!ob) continue;
       for (let i = enemies.length - 1; i >= 0; i--) {
         const e = enemies[i];
+        if (!e) continue;
         if (e.frozen > 0) continue;
         const dist = hypot(ob.x, ob.y, e.x, e.y);
         if (dist < e.r + 10) {
@@ -464,6 +471,7 @@ function checkCollisions() {
   // 敌方子弹 vs 玩家
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
+    if (!b) continue;
     if (b.friendly) continue;
     if (player.invincible > 0) continue;
     const dist = hypot(player.x, player.y, b.x, b.y);
@@ -1110,42 +1118,73 @@ function startPlaying() {
 }
 
 // ---------- 绘制 ----------
+/** 深空背景：基色渐变 + 漂移星云 + 底部地平线微光 + 暗角 */
+function paintSpace(ctx, frame = 0) {
+  const t = frame * 0.0012;
+  const base = ctx.createLinearGradient(0, 0, 0, H);
+  base.addColorStop(0, "#070b1f");
+  base.addColorStop(0.55, "#0b1235");
+  base.addColorStop(1, "#060a19");
+  ctx.fillStyle = base;
+  ctx.fillRect(-10, -10, W + 20, H + 20);
+
+  const nebula = (x, y, r, c0) => {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, c0);
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  };
+  nebula(W * 0.22 + Math.sin(t) * 22, H * 0.22, H * 0.45, "rgba(52,96,210,.20)");
+  nebula(W * 0.85 + Math.cos(t * 0.8) * 26, H * 0.6, H * 0.52, "rgba(150,84,226,.14)");
+  nebula(W * 0.55 + Math.sin(t * 1.4) * 18, H * 0.05, H * 0.3, "rgba(44,205,255,.12)");
+  nebula(W * 0.9 - Math.sin(t * 1.1) * 20, H * 0.9, H * 0.35, "rgba(255,120,190,.08)");
+
+  // 底部地平线微光，弱化滚动感
+  const hz = ctx.createLinearGradient(0, H * 0.8, 0, H);
+  hz.addColorStop(0, "rgba(70,150,255,0)");
+  hz.addColorStop(0.6, "rgba(110,90,255,.08)");
+  hz.addColorStop(1, "rgba(150,60,200,.14)");
+  ctx.fillStyle = hz;
+  ctx.fillRect(-10, H * 0.8, W + 20, H * 0.2);
+
+  // 四周暗角，聚焦中央
+  const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.95);
+  vg.addColorStop(0, "rgba(0,0,0,0)");
+  vg.addColorStop(1, "rgba(0,0,5,.55)");
+  ctx.fillStyle = vg;
+  ctx.fillRect(-10, -10, W + 20, H + 20);
+}
+
 function draw() {
   ctx.save();
   // 按 devicePixelRatio 缩放坐标系：backing store 是 W*DPR × H*DPR，
   // 用 ctx.scale 后逻辑坐标/字号保持 W×H 不变，画面更锐利不发虚。
   // scale 先于 translate，保证 applyCamera 的震动偏移在逻辑像素上不变。
   ctx.scale(DPR, DPR);
+  // 深空背景（任何状态共用，先于相机变换，画面不随震动偏移）
+  paintSpace(ctx, frame);
+  drawStars(ctx, frame);
+
   if (state === STATE.PLAYING || state === STATE.LEVELUP || state === STATE.OVER || state === STATE.PAUSED || state === STATE.TUTORIAL) {
     applyCamera(ctx);
-  }
+    drawPowerups(ctx);
+    drawBullets(ctx);
+    drawEnemies(ctx, frame);
+    // 玩家（死亡动画期间不绘制，战机即刻消失，只留爆炸特效）
+    if (player && state !== STATE.OVER && !(deathTimer > 0)) {
+      drawPlayer(ctx, player, frame);
+    }
+    drawParticles(ctx);
+    drawExplosionRings(ctx);
+    drawBlastFlashes(ctx);
+    drawDamageNumbers(ctx);
 
-  // 背景
-  ctx.fillStyle = "#05070f";
-  ctx.fillRect(-10, -10, W + 20, H + 20);
-  const bg = ctx.createRadialGradient(W / 2, H * 0.3, 60, W / 2, H / 2, H);
-  bg.addColorStop(0, "rgba(30,50,90,.5)");
-  bg.addColorStop(1, "rgba(5,7,15,0)");
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, W, H);
-
-  drawStars(ctx, frame);
-  drawPowerups(ctx);
-  drawBullets(ctx);
-  drawEnemies(ctx, frame);
-  // 玩家（死亡动画期间不绘制，战机即刻消失，只留爆炸特效）
-  if (player && state !== STATE.OVER && !(deathTimer > 0)) {
-    drawPlayer(ctx, player, frame);
-  }
-  drawParticles(ctx);
-  drawExplosionRings(ctx);
-  drawBlastFlashes(ctx);
-  drawDamageNumbers(ctx);
-
-  // 死亡白屏闪烁
-  if (deathFlash > 0) {
-    ctx.fillStyle = `rgba(255,255,255,${deathFlash * 0.6})`;
-    ctx.fillRect(0, 0, W, H);
+    // 死亡白屏闪烁
+    if (deathFlash > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${deathFlash * 0.6})`;
+      ctx.fillRect(0, 0, W, H);
+    }
   }
 
   ctx.restore();
@@ -1221,26 +1260,31 @@ function draw() {
 
   // 教程界面（点击任意处后游戏才正式开始）
   if (state === STATE.TUTORIAL) {
-    const a = 0.15 + 0.55 * clamp(tutorialTimer, 0, 1);
-    ctx.globalAlpha = a;
-    ctx.fillStyle = "rgba(5,7,15,.6)";
+    const a = 0.5 + 0.3 * clamp(tutorialTimer, 0, 1);
+    ctx.globalAlpha = Math.min(0.78, a);
+    const dg = ctx.createRadialGradient(W / 2, H * 0.36, 40, W / 2, H * 0.42, H * 0.9);
+    dg.addColorStop(0, "rgba(8,12,28,.92)");
+    dg.addColorStop(1, "rgba(4,6,14,.72)");
+    ctx.fillStyle = dg;
     ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = 1;
 
-    ctx.fillStyle = "#ffd166";
-    setf(ctx, "bold 26px 'sans-serif'");
+    glowText(ctx, {
+      text: "左 / 右 移动躲避敌机", x: W / 2, y: H * 0.36,
+      size: 26, weight: "bold", color: "#ffd166", blur: 22, fontFamily: "'sans-serif'",
+    });
+    ctx.fillStyle = "rgba(255,255,255,.92)";
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText("左 / 右 移动躲避敌机", W / 2, H * 0.36);
-    ctx.fillStyle = "rgba(255,255,255,.85)";
     setf(ctx, "16px 'sans-serif'");
     ctx.fillText("射击为自动 · 子弹命中后消失", W / 2, H * 0.42);
     ctx.fillText("击落敌机积经验，升级可选择技能", W / 2, H * 0.46);
 
     // 点击开始提示（呼吸闪烁）
     if (Math.sin(frame * 0.08) > -0.3) {
-      ctx.fillStyle = "#5ee6ff";
-      setf(ctx, "bold 22px 'sans-serif'");
-      ctx.fillText("点击任意处开始", W / 2, H * 0.78);
+      glowText(ctx, {
+        text: "点击任意处开始", x: W / 2, y: H * 0.78,
+        size: 22, weight: "bold", color: "#5ee6ff", blur: 18, fontFamily: "'sans-serif'",
+      });
     }
   }
 

@@ -22,10 +22,11 @@ describe("meta", () => {
   });
 
   it("earnStardust 折算并刷新最高分", () => {
-    const got = earnStardust(250);
+    const score = 2 * META.stardustPerScore + 123;
+    const got = earnStardust(score);
     assert.equal(got, 2);
     assert.equal(getStardust(), 2);
-    assert.equal(getBest(), 250);
+    assert.equal(getBest(), score);
     assert.equal(getStats().totalRuns, 1);
   });
 

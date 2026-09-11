@@ -43,7 +43,8 @@ describe("bullet", () => {
   });
 
   it("穿透/分裂/爆炸行为可叠加", () => {
-    const p = playerWith({ penetrate: 2, split: 1, explosion: 2 });
+    // expChance 堆高使爆炸概率为 100%，保证断言确定性
+    const p = playerWith({ penetrate: 2, split: 1, explosion: 2, expChance: 10, expRange: 2 });
     const b = fireBullet(0, 1, p);
     assert.ok(b.behaviors.has("penetrate"));
     assert.ok(b.behaviors.has("split"));
@@ -58,7 +59,7 @@ describe("bullet", () => {
     p.buffs.critboost = 8;
     const b = fireBullet(0, 2, p);
     assert.equal(b.isCrit, true);
-    assert.equal(b.dmg, Math.round(2 * (2.5 + 1 + 0.5)));
+    assert.equal(b.dmg, Math.round(2 * (BULLET.critMulti + 0.5 + 0.5 * 2)));
   });
 
   it("子弹加速技能提高初速", () => {

@@ -75,6 +75,8 @@ export function resetWaves() {
   bossWave = 0;
   swarmTimer = 0;
   swarmWarned = false;
+  bossWarnPending = false;
+  bossWarnTimer = 0;
 }
 
 // ---------- Boss 定义 ----------

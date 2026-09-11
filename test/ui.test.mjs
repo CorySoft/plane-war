@@ -119,4 +119,28 @@ describe("ui", () => {
     assert.equal(getAchieveButton(), null);
     assert.ok(Array.isArray(getQuestClaimButtons()));
   });
+
+  it("veil 面纱：alpha<=0 跳过，正值绘制半透明覆盖", async () => {
+    const { veil } = await import("../js/theme.js");
+    let calls = 0;
+    const spy = { save() {}, restore() {}, fillRect() { calls++; }, fillStyle: null };
+    veil(spy, 100, 100, 0);
+    assert.equal(calls, 0);
+    veil(spy, 100, 100, 0.5, "#070b1f");
+    assert.equal(calls, 1);
+    assert.match(spy.fillStyle, /^rgba\(7,11,31,0\.5\)$/);
+    veil(spy, 100, 100, 2);
+    assert.match(spy.fillStyle, /^rgba\(7,11,31,1\)$/);
+  });
+
+  it("页面切换触发过渡面纱，alpha 随时间衰减", async () => {
+    const { getPageVeilAlpha } = await import("../js/ui.js");
+    setMenuPage("codex");
+    const a = getPageVeilAlpha();
+    assert.ok(a > 0.9 && a <= 1, `fresh switch alpha=${a}`);
+    drawMenu(makeCtx(), 0, "normal", DIFFICULTY_PRESETS, ["dmg"]);
+    assert.ok(getCodexBackButton());
+    const b = getPageVeilAlpha();
+    assert.ok(b >= 0 && b <= a, `decay alpha=${b}`);
+  });
 });

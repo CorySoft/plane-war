@@ -9,17 +9,23 @@
   html, body {
     width: 100%; height: 100%;
     overflow: hidden;
-    background: #05070f;
+    background: #06091a;
     font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", monospace;
     touch-action: none;
   }
   #wrap {
     position: fixed; inset: 0;
     display: flex; align-items: center; justify-content: center;
+    /* 深空渐变底盘：canvas 边缘留黑时也有层次 */
+    background:
+      radial-gradient(120% 90% at 50% 0%, rgba(56,92,190,.35), transparent 60%),
+      radial-gradient(90% 80% at 85% 85%, rgba(140,70,200,.22), transparent 60%),
+      linear-gradient(180deg, #05070f, #0a1030 48%, #04060f);
+    background-attachment: fixed;
   }
   canvas {
     display: block;
-    background: #05070f;
+    background: #04060f;
     image-rendering: auto;
     flex-shrink: 0;       /* 防止 flex 布局压扁 canvas，保证 cover 两侧溢出被外层裁掉 */
     max-width: none;
@@ -33,11 +39,17 @@
   .touch-ui .tbtn {
     pointer-events: auto;
     width: 76px; height: 76px; border-radius: 50%;
-    background: rgba(255,255,255,.04);
-    border: 1px solid rgba(255,255,255,.12);
-    color: rgba(207,234,255,.6); font-size: 30px;
+    background: linear-gradient(165deg, rgba(94,230,255,.18), rgba(22,34,70,.28));
+    border: 1px solid rgba(130,205,255,.45);
+    color: #eaf6ff; font-size: 30px;
     display: flex; align-items: center; justify-content: center;
     user-select: none; -webkit-user-select: none;
+    box-shadow: 0 0 16px rgba(80,180,255,.16), inset 0 1px 0 rgba(255,255,255,.14);
+    transition: transform .08s ease;
+  }
+  .touch-ui .tbtn:active {
+    transform: scale(.93);
+    background: linear-gradient(165deg, rgba(94,230,255,.3), rgba(26,40,84,.4));
   }
   @media (pointer: coarse) {
     .touch-ui.show { display: flex; }
@@ -45,26 +57,32 @@
   #loader {
     position: fixed; inset: 0; z-index: 100;
     display: flex; align-items: center; justify-content: center;
-    background: #05070f;
+    background:
+      radial-gradient(110% 80% at 50% 20%, rgba(60,110,220,.4), transparent 62%),
+      radial-gradient(90% 70% at 85% 90%, rgba(150,70,210,.3), transparent 60%),
+      linear-gradient(180deg, #060b1f, #0a1130 50%, #04060f);
     transition: opacity .5s ease;
   }
   .loader-card { text-align: center; width: min(300px, 70vw); }
   .loader-title {
-    color: #5ee6ff; font-size: 30px; font-weight: bold;
+    color: #8ff2ff; font-size: 30px; font-weight: bold;
     letter-spacing: 6px; margin-bottom: 26px;
+    text-shadow: 0 0 14px rgba(94,230,255,.8), 0 0 30px rgba(94,230,255,.4);
   }
   .loader-track {
     height: 10px; border-radius: 6px;
-    background: rgba(255,255,255,.08);
-    overflow: hidden; border: 1px solid rgba(255,255,255,.12);
+    background: rgba(255,255,255,.1);
+    overflow: hidden; border: 1px solid rgba(150,210,255,.28);
+    box-shadow: inset 0 0 8px rgba(0,0,0,.5);
   }
   .loader-bar {
     height: 100%; width: 0%;
-    background: linear-gradient(90deg, #4cc9f0, #5ee6ff);
+    background: linear-gradient(90deg, #4cc9f0, #8ff2ff, #5ee6ff);
     border-radius: 6px;
     transition: width .25s ease;
+    box-shadow: 0 0 12px rgba(94,230,255,.8);
   }
-  .loader-text { margin-top: 12px; color: rgba(255,255,255,.55); font-size: 14px; }
+  .loader-text { margin-top: 12px; color: rgba(255,255,255,.6); font-size: 14px; text-shadow: 0 0 6px rgba(0,0,0,.6); }
 </style>
 </head>
 <body>

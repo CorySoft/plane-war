@@ -35,8 +35,9 @@ describe("config", () => {
     assert.equal(new Set(qIds).size, qIds.length);
   });
 
-  it("道具权重覆盖全部定义", () => {
-    const types = Object.keys(POWERUP_DEFS);
+  it("道具权重覆盖全部普通掉落定义", () => {
+    // randomSkill 为 Boss 专属掉落（spawnPowerup 的 Boss 池），走权重表之外
+    const types = Object.keys(POWERUP_DEFS).filter((id) => id !== "randomSkill");
     for (const list of [POWERUP_WEIGHTS_EARLY, POWERUP_WEIGHTS_LATE]) {
       const ids = list.map(([id]) => id);
       assert.deepEqual([...ids].sort(), [...types].sort());

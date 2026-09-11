@@ -84,6 +84,7 @@ export function spawnEnemy(level, diff, enemyLevel = 1, atX, atY) {
 export function updateEnemies(dt, level, playerX, playerY, playerH) {
   for (let i = enemies.length - 1; i >= 0; i--) {
     const e = enemies[i];
+    if (!e) continue;
 
     // Boss 的移动/部署由 game.js 的 updateBossAI 负责，这里只累计时间，
     // 避免普通敌机推进逻辑（如原生 vy 下坠）把 Boss 一路带出屏幕。
@@ -142,6 +143,7 @@ function bossPhaseOf(e) {
 export function getEnemyShooters(playerX, playerY, dt, fireCdScale = 1) {
   const shooters = [];
   for (const e of enemies) {
+    if (!e) continue;
     if (e.frozen > 0) continue;
     if (e.y <= 10 || e.y >= H * 0.7) continue;
     // Boss：按相位配置的开火间隔射击；无枪相位（如母舰空军召唤）跳过
@@ -175,6 +177,7 @@ export function getEnemyShooters(playerX, playerY, dt, fireCdScale = 1) {
 
 export function drawEnemies(ctx, frame) {
   for (const e of enemies) {
+    if (!e) continue;
     ctx.save();
     ctx.translate(e.x, e.y);
     ctx.rotate(Math.sin(e.t * 2) * 0.15);

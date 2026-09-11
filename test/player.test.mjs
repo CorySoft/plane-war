@@ -108,6 +108,7 @@ describe("player", () => {
 
   it("护体弹自动生成并可重生", () => {
     const p = dummyPlayer();
+    p.skills = { ...p.skills, guard: 1 };
     updatePlayer(0.016, p, 250, 0);
     assert.ok(p.orbit.length >= 1);
     const live = getOrbitBullets(p);
