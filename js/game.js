@@ -184,16 +184,12 @@ function loop() {
     // 星空始终动画（含菜单/结束画面）
     updateStars(dt);
 
-    if (toast) {
-      toast.t -= rawDt;
-      if (toast.t <= 0) toast = null;
-    }
-
     if (state === STATE.PLAYING) {
       update(dt);
       frame++;
       if (newBestFx > 0) newBestFx -= dt;
       // 道具拾取触发抽奖动画：自动暂停游戏，等待用户点击继续
+      // （若同帧已进入升级选择，退出抽奖时按 skillChoices 恢复，避免丢失三选一）
       if (getGachaAnim()) state = STATE.GACHA;
       // 死亡动画结束：星尘充足且本局未复活过 → 进入复活选择；否则结算
       if (deathTimer <= 0 && lives <= 0) {
@@ -616,9 +612,9 @@ function orbitHitEnemy(e, ob, enemyIdx) {
       addScore(3000);
       triggerShake(1.5);
       addBossKill();
-      for (let k = 0; k < 3; k++) spawnPowerup(e.x + rand(-30, 30), e.y + rand(-20, 20), level, getDropBonus());
+      for (let k = 0; k < 3; k++) spawnPowerup(e.x + rand(-30, 30), e.y + rand(-20, 20), level, getDropBonus(), true);
     }
-    
+
     removeEnemy(enemyIdx);
   } else {
     spawnParticles(ob.x, ob.y, e.color, 6, 3);
@@ -1347,9 +1343,9 @@ canvas.addEventListener("pointerdown", e => {
     return;
   }
 
-  // GACHA 抽奖完成：点击任意处继续游戏
+  // GACHA 抽奖完成：点击任意处继续游戏（若升级选择待处理则先回到升级界面）
   if (state === STATE.GACHA) {
-    state = STATE.PLAYING;
+    state = skillChoices ? STATE.LEVELUP : STATE.PLAYING;
     clearGachaAnim();
     return;
   }

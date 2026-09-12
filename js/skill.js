@@ -55,7 +55,10 @@ export function generateSkillChoices(playerSkills) {
  * @returns {object|null} toast 消息
  */
 export function applySkill(skill, player) {
-  player.skills[skill.id] = (player.skills[skill.id] || 0) + 1;
+  const cur = player.skills[skill.id] || 0;
+  // 上限钳制：道具/三选一并发时选项可能过期，超限直接拒绝
+  if (cur >= skill.max) return null;
+  player.skills[skill.id] = cur + 1;
   discoverSkill(skill.id);   // 收录进技能图鉴
   if (skill.id === "maxhp") {
     player._heal = (player._heal || 0) + 1;

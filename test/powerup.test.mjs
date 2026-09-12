@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import "./_env.mjs";
 import { resetStorage } from "./_env.mjs";
 import { POWERUP_DEFS, POWERUP_DROP, SKILLS, H } from "../js/config.js";
-import { powerups, spawnPowerup, updatePowerups, applyPowerup, clearPowerups } from "../js/powerup.js";
+import { powerups, spawnPowerup, updatePowerups, applyPowerup, clearPowerups, getGachaAnim, clearGachaAnim } from "../js/powerup.js";
 import { createPlayer } from "../js/player.js";
 import { META } from "../js/config.js";
 import { loadMeta, resetMeta, getStats } from "../js/meta.js";
@@ -17,6 +17,7 @@ describe("powerup", () => {
   beforeEach(() => {
     clearPowerups();
     clearParticles();
+    clearGachaAnim();
     resetStorage();
     resetMeta();
     loadMeta();
@@ -101,10 +102,11 @@ describe("powerup", () => {
     assert.ok(p._toast);
   });
 
-  it("技能全满时 skillup 无效", () => {
+  it("技能全满时 skillup 给出提示", () => {
     const p = player();
     for (const s of SKILLS) p.skills[s.id] = s.max;
     applyPowerup({ type: "skillup", x: 0, y: 0 }, p);
-    assert.equal(p._toast, null);
+    assert.equal(p._toast.text, "技能已全部满级");
+    assert.equal(getGachaAnim(), null);
   });
 });

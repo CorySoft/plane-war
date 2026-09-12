@@ -293,6 +293,8 @@ export function spawnSplitChildren(parent) {
     e.laserTimer = 0;
     e.isBoss = false;
     e._deathExplosion = null;
+    e._laserShot = false;
+    e.enemyLevel = 1;
     e.kx = 0; e.ky = 0; e.kbTimer = 0;
     pushEnemy(e);
   }

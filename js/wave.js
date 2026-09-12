@@ -60,7 +60,7 @@ export function updateWaves(dt, level, now, diff) {
       return "swarm";
     }
   }
-return null;
+  return null;
 }
 
 export function spawnSwarm(level, diff, enemyLevel) {

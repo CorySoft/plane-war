@@ -97,7 +97,11 @@ export function applyPowerup(p, player) {
     player.buffs.knockback = 8;
   } else if (type === "skillup") {
     const sk = pickUpgradableSkill(player.skills);
-    if (!sk) return;
+    if (!sk) {
+      player._toast = { text: "技能已全部满级", t: 1.4, color: def.color };
+      sfx.pickup();
+      return;
+    }
     const t = applySkill(sk, player);
     player._toast = t;
     player._skillAnim = null;
@@ -107,7 +111,11 @@ export function applyPowerup(p, player) {
     return;
   } else if (type === "randomSkill") {
     const sk = pickAnySkill(player.skills);
-    if (!sk) return;
+    if (!sk) {
+      player._toast = { text: "技能已全部满级", t: 1.4, color: def.color };
+      sfx.pickup();
+      return;
+    }
     const t = applySkill(sk, player);
     player._toast = t;
     player._skillAnim = null;
