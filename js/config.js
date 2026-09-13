@@ -57,7 +57,7 @@ export const BULLET = {
   baseSpeed: 6,
   baseRange: 250,          // 起始射程(像素)
   rangePerLevel: 50,       // 射程延伸技能：每级射程+2m（1m=25px）
-levelRangePerLevel: 2.5,   // 升级加成：玩家每升1级射程+0.1m（线性，避免指数放大）
+  levelRangePerLevel: 2.5,   // 升级加成：玩家每升1级射程+0.1m（线性，避免指数放大）
   rangeCapMargin: 80,      // 射程硬上限 = 屏幕高度 + 80，防止溢出屏外
   refireDist: 250,      // 再次发射所需子弹飞行距离（10m，1m=25px）：子弹飞超此距离或销毁即可再射
   baseRadius: 4,
@@ -160,7 +160,7 @@ export const POWERUP_WEIGHTS_LATE = [
 // ---------- 系统商城：星尘兑换永久加成（500起，每级翻倍） ----------
 export const SHOP_ITEMS = [
   { id: "baseDmg",    name: "基础火力",   icon: "⚔", desc: "基础伤害 +1",           baseCost: 500, max: 5, effect: (n) => ({ baseDmg: n }) },
-  { id: "baseFire",   name: "基础射速",   icon: "⚡", desc: "射击间隔 -5%",         baseCost: 500, max: 5, effect: (n) => ({ fireRateMul: 1 - 0.04 * n }) },
+  { id: "baseFire",   name: "基础射速",   icon: "⚡", desc: "射击间隔 -4%",         baseCost: 500, max: 5, effect: (n) => ({ fireRateMul: 1 - 0.04 * n }) },
   { id: "startHp",    name: "起始生命",   icon: "♥", desc: "开局生命 +1",          baseCost: 500, max: 3, effect: (n) => ({ startHp: n }) },
   { id: "startShield",name: "起始护盾",   icon: "S", desc: "开局护盾 +1",          baseCost: 500, max: 2, effect: (n) => ({ maxShield: n }) },
   { id: "explosion",  name: "爆炸伤害",   icon: "✴", desc: "爆炸AOE伤害 +10%",    baseCost: 500, max: 4, effect: (n) => ({ expDmgBonus: 0.10 * n }) },

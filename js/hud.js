@@ -190,10 +190,10 @@ function getBehaviorLabel(player) {
   if ((s.bulletSpeed || 0) > 0) extras.push("弹速" + s.bulletSpeed + "级");
   if ((s.volley || 0) > 0) extras.push("连射" + s.volley + "级");
   if ((s.scatter || 0) > 0) extras.push("散射" + s.scatter + "级");
+  if ((s.sideBullets || 0) > 0) extras.push("左右护法" + s.sideBullets + "级");
   if (extras.length > 0) {
     if (!label) label = { label: "", color: "#fff" };
     label.label = (label.label ? label.label + "  " : "") + extras.join(" ");
-    if ((s.sideBullets || 0) > 0) label.label += " 左右护法" + s.sideBullets + "级";
   }
   return label;
 }

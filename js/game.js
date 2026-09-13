@@ -1397,8 +1397,8 @@ canvas.addEventListener("pointerdown", e => {
       for (const btn of getShopBuyButtons()) {
         if (hitTestButton(mx, my, btn)) {
           const ok = purchaseShopItem(btn.id);
-             if (ok) { toast = { text: "购买成功！", color: "#d0a6ff", t: 1.5 }; sfx.power(); }
-           else { toast = { text: "星尘不足", color: "#ff6b6b", t: 1.5 }; }
+          if (ok) { toast = { text: "购买成功！", color: "#d0a6ff", t: 1.5 }; sfx.power(); }
+          else { toast = { text: "星尘不足", color: "#ff6b6b", t: 1.5 }; }
           return;
         }
       }
@@ -1413,7 +1413,7 @@ canvas.addEventListener("pointerdown", e => {
         if (hitTestButton(mx, my, claims[i])) {
           const reward = claimQuest(items[i].def.id);
           if (reward > 0) {
-              toast = { text: "任务完成  +" + reward + " 星尘", color: "#7CFC00", t: 3 };
+            toast = { text: "任务完成  +" + reward + " 星尘", color: "#7CFC00", t: 3 };
             sfx.power();
           }
           return;
