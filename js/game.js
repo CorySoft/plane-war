@@ -120,6 +120,8 @@ let showTutorial = true;   // 新手教程提示
 let tutorialTimer = 0;     // 教程剩余显示时间
 let musicStarted = false;
 let reviveUsed = false;    // 本局是否已用过复活（每局限 1 次）
+// 深空背景固定渐变缓存（基色/地平线/暗角，只依赖 W/H），必须在 loop() 启动前声明，避免 TDZ
+let spaceBgCache = { key: "", base: null, hz: null, vg: null };
 
 // ---------- 初始化（失败也尽量让 loading 走掉，靠兜底显示菜单） ----------
 try {
@@ -1114,9 +1116,6 @@ function startPlaying() {
 }
 
 // ---------- 绘制 ----------
-// 深空背景的固定渐变（基色/地平线/暗角）只依赖 W/H，缓存复用，避免每帧重建 3 个渐变对象
-let spaceBgCache = { key: "", base: null, hz: null, vg: null };
-
 /** 深空背景：基色渐变 + 漂移星云 + 底部地平线微光 + 暗角 */
 function paintSpace(ctx, frame = 0) {
   const t = frame * 0.0012;
