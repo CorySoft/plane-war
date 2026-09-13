@@ -1114,16 +1114,32 @@ function startPlaying() {
 }
 
 // ---------- 绘制 ----------
+// 深空背景的固定渐变（基色/地平线/暗角）只依赖 W/H，缓存复用，避免每帧重建 3 个渐变对象
+let spaceBgCache = { key: "", base: null, hz: null, vg: null };
+
 /** 深空背景：基色渐变 + 漂移星云 + 底部地平线微光 + 暗角 */
 function paintSpace(ctx, frame = 0) {
   const t = frame * 0.0012;
-  const base = ctx.createLinearGradient(0, 0, 0, H);
-  base.addColorStop(0, "#070b1f");
-  base.addColorStop(0.55, "#0b1235");
-  base.addColorStop(1, "#060a19");
-  ctx.fillStyle = base;
+  const cacheKey = W + "x" + H;
+  if (spaceBgCache.key !== cacheKey) {
+    const base = ctx.createLinearGradient(0, 0, 0, H);
+    base.addColorStop(0, "#070b1f");
+    base.addColorStop(0.55, "#0b1235");
+    base.addColorStop(1, "#060a19");
+    const hz = ctx.createLinearGradient(0, H * 0.8, 0, H);
+    hz.addColorStop(0, "rgba(70,150,255,0)");
+    hz.addColorStop(0.6, "rgba(110,90,255,.08)");
+    hz.addColorStop(1, "rgba(150,60,200,.14)");
+    const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.95);
+    vg.addColorStop(0, "rgba(0,0,0,0)");
+    vg.addColorStop(1, "rgba(0,0,5,.55)");
+    spaceBgCache = { key: cacheKey, base, hz, vg };
+  }
+
+  ctx.fillStyle = spaceBgCache.base;
   ctx.fillRect(-10, -10, W + 20, H + 20);
 
+  // 星云随 frame 缓慢漂移，位置每帧变化，渐变保持即时创建
   const nebula = (x, y, r, c0) => {
     const g = ctx.createRadialGradient(x, y, 0, x, y, r);
     g.addColorStop(0, c0);
@@ -1137,18 +1153,11 @@ function paintSpace(ctx, frame = 0) {
   nebula(W * 0.9 - Math.sin(t * 1.1) * 20, H * 0.9, H * 0.35, "rgba(255,120,190,.08)");
 
   // 底部地平线微光，弱化滚动感
-  const hz = ctx.createLinearGradient(0, H * 0.8, 0, H);
-  hz.addColorStop(0, "rgba(70,150,255,0)");
-  hz.addColorStop(0.6, "rgba(110,90,255,.08)");
-  hz.addColorStop(1, "rgba(150,60,200,.14)");
-  ctx.fillStyle = hz;
+  ctx.fillStyle = spaceBgCache.hz;
   ctx.fillRect(-10, H * 0.8, W + 20, H * 0.2);
 
   // 四周暗角，聚焦中央
-  const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.95);
-  vg.addColorStop(0, "rgba(0,0,0,0)");
-  vg.addColorStop(1, "rgba(0,0,5,.55)");
-  ctx.fillStyle = vg;
+  ctx.fillStyle = spaceBgCache.vg;
   ctx.fillRect(-10, -10, W + 20, H + 20);
 }
 
