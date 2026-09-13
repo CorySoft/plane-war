@@ -275,7 +275,8 @@ export function questEvent(type, amount = 1) {
   ensureQuests();
   if (metaData.quests.progress[type] === undefined) return;
   metaData.quests.progress[type] += amount;
-  saveMeta();
+  // 不在此处 saveMeta：所有调用方（earnStardust/addKill/addBossKill/addPowerupCollected）
+  // 随后都会统一保存，避免每次击杀重复写 localStorage（同步 I/O）
 }
 
 /** 图鉴/面板展示用：{ date, items:[{def, cur, target, claimed}] } */
