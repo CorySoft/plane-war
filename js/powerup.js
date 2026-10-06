@@ -8,9 +8,18 @@ import { spawnParticles } from "./particles.js";
 import { applySkill } from "./skill.js";
 import { sfx } from "./audio.js";
 import { addPowerupCollected, discoverPowerup } from "./meta.js";
+import { drawSprite } from "./assets.js";
 // freeze 通过 player 标记由 game.js 消费；madHunt/xppack 直接操作 buff/标记，无需直接调用
 
-const XP_PACK_XP = 50;    // 经验包固定经验值
+// 经验包：固定保底值 + 按当前升级需求的百分比。
+// 纯固定值在后期（升级需求上千）几乎等于没用，故改成与需求挂钩。
+const XP_PACK_BASE = 50;
+const XP_PACK_RATIO = 0.2;
+
+/** 经验包实际经验值：max(50, 当前升级需求的 20%) */
+export function xpPackAmount(xpNeed) {
+  return Math.max(XP_PACK_BASE, Math.round((xpNeed || 0) * XP_PACK_RATIO));
+}
 
 export let powerups = [];
 
@@ -88,7 +97,7 @@ export function applyPowerup(p, player) {
   } else if (type === "double") {
     player.buffs.double = 8;
   } else if (type === "xppack") {
-    player._xp = XP_PACK_XP;
+    player._xpPack = true;   // 具体数值由 game.js 按当前 xpNeed 折算
   } else if (type === "drop") {
     player.buffs.drop = 8;
   } else if (type === "critboost") {
@@ -104,7 +113,6 @@ export function applyPowerup(p, player) {
     }
     const t = applySkill(sk, player);
     player._toast = t;
-    player._skillAnim = null;
     setGachaAnim(sk, "skillup");
     spawnParticles(p.x, p.y, def.color, 30, 8);
     sfx.power();
@@ -118,7 +126,6 @@ export function applyPowerup(p, player) {
     }
     const t = applySkill(sk, player);
     player._toast = t;
-    player._skillAnim = null;
     setGachaAnim(sk, "randomSkill");
     spawnParticles(p.x, p.y, def.color, 30, 8);
     sfx.power();
@@ -129,22 +136,26 @@ export function applyPowerup(p, player) {
   player._toast = { text: def.name, t: 1.2, color: def.color };
 }
 
+function unlockedSkill(s, playerSkills) {
+  return !s.requires || (playerSkills[s.requires] || 0) > 0;
+}
+
 // 随机选择一个“可升级技能”：优先从已拥有的技能里升，若一个没有（或全部满级）
 // 则随机授予一个未满级的新技能，保证道具永远有效。
 function pickUpgradableSkill(playerSkills) {
   const owned = SKILLS.filter(s => {
     const cur = playerSkills[s.id] || 0;
-    return cur > 0 && cur < s.max;
+    return cur > 0 && cur < s.max && unlockedSkill(s, playerSkills);
   });
   if (owned.length > 0) return owned[Math.floor(Math.random() * owned.length)];
-  const pool = SKILLS.filter(s => (playerSkills[s.id] || 0) < s.max);
+  const pool = SKILLS.filter(s => (playerSkills[s.id] || 0) < s.max && unlockedSkill(s, playerSkills));
   if (pool.length === 0) return null;
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
 /** 随机获取一个任意技能（未满级即可，可能是全新技能） */
 function pickAnySkill(playerSkills) {
-  const pool = SKILLS.filter(s => (playerSkills[s.id] || 0) < s.max);
+  const pool = SKILLS.filter(s => (playerSkills[s.id] || 0) < s.max && unlockedSkill(s, playerSkills));
   if (pool.length === 0) return null;
   return pool[Math.floor(Math.random() * pool.length)];
 }
@@ -199,11 +210,13 @@ export function drawPowerups(ctx) {
     }
     ctx.closePath();
     ctx.fill(); ctx.stroke();
-    // 图标
-    ctx.fillStyle = def.color;
-    setf(ctx, "bold 15px monospace");
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(def.icon, 0, 1);
+    // 图标：优先贴图（24px 霓虹图标），缺图回退原来的单字母
+    if (!drawSprite(ctx, "powerup_" + p.type, 0, 1, 26, 26)) {
+      ctx.fillStyle = def.color;
+      setf(ctx, "bold 15px monospace");
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(def.icon, 0, 1);
+    }
     ctx.restore();
   }
 }
@@ -216,22 +229,27 @@ function getSkillIcon(skill) {
   return (skill.icon || skill.id.charAt(0)).toUpperCase();
 }
 
+/**
+ * 抽奖滚动池：真实技能 id。顺序即 `skill_<id>` 贴图的对应关系，
+ * 贴图缺失时回退各自的单字母图标。
+ */
+export const GACHA_SKILL_POOL_IDS = [
+  "dmg", "rate", "move", "lifesteal", "explosion", "knockback",
+  "shield", "crit", "split", "penetrate", "volley", "scatter",
+];
+
+function buildGachaPool() {
+  return GACHA_SKILL_POOL_IDS.map((id) => {
+    const s = SKILLS.find((x) => x.id === id);
+    return s
+      ? { id, icon: getSkillIcon(s), name: s.name, color: s.color, desc: s.desc }
+      : { id, icon: id.charAt(0).toUpperCase(), name: id, color: "#5ee6ff", desc: "" };
+  });
+}
+
 export function setGachaAnim(skill, subtype) {
   const displaySkill = Object.assign({}, skill, { icon: getSkillIcon(skill) });
-  const pool = [
-    { icon: "B", name: "火力强化", color: "#ff4488" },
-    { icon: "F", name: "急速射击", color: "#ffd166" },
-    { icon: "M", name: "移速提升", color: "#5ee6ff" },
-    { icon: "H", name: "吸血续航", color: "#ff8fa3" },
-    { icon: "D", name: "双倍伤害", color: "#ff6633" },
-    { icon: "E", name: "爆炸弹道", color: "#ff6633" },
-    { icon: "K", name: "子弹击退", color: "#5ee6ff" },
-    { icon: "S", name: "护盾", color: "#66e0ff" },
-    { icon: "C", name: "暴击", color: "#ff8fa3" },
-    { icon: "W", name: "分裂弹道", color: "#7bd67b" },
-    { icon: "N", name: "穿透", color: "#aa66ff" },
-    { icon: "V", name: "连射", color: "#ffe066" },
-  ];
+  const pool = buildGachaPool();
   const lh = 26;
   const slots = 28;
   const previewSkills = [];
@@ -332,9 +350,12 @@ export function drawGachaAnim(ctx) {
       const dist = Math.abs(dy) / lh;
       const opacity = Math.max(0, 1 - dist * 0.35);
       ctx.globalAlpha = opacity;
-      ctx.fillStyle = "#fff";
-      setf(ctx, "bold 14px monospace");
-      ctx.fillText(sk.icon, cx + 32, centerY + dy);
+      // 技能贴图，缺图回退字母
+      if (!drawSprite(ctx, "skill_" + (sk.id || ""), cx + 32, centerY + dy, 16, 16)) {
+        ctx.fillStyle = "#fff";
+        setf(ctx, "bold 14px monospace");
+        ctx.fillText(sk.icon, cx + 32, centerY + dy);
+      }
       ctx.fillStyle = sk.color;
       setf(ctx, "13px 'sans-serif'");
       ctx.fillText(sk.name, W / 2, centerY + dy);
@@ -363,7 +384,9 @@ export function drawGachaAnim(ctx) {
     setf(ctx, "bold 42px monospace");
     ctx.shadowBlur = 16;
     ctx.shadowColor = "#ffd700";
-    ctx.fillText(anim.skill.icon, 0, 0);
+    if (!drawSprite(ctx, "skill_" + (anim.skill.id || ""), 0, 0, 44, 44)) {
+      ctx.fillText(anim.skill.icon, 0, 0);
+    }
     ctx.shadowBlur = 0;
     ctx.restore();
 

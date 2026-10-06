@@ -117,6 +117,34 @@ describe("enemy", () => {
     assert.equal(getEnemyShooters(240, 600, 0.016, 1).length, 0);
   });
 
+  // ---------- 回归：对象池复用下的敌机唯一标识 ----------
+  it("每架敌机拥有唯一 uid（穿透/碎片命中去重依赖它）", () => {
+    const a = spawnEnemy(1, diff, 1, 100, 100);
+    const b = spawnEnemy(1, diff, 1, 200, 100);
+    assert.ok(a.uid > 0);
+    assert.notEqual(a.uid, b.uid);
+  });
+
+  it("对象池复用后 uid 也会刷新（不会误判为已命中）", () => {
+    const first = spawnEnemy(1, diff, 1, 100, 100);
+    const uid = first.uid;
+    removeEnemyEx(enemies.indexOf(first));
+    const reused = spawnEnemy(1, diff, 1, 100, 100);
+    // 可能拿到池中同一个对象，但 uid 必须是新的
+    assert.notEqual(reused.uid, uid);
+  });
+
+  it("分裂子代也带 uid 且受同屏上限约束", () => {
+    const parent = spawnEnemy(6, diff, 1, 240, 200);
+    parent.type = "split";
+    parent.splitChildren = 2;
+    spawnSplitChildren(parent);
+    const kids = enemies.filter(e => e.splitChildren === 0 && e.type === "small");
+    assert.ok(kids.length >= 1);
+    for (const k of kids) assert.ok(k.uid > 0);
+    assert.ok(enemies.length <= 60);
+  });
+
   it("激光敌机蓄力结束进入射击列表并标记", () => {
     const e = spawnEnemy(1, diff, 1, 240, 120);
     e.type = "laser";

@@ -6,20 +6,43 @@
 import { clamp, roundRect, setf } from "./utils.js";
 
 export const C = {
+  // 基础
   bgDeep: "#04070f",
   bgPanel: "rgba(13,18,36,.86)",
   ink: "#e8f4ff",
   white: "#ffffff",
+  whiteSoft: "rgba(255,255,255,.75)",
+  whiteDim: "rgba(255,255,255,.5)",
+  whiteFaint: "rgba(255,255,255,.35)",
+  // 青系：射击/速度/攻击
   cyan: "#5ee6ff",
   cyanSoft: "#9adcff",
+  cyanDark: "#2f7bff",
+  // 金系：分数/完成/稀有
   gold: "#ffd166",
   goldSoft: "#ffe9b0",
+  goldDark: "#ffd93b",
+  // 粉系：生命/暴击/放弃
   pink: "#ff6b9d",
+  pinkSoft: "#ff8fa3",
+  pinkDark: "#ff9a9a",
+  // 红系：结束/敌机/危险
   red: "#ff5c6a",
-  orange: "#ff8a3d",
-  lilac: "#c7a6ff",
-  violet: "#8a7bff",
-  green: "#7dffb0",
+  redSoft: "#ff6b6b",
+  // 绿系：成就/生命力
+  green: "#7CFC00",
+  greenSoft: "#9dff57",
+  // 紫系：天赋/辅助/商城
+  lilac: "#c8a6ff",
+  lilacSoft: "#e0c2ff",
+  lilacDark: "#d0a6ff",
+  // 橙系：爆炸/追击
+  orange: "#ff8a55",
+  orangeSoft: "#ffa94d",
+  // 背景深色
+  panelDark: "#05121c",
+  bgDark: "#03202e",
+  // 进度条轨道
   track: "rgba(255,255,255,.1)",
 };
 
@@ -33,14 +56,6 @@ export function hexToRgba(hex, alpha = 1) {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
 }
 
-/** 垂直线性渐变对象 */
-export function vGrad(ctx, x, y, w, h, c0, c1) {
-  const g = ctx.createLinearGradient(x, y, x, y + h);
-  g.addColorStop(0, c0);
-  g.addColorStop(1, c1);
-  return g;
-}
-
 /** 发光文字：自动按逻辑宽度缩放字号 */
 export function glowText(ctx, o) {
   const {
@@ -52,7 +67,9 @@ export function glowText(ctx, o) {
   } = o;
   if (text === undefined || text === null) return;
   ctx.save();
-  ctx.globalAlpha = alpha;
+  // 乘算而非覆盖：保留调用方已设置的透明度（如 toast 淡出），
+  // 覆盖会让淡出中的文字被强制拉回全亮直到瞬间消失
+  ctx.globalAlpha *= alpha;
   const wstr = weight ? weight + " " : "";
   setf(ctx, wstr + size + "px " + fontFamily);
   ctx.textAlign = align;
@@ -64,7 +81,7 @@ export function glowText(ctx, o) {
   ctx.restore();
 }
 
-/** 玻璃面板：渐变底 + 描边 + 顶部高光 + 可选外发光 */
+/** 玻璃面板：纯色底（top 已废弃，统一用 mid 深度）+ 描边 + 顶部高光 + 可选外发光 */
 export function softPanel(ctx, x, y, w, h, r = 14, opts = {}) {
   const {
     top = "rgba(84,150,255,.20)",
@@ -75,15 +92,12 @@ export function softPanel(ctx, x, y, w, h, r = 14, opts = {}) {
     glow = 0,
     highlight = true,
   } = opts;
+  void top; void bottom;
   const rr = Math.max(1, r);
   ctx.save();
   if (glow > 0) { ctx.shadowColor = border; ctx.shadowBlur = glow; }
-  const g = ctx.createLinearGradient(0, y, 0, y + h);
-  g.addColorStop(0, top);
-  g.addColorStop(0.5, mid);
-  g.addColorStop(1, bottom);
   roundRect(ctx, x, y, w, h, rr);
-  ctx.fillStyle = g;
+  ctx.fillStyle = mid;
   ctx.fill();
   ctx.shadowBlur = 0;
   ctx.lineWidth = borderW;
@@ -107,13 +121,13 @@ export function lineBtn(ctx, x, y, w, h, color, label, o = {}) {
     textColor = color, alpha = 1,
     fontFamily = "sans-serif", r = 13,
   } = o;
+  // 深色文字（如 bgDark / #4a3000）需要更亮的底色才能看清；
+  // 亮色文字用半透明底色即可。
+  const darkText = isDarkHex(textColor);
   ctx.save();
-  ctx.globalAlpha = alpha;
-  const g = ctx.createLinearGradient(0, y, 0, y + h);
-  g.addColorStop(0, hexToRgba(color, 0.5));
-  g.addColorStop(1, hexToRgba(color, 0.06));
+  ctx.globalAlpha *= alpha;   // 乘算保留调用方透明度（同 glowText）
   roundRect(ctx, x, y, w, h, r);
-  ctx.fillStyle = g;
+  ctx.fillStyle = hexToRgba(color, darkText ? 0.62 : 0.32);
   ctx.fill();
   ctx.shadowColor = color;
   ctx.shadowBlur = glow * 0.5;
@@ -123,10 +137,23 @@ export function lineBtn(ctx, x, y, w, h, color, label, o = {}) {
   ctx.shadowBlur = 0;
   glowText(ctx, {
     text: label, x: x + w / 2, y: y + h / 2,
-    size, weight, color: textColor, blur: glow,
+    size, weight, color: textColor, blur: darkText ? 0 : glow,
     align: "center", baseline: "middle", fontFamily,
   });
   ctx.restore();
+}
+
+/** 判断十六进制颜色是否偏暗（用于文字/底色对比度自适应） */
+export function isDarkHex(color) {
+  if (typeof color !== "string" || color[0] !== "#") return false;
+  let h = color.slice(1);
+  if (h.length === 3) h = h.split("").map(c => c + c).join("");
+  if (h.length !== 6) return false;
+  const n = parseInt(h, 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) < 98;
 }
 
 /** 圆角进度条 */

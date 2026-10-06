@@ -5,6 +5,7 @@ import {
   W, H, fontScale, computeViewport, setViewport, STATE, SKILLS, ACHIEVEMENTS,
   DAILY_QUESTS, META, POWERUP_DEFS, POWERUP_WEIGHTS_EARLY, POWERUP_WEIGHTS_LATE,
   DIFFICULTY_PRESETS, todayKey, ENEMY_TYPES,
+  ENEMY_LEVEL, enemyLevelScale, refireGateDistance, skillMax, BULLET,
 } from "../js/config.js";
 
 afterEach(() => {
@@ -85,6 +86,43 @@ describe("config", () => {
     const v = computeViewport();
     assert.equal(v.h, 720);
     assert.ok(v.w >= 320 && v.w <= 480);
+  });
+
+  // ---------- 敌方等级成长 ----------
+  it("敌方等级不再停在 30 级（上限显著提高）", () => {
+    assert.ok(ENEMY_LEVEL.maxLevel > 30, "旧版 30 级硬顶导致后期难度不再增长");
+  });
+
+  it("enemyLevelScale 在软上限内线性、之后减半", () => {
+    assert.equal(enemyLevelScale(1), 0);
+    assert.equal(enemyLevelScale(2), 1);
+    assert.equal(enemyLevelScale(30), 29);
+    // 超过软上限：每级只按 50% 计入
+    assert.equal(enemyLevelScale(31), 29.5);
+    assert.equal(enemyLevelScale(40), 29 + 10 * ENEMY_LEVEL.softCapFactor);
+    // 单调递增且不失控
+    assert.ok(enemyLevelScale(99) > enemyLevelScale(50));
+    assert.ok(enemyLevelScale(99) < enemyLevelScale(99) + 1);
+    // 非法输入兜底
+    assert.equal(enemyLevelScale(0), 0);
+    assert.equal(enemyLevelScale(-5), 0);
+    assert.equal(enemyLevelScale(undefined), 0);
+  });
+
+  // ---------- 射击闸门：射速技能必须真正生效 ----------
+  it("refireGateDistance 与射击间隔联动且不低于下限", () => {
+    const slow = refireGateDistance(0.5);
+    const fast = refireGateDistance(0.25);
+    assert.ok(fast < slow, "射速越快，波间距应越小");
+    assert.ok(slow <= BULLET.refireDist, "不得超过原闸门距离");
+    // 超快射速也要保留最小间距，避免子弹叠成一条线
+    assert.ok(refireGateDistance(0.01) >= 36);
+    assert.ok(refireGateDistance(0.001) >= 36);
+  });
+
+  it("skillMax 返回 SKILLS 的真实上限", () => {
+    for (const s of SKILLS) assert.equal(skillMax(s.id), s.max);
+    assert.equal(skillMax("not_exist"), 0);
   });
 
   it("fontScale 随逻辑宽度变化", () => {

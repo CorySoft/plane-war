@@ -19,8 +19,27 @@ function allocBullet() {
     dmg: 0, r: 0, baseR: 0, friendly: true, color: "",
     traveled: 0, maxRange: 0, pierceCount: 0, maxPierce: 0,
     splitCount: 0, explosionRadius: 0, expChance: 0, expDmgRatio: 0, isScatter: false, isCrit: false,
-    _refire: false, life: 0, homing: 0, knockback: 0,
+    _refire: false, life: 0, homing: 0, knockback: 0, nextSplitDist: 0, splitRange: 0,
+    hitUids: new Set(),   // 已命中过的敌机 uid（穿透/碎片每敌只结算一次）
   };
+}
+
+/**
+ * 该子弹是否尚未命中过这架敌机。
+ * 穿透弹与分裂碎片命中后不会立即销毁，若不去重会在重叠的每一帧重复扣血，
+ * 造成「碎片贴脸秒杀」的异常伤害。
+ */
+export function canHitEnemy(b, e) {
+  if (!b || !e) return false;
+  if (!b.hitUids) b.hitUids = new Set();
+  return !b.hitUids.has(e.uid);
+}
+
+/** 记录一次命中（幂等） */
+export function markHitEnemy(b, e) {
+  if (!b || !e) return;
+  if (!b.hitUids) b.hitUids = new Set();
+  b.hitUids.add(e.uid);
 }
 
 /** 释放子弹回池（重置动态字段） */
@@ -35,6 +54,8 @@ function freeBullet(b) {
   b.isScatter = false;
   b.isCrit = false;
   b._refire = false; b.life = 0; b.homing = 0; b.knockback = 0;
+  b.nextSplitDist = 0; b.splitRange = 0;
+  b.hitUids.clear();
   if (pool.length < 400) pool.push(b); // 防爆量：池上限
 }
 
@@ -79,8 +100,8 @@ export function fireBullet(angle, dmg, player, x, y, spd = BULLET.baseSpeed, isE
     + (critBuff ? 0.5 : 0);
   const finalDmg = isCrit ? Math.round(dmg * critMulti) : dmg;
 
-  // 子弹速度加成
-  const speedMul = 1 + (player.skills.bulletSpeed || 0) * 0.20;
+  // 子弹速度加成（收敛：每级 +15%，满级 +90%）
+  const speedMul = 1 + (player.skills.bulletSpeed || 0) * 0.15;
   const finalSpd = spd * speedMul;
 
   // 天基武器：出膛后加速
@@ -97,8 +118,8 @@ export function fireBullet(angle, dmg, player, x, y, spd = BULLET.baseSpeed, isE
   const b = allocBullet();
   b.x = x ?? player.x;
   b.y = y ?? (player.y - player.h / 2);
-  b.vx = Math.sin(angle) * 3;
-  b.vy = -finalSpd;
+  b.vx = Math.sin(angle) * finalSpd;
+  b.vy = -Math.cos(angle) * finalSpd;
   b.baseSpd = finalSpd;
   b.accel = accel;
   b.dmg = finalDmg;
@@ -114,6 +135,11 @@ export function fireBullet(angle, dmg, player, x, y, spd = BULLET.baseSpeed, isE
   b.pierceCount = 0;
   b.maxPierce = behaviors.has("penetrate") ? penetrateLv : 0;
   b.splitCount = behaviors.has("split") ? (1 + splitLv * BULLET.splitCountPerLevel) : 0;
+  // 「分裂距离」技能：决定碎片飞行射程（默认为基础值）
+  const splitDistLv = player.skills.splitDist || 0;
+  b.splitRange = behaviors.has("split")
+    ? BULLET.splitFragBaseRange + splitDistLv * BULLET.splitFragRangePerLevel
+    : 0;
   b.explosionRadius = isExplosionBullet ? BULLET.explosionBaseRadius + expRangeLv * BULLET.explosionRadiusPerLevel : 0;
   b.expDmgRatio = isExplosionBullet ? (BULLET.explosionBaseDmgRatio + expDmgLv * BULLET.explosionDmgRatioPerLevel) : 0;
   b.isScatter = false;
@@ -129,26 +155,56 @@ export function fireBullet(angle, dmg, player, x, y, spd = BULLET.baseSpeed, isE
 }
 
 /** 创建分裂弹碎片（由分裂/爆炸技能触发） */
-export function spawnSplitBullet(x, y, angle, dmg, color, parentR = 4) {
+export function spawnSplitBullet(x, y, angle, dmg, color, parentR = 4, range = 200) {
   const spd = BULLET.splitSpeed;
   const b = allocBullet();
   b.x = x; b.y = y;
-  b.vx = Math.sin(angle) * 2;
-  b.vy = -spd;
+  b.vx = Math.sin(angle) * spd;
+  b.vy = -Math.cos(angle) * spd;
   b.dmg = dmg;
-  b.r = Math.max(1.5, parentR * 0.4);
+  b.r = Math.max(2, parentR * 0.45);   // 小圆子弹：半径稍大于原碎片
   b.baseR = b.r;
   b.friendly = true;
   b.color = color || "#a0ffd0";
   b.traveled = 0;
-  b.maxRange = 200;
+  b.maxRange = range;
   b.behaviors.clear();
   b.pierceCount = 0; b.maxPierce = 0;
   b.splitCount = 0; b.explosionRadius = 0; b.expDmgRatio = 0;
   b.isScatter = true; b.isCrit = false;
   b._refire = false; b.life = 0; b.accel = 0;
+  b.nextSplitDist = 0; b.knockback = 0;
+  b.hitUids.clear();
   pushBullet(b);
   return b;
+}
+
+/**
+ * 速度矢量 → 子弹角度（本项目约定：0 = 正上方，正值顺时针）。
+ * fireBullet 用 (sin a, -cos a) 生成速度，因此由 (vx,vy) 反解为 atan2(vx, -vy)。
+ * 直接用 atan2(vy, vx) 会相差 90°，表现为「碎片朝侧面而不是朝前飞」。
+ */
+export function headingToBulletAngle(vx, vy) {
+  return Math.atan2(vx, -vy);
+}
+
+/**
+ * 主弹命中/飞行触发分裂：围绕子弹飞行方向的前向等间距扇形碎片
+ * @param {number} travelDir 主弹飞行方向（子弹角度制：0 = 正上方）
+ * @param {number} range 碎片射程（分裂距离技能加成）
+ * @returns {number} 生成的碎片数
+ */
+export function spawnSplitBurst(x, y, travelDir, count, dmg, color, parentR = 4, range = 200) {
+  if (count <= 0) return 0;
+  const n = Math.min(Math.max(count, 1), 12);       // 单轮碎片数量上限，防爆量
+  // 前向窄扇形：各方向围绕主弹行进方向（纵深延伸），满级也不横向横散
+  const arc = Math.min(1.2, n * 0.2);               // ±最大约 34°，随片数微张
+  for (let k = 0; k < n; k++) {
+    const t = n === 1 ? 0.5 : k / (n - 1);          // 0..1
+    const ang = travelDir + (t - 0.5) * arc;
+    spawnSplitBullet(x, y, ang, dmg, color, parentR, range);
+  }
+  return n;
 }
 
 /** 从对象池取出一发敌方子弹 */
@@ -168,6 +224,8 @@ export function spawnHostileBullet(x, y, vx, vy, opts = {}) {
   b.splitCount = 0; b.explosionRadius = 0;
   b.isScatter = false; b.isCrit = false;
   b._refire = false; b.accel = 0; b.homing = 0;
+  b.knockback = 0;
+  b.hitUids.clear();
   b.dmg = opts.dmg || 0;
   pushBullet(b);
   return b;
@@ -227,11 +285,16 @@ export function updateBullets(dt) {
     const b = bullets[i];
     if (!b) continue;
 
-    // 天基武器：子弹出膛后不断加速
+    // 天基武器：沿子弹自身飞行方向加速（旧实现直接改写 vy，会把左右护法的
+    // 水平弹强行掰成向上飞，必须按速度矢量等比放大）
     if (b.accel > 0 && b.friendly && !b.isScatter) {
-      const curSpd = Math.abs(b.vy);
-      const newSpd = Math.min(curSpd + b.accel * dt * 60, BULLET.orbitalMaxSpeed);
-      b.vy = -newSpd;
+      const curSpd = Math.hypot(b.vx, b.vy);
+      if (curSpd > 0.001) {
+        const newSpd = Math.min(curSpd + b.accel * dt * 60, BULLET.orbitalMaxSpeed);
+        const k = newSpd / curSpd;
+        b.vx *= k;
+        b.vy *= k;
+      }
     }
 
     const dx = b.vx * dt * 60;
@@ -247,6 +310,7 @@ export function updateBullets(dt) {
       if (b.life <= 0 || b.y < -30 || b.y > H + 30 || b.x < -30 || b.x > W + 30) dead = true;
     }
     if (dead) { freeBullet(b); continue; }
+
     next.push(b);
   }
   bullets = next;
@@ -270,10 +334,10 @@ export function drawBullets(ctx) {
   for (const [color, arr] of groups) {
     ctx.fillStyle = color;
     if (useShadow) ctx.shadowColor = color;
-    // 友方矩形与敌方圆形分离绘制，减少路径切换
+    // 友方矩形子弹局部：主弹画矩形，分裂碎片（isScatter） 画小圆
     for (const b of arr) {
       if (!b) continue;
-      if (b.friendly) {
+      if (b.friendly && !b.isScatter) {
         const bw = 5, bh = 16;
         ctx.fillRect(b.x - bw / 2, b.y - bh / 2, bw, bh);
       }
@@ -282,7 +346,10 @@ export function drawBullets(ctx) {
     let hasArc = false;
     for (const b of arr) {
       if (!b) continue;
-      if (!b.friendly) { ctx.moveTo(b.x + b.r, b.y); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); hasArc = true; }
+      // 敌方子弹与分裂小圆碎片都画圆
+      if (!b.friendly || b.isScatter) {
+        ctx.moveTo(b.x + b.r, b.y); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); hasArc = true;
+      }
     }
     if (hasArc) ctx.fill();
   }
@@ -327,6 +394,15 @@ export function maxMainBulletTraveled() {
     if (b.friendly && !b.isScatter && !b._refire && b.traveled > m) m = b.traveled;
   }
   return m;
+}
+
+/** 当前同屏友方子弹数量（密度兜底用） */
+export function countFriendlyBullets() {
+  let n = 0;
+  for (const b of bullets) {
+    if (b && b.friendly) n++;
+  }
+  return n;
 }
 
 /** 把当前所有尚未触发的主弹标记为「已触发」（下一波射击发出后调用） */

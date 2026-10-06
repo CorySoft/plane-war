@@ -4,25 +4,21 @@
 
 import { W, H } from "./config.js";
 import { clamp, roundRect, setf } from "./utils.js";
-import { bar, glowText, softPanel, hexToRgba, pulse } from "./theme.js";
+import { bar, glowText, hexToRgba, pulse, C } from "./theme.js";
 
 // 分数滚动显示（跨帧向真实分数趋近，数字变化更顺滑）
 let shownScore = -1;
 
-export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNeed, lives, maxLives, combo, player, frame }) {
+export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNeed, lives, maxLives, combo, comboFrac, player, frame }) {
   if (shownScore < 0 || score < shownScore) shownScore = score;
   else shownScore += Math.max(1, Math.round((score - shownScore) * 0.2));
   const dispScore = Math.min(score, shownScore);
 
   const rEdge = W - 16;
 
-  // ===== 左上：得分玻璃板 =====
-  softPanel(ctx, 8, 6, 152, 90, 14, {
-    top: "rgba(94,230,255,.12)", mid: "rgba(14,20,42,.44)",
-    bottom: "rgba(5,7,18,.72)", border: "rgba(94,230,255,.22)",
-  });
+  // ===== 左上：得分 =====
   ctx.textAlign = "left"; ctx.textBaseline = "top";
-  ctx.fillStyle = "#5ee6ff";
+  ctx.fillStyle = C.cyan;
   setf(ctx, "bold 22px 'sans-serif'");
   ctx.fillText("得分", 20, 13);
   glowText(ctx, {
@@ -30,36 +26,32 @@ export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNee
     size: 29, weight: "bold", color: "#ffffff", blur: 7,
     align: "left", baseline: "top", fontFamily: "'Courier New', monospace",
   });
-  ctx.fillStyle = "rgba(255,255,255,.6)";
+  ctx.fillStyle = C.whiteDim;
   setf(ctx, "13px 'sans-serif'");
   ctx.fillText("最高 " + String(best).padStart(6, "0"), 20, 78);
 
-  // ===== 右上：难度 / 等级 / 经验玻璃板 =====
-  softPanel(ctx, rEdge - 124, 6, 124, 80, 14, {
-    top: "rgba(255,209,102,.08)", mid: "rgba(16,22,42,.42)",
-    bottom: "rgba(5,7,18,.72)", border: "rgba(255,209,102,.2)",
-  });
+  // ===== 右上：难度 / 等级 / 经验 =====
   ctx.textAlign = "right";
   glowText(ctx, {
     text: "难度 Lv." + level, x: rEdge - 10, y: 10, size: 15, weight: "bold",
-    color: "#ffd166", blur: 8, align: "right", baseline: "top", fontFamily: "'sans-serif'",
+    color: C.gold, blur: 8, align: "right", baseline: "top", fontFamily: "'sans-serif'",
   });
   glowText(ctx, {
     text: "等级 Lv." + pLevel, x: rEdge - 10, y: 29, size: 15, weight: "bold",
-    color: "#8ad4ff", blur: 8, align: "right", baseline: "top", fontFamily: "'sans-serif'",
+    color: C.cyanSoft, blur: 8, align: "right", baseline: "top", fontFamily: "'sans-serif'",
   });
   // 经验条
   const xpW = 94, xpH = 6, xpY = 51;
-  bar(ctx, rEdge - 10 - xpW, xpY, xpW, xpH, clamp(xp / xpNeed, 0, 1), "#8ad4ff", { rounded: 3, glow: 6 });
+  bar(ctx, rEdge - 10 - xpW, xpY, xpW, xpH, clamp(xp / xpNeed, 0, 1), C.cyanSoft, { rounded: 3, glow: 6 });
   glowText(ctx, {
     text: "敌方 Lv." + enemyLevel, x: rEdge - 10, y: 62, size: 13, weight: "bold",
-    color: "#ff6b6b", blur: 7, align: "right", baseline: "top", fontFamily: "'sans-serif'",
+    color: C.redSoft, blur: 7, align: "right", baseline: "top", fontFamily: "'sans-serif'",
   });
 
   // ===== 连击（带热度脉动） =====
   if (combo >= 3) {
     const hot = combo >= 8;
-    const cc = hot ? "#ff5c6a" : "#ffd166";
+    const cc = hot ? C.red : C.gold;
     const k = hot ? clamp((combo - 8) / 6, 0, 1) : clamp((combo - 3) / 5, 0, 1);
     const pull = 1 + (hot ? 0.12 + 0.06 * pulse(frame * 1, 6) : 0.05 * pulse(frame * 1, 6));
     ctx.save();
@@ -70,15 +62,20 @@ export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNee
       color: cc, blur: 10 + 14 * k, align: "right", baseline: "middle", fontFamily: "'sans-serif'",
     });
     ctx.restore();
-    // 热度短线
-    const bw2 = 20 + 34 * k;
+    // 连击倒计时条：显示 comboTime 剩余比例，走完之后连击归零
+    const cbw = 52, cbh = 4, cby = 132;
+    const cRatio = clamp(comboFrac ?? 1, 0, 1);
     ctx.save();
-    ctx.globalAlpha = 0.7;
-    const hg = ctx.createLinearGradient(rEdge - 6 - bw2, 0, rEdge - 6, 0);
-    hg.addColorStop(0, "rgba(0,0,0,0)");
-    hg.addColorStop(1, hexToRgba(cc, 0.9));
-    ctx.fillStyle = hg;
-    ctx.fillRect(rEdge - 6 - bw2, 124, bw2, 2);
+    roundRect(ctx, rEdge - 6 - cbw, cby, cbw, cbh, 2);
+    ctx.fillStyle = hexToRgba(cc, 0.22);
+    ctx.fill();
+    if (cRatio > 0) {
+      ctx.shadowColor = cc;
+      ctx.shadowBlur = 5;
+      ctx.fillStyle = hexToRgba(cc, 0.95);
+      roundRect(ctx, rEdge - 6 - cbw, cby, cbw * cRatio, cbh, 2);
+      ctx.fill();
+    }
     ctx.restore();
   }
 
@@ -89,9 +86,9 @@ export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNee
     ctx.save();
     ctx.translate(20 + i * 28, H - 34);
     ctx.scale(bob, bob);
-    ctx.shadowColor = "#ff6b9d";
+    ctx.shadowColor = C.pink;
     ctx.shadowBlur = 8;
-    ctx.fillStyle = "#ff6b9d";
+    ctx.fillStyle = C.pink;
     setf(ctx, "22px 'sans-serif'");
     ctx.fillText("♥", 0, 0);
     ctx.restore();
@@ -125,34 +122,33 @@ export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNee
     });
   }
 
-  // ===== buff 状态条 =====
+  // ===== buff 状态条（按功能合并色组） =====
   const activeBuffs = [];
-  if (player.buffs.rapid > 0) activeBuffs.push(["rapid", "⚡急速", "#ffe066", 8, player.buffs.rapid]);
-  if (player.buffs.speed > 0) activeBuffs.push(["speed", "»加速", "#9be8ff", 8, player.buffs.speed]);
-  if (player.buffs.double > 0) activeBuffs.push(["double", "双倍", "#ffa8d9", 8, player.buffs.double]);
+  if (player.buffs.rapid > 0) activeBuffs.push(["rapid", "⚡急速", "#5ee6ff", 8, player.buffs.rapid]);
+  if (player.buffs.speed > 0) activeBuffs.push(["speed", "»加速", "#5ee6ff", 8, player.buffs.speed]);
+  if (player.buffs.double > 0) activeBuffs.push(["double", "双倍", "#ffd166", 8, player.buffs.double]);
   if (player.shield > 0) activeBuffs.push(["shield", "护盾", "#66e0ff", player.maxShield, player.shield]);
-  if ((player.skills.magnet || 0) > 0 && player.buffs.magnet <= 0) activeBuffs.push(["magnet", "磁力", "#d0a6ff", 1, 1]);
+  if ((player.skills.magnet || 0) > 0 && player.buffs.magnet <= 0) activeBuffs.push(["magnet", "磁力", "#66e0ff", 1, 1]);
   if (player.powerTime > 0) activeBuffs.push(["power", "火力", "#ffd166", 15, player.powerTime]);
   if (player.buffs.madHunt > 0) activeBuffs.push(["madHunt", "追击", "#fca311", 8, player.buffs.madHunt]);
-  if (player.buffs.drop > 0) activeBuffs.push(["drop", "☘爆率", "#ffd93b", 8, player.buffs.drop]);
+  if (player.buffs.drop > 0) activeBuffs.push(["drop", "☘爆率", "#7CFC00", 8, player.buffs.drop]);
   if (player.buffs.critboost > 0) activeBuffs.push(["critboost", "致命", "#ff8fa3", 8, player.buffs.critboost]);
-  if (player.buffs.knockback > 0) activeBuffs.push(["knockback", "»击退", "#5ee6ff", 8, player.buffs.knockback]);
+  if (player.buffs.knockback > 0) activeBuffs.push(["knockback", "»击退", "#ff8fa3", 8, player.buffs.knockback]);
 
   let bx = 16;
+  let by = H - 98;
+  const bh = 20;
   const len = activeBuffs.length;
   // 竖屏窄屏(W<480)时压缩条宽，避免 buff 条溢出右侧
   const slot = len > 0 ? (W - 32 - (len - 1) * 6) / len : 0;
-  const w = Math.min(74, Math.max(46, slot));
+  const w = Math.min(74, Math.max(40, slot));
   for (const [key, label, color, total, remain] of activeBuffs) {
-    if (bx + w > W - 6) break;
-    const by = H - 98, bh = 20;
+    // 一行放不下则换行到上一行，避免 buff 被静默丢弃
+    if (bx + w > W - 6) { bx = 16; by -= bh + 6; }
     ctx.save();
     // 胶囊底
-    const cg = ctx.createLinearGradient(0, by, 0, by + bh);
-    cg.addColorStop(0, hexToRgba(color, 0.2));
-    cg.addColorStop(1, "rgba(10,14,30,.9)");
     roundRect(ctx, bx, by, w, bh, 8);
-    ctx.fillStyle = cg;
+    ctx.fillStyle = hexToRgba(color, 0.18);
     ctx.fill();
     ctx.strokeStyle = hexToRgba(color, 0.55);
     ctx.lineWidth = 1;
@@ -179,13 +175,14 @@ export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNee
 function getBehaviorLabel(player) {
   const s = player.skills;
   let label = null;
-  if (s.penetrate > 0) label = { label: "◆穿透 " + s.penetrate + "级", color: "#aa66ff" };
+  if (s.penetrate > 0) label = { label: "◆穿透 " + s.penetrate + "级", color: "#5ee6ff" };
   else if (s.explosion > 0) {
     const ch = s.expChance || 0, dm = s.expDmg || 0, rn = s.expRange || 0;
-    label = { label: "◆爆炸 " + ch + "/" + dm + "/" + rn, color: "#ff6633" };
+    label = { label: "◆爆炸 " + ch + "/" + dm + "/" + rn, color: "#ff8a55" };
   }
-  else if (s.split > 0) label = { label: "◆分裂 " + s.split + "级", color: "#7bd67b" };
+  else if (s.split > 0) label = { label: "◆分裂 " + s.split + "级", color: "#ff8a55" };
   const extras = [];
+  if ((s.splitDist || 0) > 0) extras.push("分距" + s.splitDist + "级");
   if ((s.orbital || 0) > 0) extras.push("天基" + s.orbital + "级");
   if ((s.bulletSpeed || 0) > 0) extras.push("弹速" + s.bulletSpeed + "级");
   if ((s.volley || 0) > 0) extras.push("连射" + s.volley + "级");

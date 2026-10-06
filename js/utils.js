@@ -6,7 +6,8 @@ import { W } from "./config.js";
 
 export const rand = (a, b) => a + Math.random() * (b - a);
 export const randInt = (a, b) => Math.floor(rand(a, b + 1));
-export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+// NaN 防线：NaN 与任何数比较均为 false 会原样透传，下游 slowmo/坐标一旦吃到即整局报废
+export const clamp = (v, a, b) => (Number.isNaN(v) ? a : v < a ? a : v > b ? b : v);
 export const pick = arr => arr[Math.floor(Math.random() * arr.length)];
 export const hypot = (x1, y1, x2, y2) => Math.hypot(x1 - x2, y1 - y2);
 export const lerp = (a, b, t) => a + (b - a) * t;

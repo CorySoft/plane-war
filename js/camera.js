@@ -9,6 +9,8 @@ export let slowmo = 1;
 let targetSlowmo = 1;
 
 export function triggerShake(intensity) {
+  // NaN 防御：Math.max(shake, NaN)=NaN 会让震动永久失效且无法恢复
+  if (!Number.isFinite(intensity)) return;
   shake = Math.max(shake, intensity);
 }
 

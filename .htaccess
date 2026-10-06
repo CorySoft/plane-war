@@ -1,0 +1,47 @@
+# ============================================================
+# 站点根重写：把请求落到 htdocs/wwwroot（游戏真正所在目录）
+#
+# 关键修正：判定文件是否存在必须用 RewriteRule 的 $1 捕获组，
+# 而不是 %{REQUEST_URI}——后者包含查询串（如 /js/game.js?v=0.1.8），
+# 拼出来的路径 "-f" 永远失败，版本化模块会被误转发到 index.php → 404，
+# 表现为「进度条走到 100% 后提示加载失败」。
+# ============================================================
+RewriteEngine On
+
+# 0) 禁止访问服务端日志与节流文件（位于 wwwroot/，含用户提交的敏感内容）。
+#    用 mod_rewrite 返回 403，只依赖 FileInfo（与下方 RewriteRule 同级，已被 Byethost 允许），
+#    避免 Require/AllowOverride 不被允许时整站 500。必须放在通用 ^(.+)$ 重写之前以优先匹配。
+RewriteRule ^(feedback\.log|\.push_throttle)$ - [F]
+
+# 1) 根路径 → 游戏首页
+RewriteCond %{DOCUMENT_ROOT}/wwwroot/index.html -f
+RewriteRule ^$ wwwroot/index.html [L]
+
+# 2) 静态资源（js/css/图片，含 ?v= 版本查询串）直接提供
+RewriteCond %{DOCUMENT_ROOT}/wwwroot/$1 -f
+RewriteRule ^(.+)$ wwwroot/$1 [L]
+
+# 3) 目录 → 该目录下的 index.html
+RewriteCond %{DOCUMENT_ROOT}/wwwroot/$1/index.html -f
+RewriteRule ^(.+)$ wwwroot/$1/index.html [L]
+
+# ============================================================
+# MIME 兜底：ES module 必须以 JavaScript 类型返回，
+# 否则浏览器会因「MIME 类型不是 JS」直接拒绝执行整个模块图。
+# ============================================================
+<IfModule mod_mime.c>
+  AddType application/javascript .js .mjs
+  AddType text/css .css
+  AddType application/json .json
+</IfModule>
+
+# ============================================================
+# 破除静态缓存（Byethost 静态文件可能带长缓存头）
+# ============================================================
+<IfModule mod_headers.c>
+  <FilesMatch "\.(js|mjs|html|css|json)$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
+</IfModule>

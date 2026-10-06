@@ -4,7 +4,7 @@
 
 import { W, H, DIFFICULTY } from "./config.js";
 import { rand } from "./utils.js";
-import { spawnEnemy, enemies } from "./enemy.js";
+import { spawnEnemy, enemies, nextEnemyUid } from "./enemy.js";
 
 export function getDifficultyLevel(score) {
   return Math.min(DIFFICULTY.maxLevel, 1 + Math.floor(score / DIFFICULTY.levelUpScore));
@@ -21,13 +21,14 @@ let swarmWarned = false;
 let bossWarnPending = false;
 let bossWarnTimer = 0;
 
-export function updateWaves(dt, level, now, diff) {
+// @param enemyLevel 当前敌方等级（精英波此前漏传 → 后期精英波全是 1 级白板）
+export function updateWaves(dt, level, diff, enemyLevel = 1) {
   // 精英波计时
   eliteTimer += dt;
   if (eliteTimer >= DIFFICULTY.eliteWaveInterval && level >= 2) {
     eliteTimer = 0;
     const count = 2 + Math.min(level, 5);
-    for (let i = 0; i < count; i++) spawnEnemy(level, diff);
+    for (let i = 0; i < count; i++) spawnEnemy(level, diff, enemyLevel);
   }
 
   // Boss 预警（等级达标后先提示 2 秒）
@@ -115,6 +116,7 @@ export function spawnBoss(type, level = 1) {
   const hp = Math.round(cfg.hp * lvlScale);
   const firstPhase = cfg.phases[0];
   const e = {
+    uid: nextEnemyUid(),
     type: "boss",
     bossType: type,
     name: cfg.name,

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# post-commit — git 提交后自动增量部署到 Byethost FTP
+# 启用：git config core.hooksPath .githooks
+# 跳过本次部署：git commit --no-verify
+set -u
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+# 需要 .deploy.env 存在且是否有变更文件
+if [ ! -f ".deploy.env" ]; then
+  exit 0
+fi
+
+# 只在实际修改了可部署文件时才部署
+changed=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | grep -Ev '^(test/|test-results/|\.gitignore|DEPLOY\.md|deploy\.sh|node_modules/)' || true)
+if [ -z "$changed" ]; then
+  exit 0
+fi
+
+echo "== 检测到变更，自动部署到 FTP =="
+bash "$ROOT/deploy.sh" --force > /tmp/plane_war_auto_deploy.log 2>&1
+status=$?
+if [ $status -eq 0 ]; then
+  echo "（自动部署成功）"
+else
+  echo "（自动部署失败，详见 /tmp/plane_war_auto_deploy.log）"
+fi
+exit 0

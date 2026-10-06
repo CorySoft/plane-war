@@ -12,10 +12,19 @@ describe("wave", () => {
   });
 
   it("难度等级按分数封顶", () => {
+    const step = DIFFICULTY.levelUpScore;
     assert.equal(getDifficultyLevel(0), 1);
-    assert.equal(getDifficultyLevel(4999), 1);
-    assert.equal(getDifficultyLevel(5000), 2);
+    assert.equal(getDifficultyLevel(step - 1), 1);
+    assert.equal(getDifficultyLevel(step), 2);
+    assert.equal(getDifficultyLevel(step * 2), 3);
     assert.equal(getDifficultyLevel(1e9), DIFFICULTY.maxLevel);
+  });
+
+  it("难度档位不再过早封顶（后期仍有压迫感）", () => {
+    // maxLevel 决定「多久之后只剩敌方等级在涨」
+    assert.ok(DIFFICULTY.maxLevel >= 12, "难度等级上限过低会让中后期难度断档");
+    const capScore = DIFFICULTY.levelUpScore * (DIFFICULTY.maxLevel - 1);
+    assert.ok(capScore >= 45000, "封顶分数应撑到中后期");
   });
 
   it("生成率随等级提升并封顶", () => {
@@ -28,28 +37,30 @@ describe("wave", () => {
   });
 
   it("精英波在 2 级后触发", () => {
-    assert.equal(updateWaves(1, 1, 0, {}), null);
+    assert.equal(updateWaves(1, 1, 0), null);
     clearEnemies();
-    const ev = updateWaves(DIFFICULTY.eliteWaveInterval, 2, 0, { hpScale: 1, speedScale: 1, fireCdScale: 1 });
+    const ev = updateWaves(DIFFICULTY.eliteWaveInterval, 2, 0, 4);
     assert.equal(ev, null);
     assert.ok(enemies.length >= 2);
+    // 精英波必须携带当前敌方等级（曾漏传导致后期精英波全是 1 级白板）
+    assert.ok(enemies.every(e => e.enemyLevel === 4));
   });
 
   it("Boss 波按间隔触发一次", () => {
-    assert.equal(updateWaves(0, 4, 0, {}), null);
+    assert.equal(updateWaves(0, 4, 0), null);
     // 等级达标后先进 2 秒预警，再正式触发 Boss
-    assert.equal(updateWaves(0, 5, 0, {}), "bossWarn");
-    assert.equal(updateWaves(2, 5, 0, {}), "boss");
-    assert.equal(updateWaves(0, 5, 0, {}), null);
-    assert.equal(updateWaves(0, 10, 0, {}), "bossWarn");
-    assert.equal(updateWaves(2, 10, 0, {}), "boss");
+    assert.equal(updateWaves(0, 5, 0), "bossWarn");
+    assert.equal(updateWaves(2, 5, 0), "boss");
+    assert.equal(updateWaves(0, 5, 0), null);
+    assert.equal(updateWaves(0, 10, 0), "bossWarn");
+    assert.equal(updateWaves(2, 10, 0), "boss");
   });
 
   it("resetWaves 后可再次召唤 Boss", () => {
-    updateWaves(0, 5, 0, {});
+    updateWaves(0, 5, 0);
     resetWaves();
-    assert.equal(updateWaves(0, 5, 0, {}), "bossWarn");
-    assert.equal(updateWaves(2, 5, 0, {}), "boss");
+    assert.equal(updateWaves(0, 5, 0), "bossWarn");
+    assert.equal(updateWaves(2, 5, 0), "boss");
   });
 
   it("spawnBoss 血量随等级成长", () => {

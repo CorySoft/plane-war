@@ -2,18 +2,20 @@
  * ui.js — 菜单 / 结束 / 升级选择 / 暂停 / 伤害飘字
  * =========================================================== */
 
-import { W, H, STATE, TAU, SKILLS, POWERUP_DEFS, SHOP_ITEMS, getShopItemCost, ACHIEVEMENTS, DAILY_QUESTS, META } from "./config.js";
+import { W, H, TAU, SKILLS, POWERUP_DEFS, SHOP_ITEMS, getShopItemCost, ACHIEVEMENTS, META, skillLevelColor } from "./config.js";
 import { clamp, roundRect, setf } from "./utils.js";
 import { glowText, softPanel, lineBtn, bar, hexToRgba, C, pulse, veil } from "./theme.js";
+import { APP_VERSION } from "./version.js";
+import { drawSprite } from "./assets.js";
 import {
-  getStardust, getQuestView, getAchievementView, getDiscoveredPowerups, getShopLevels, getShopLevel,
+  getStardust, getQuestView, getAchievementView, getDiscoveredPowerups, getShopLevel,
   isAircraftUnlocked, getSelectedAircraft, isTalentPurchased, getSettings,
 } from "./meta.js";
 
 // ---------- 伤害飘字 ----------
 let damageNumbers = [];
 
-export function spawnDamageNumber(x, y, text, color = "#fff", big = false) {
+export function spawnDamageNumber(x, y, text, color = C.white, big = false) {
   const now = performance.now();
   // 持续密集伤害：同一区域的相同飘字 180ms 内不重复出现，避免叠成一片
   if (!big) {
@@ -119,6 +121,7 @@ let btnTalentRect = null;
 let btnTalentBackRect = null;
 let btnSettingsRect = null;
 let btnSettingsBackRect = null;
+let btnFeedbackRect = null;   // 主菜单「反馈」按钮
 let skillCards = [];
 let difficultyRects = {};
 let questClaimRects = [];       // 任务页各「领取」按钮
@@ -140,6 +143,26 @@ let btnClearNoRect = null;
 export function getClearYesButton() { return btnClearYesRect; }
 export function getClearNoButton() { return btnClearNoRect; }
 
+// 机库购买确认框
+let hangarConfirm = null;   // { id, name, cost }
+let btnHangarConfirmYesRect = null;
+let btnHangarConfirmNoRect = null;
+export const setHangarConfirm = v => { hangarConfirm = v; };
+export const getHangarConfirm = () => hangarConfirm;
+export function getHangarConfirmYesButton() { return btnHangarConfirmYesRect; }
+export function getHangarConfirmNoButton() { return btnHangarConfirmNoRect; }
+
+// 技能图鉴滚动（卡片网格超过可视区时可滚动，返回按钮固定在视口之下）
+let codexScroll = 0;        // 当前滚动偏移(像素)
+let codexMaxScroll = 0;     // 最大滚动量（内容高 - 视口高，>0 时才显示滚动条）
+let codexViewport = null;   // { x, y, w, h } 卡片可视区（用于 clip 与命中判定）
+export function getCodexScroll() { return codexScroll; }
+export function getCodexMaxScroll() { return codexMaxScroll; }
+export function getCodexViewport() { return codexViewport; }
+export function setCodexScroll(v) {
+  codexScroll = codexMaxScroll > 0 ? clamp(Math.round(v), 0, codexMaxScroll) : 0;
+}
+
 // 可点击的图鉴卡片区域（每帧重建）
 let codexCardRects = [];        // 技能图鉴 [{rect, skill, got}]
 let powerupCardRects = [];      // 道具图鉴 [{rect, key, def, got}]
@@ -154,6 +177,11 @@ let pageVeilAt = -1e9;
 export const setMenuPage = p => {
   if (menuPage === p) return;
   menuPage = p;
+  // 切页时清理弹窗（机库购买确认 / 清除缓存确认 / 详情卡片），防止残留跨页
+  setHangarConfirm(null);
+  setShowClearCache(false);
+  setDetailCard(null);
+  if (p !== "codex" && p !== "powerupCodex") codexScroll = 0;
   pageVeilAt = uiTime();
 };
 export const getMenuPage = () => menuPage;
@@ -182,31 +210,23 @@ function sectionLabel(ctx, text, x, y, color = "rgba(255,255,255,.75)", size = 1
   ctx.restore();
 }
 
-/** 子页大标题：白色→主题色渐变 + 辉光 */
+/** 子页大标题：主题色实色 + 辉光 */
 function pageTitle(ctx, text, x, y, color, size = 32, font = "'sans-serif'") {
   ctx.save();
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  const g = ctx.createLinearGradient(0, y, 0, y + size * 1.25);
-  g.addColorStop(0, "#ffffff");
-  g.addColorStop(0.45, hexToRgba(color, 1));
-  g.addColorStop(1, hexToRgba(color, 0.8));
   setf(ctx, "bold " + size + "px " + font);
   ctx.shadowColor = color;
   ctx.shadowBlur = 22;
-  ctx.fillStyle = g;
+  ctx.fillStyle = color;
   ctx.fillText(text, x, y);
   ctx.restore();
 }
 
-/** 标题下方渐隐装饰线 */
+/** 标题下方装饰短线 */
 function titleRule(ctx, x, y, halfW, color) {
   ctx.save();
-  const g = ctx.createLinearGradient(x - halfW, 0, x + halfW, 0);
-  g.addColorStop(0, "rgba(0,0,0,0)");
-  g.addColorStop(0.5, hexToRgba(color, 0.8));
-  g.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = g;
+  ctx.fillStyle = hexToRgba(color, 0.8);
   ctx.fillRect(x - halfW, y, halfW * 2, 2);
   ctx.restore();
 }
@@ -244,19 +264,15 @@ export function getHangarBackButton() { return btnHangarBackRect; }
 export function getTalentButton() { return btnTalentRect; }
 export function getTalentBackButton() { return btnTalentBackRect; }
 export function getSettingsButton() { return btnSettingsRect; }
+export function getFeedbackButton() { return btnFeedbackRect; }
 export function getSettingsBackButton() { return btnSettingsBackRect; }
 export function getHangarCards() { return hangarCardRects; }
 export function getTalentCards() { return talentCardRects; }
 export function getSettingToggles() { return settingToggleRects; }
 
-export function drawMenu(ctx, best, difficultyKey, presets, discovered = []) {
+export function drawMenu(ctx, best, difficultyKey, presets, discovered = [], player = null) {
   // 压暗以聚焦内容，同时保留背景的星云层次
-  const dim = ctx.createLinearGradient(0, 0, 0, H);
-  dim.addColorStop(0, "rgba(3,5,14,.5)");
-  dim.addColorStop(0.35, "rgba(3,5,14,.05)");
-  dim.addColorStop(0.72, "rgba(3,5,14,.2)");
-  dim.addColorStop(1, "rgba(3,5,14,.66)");
-  ctx.fillStyle = dim;
+  ctx.fillStyle = "rgba(5,7,16,.42)";
   ctx.fillRect(0, 0, W, H);
 
   hangarCardRects = [];
@@ -276,7 +292,7 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = []) {
   btnShopBuyRects = [];
   btnClearCacheRect = null;
 
-  if (menuPage === "codex") { drawSkillCodex(ctx, discovered); drawPageVeil(ctx); return; }
+  if (menuPage === "codex") { drawSkillCodex(ctx, discovered, player); drawPageVeil(ctx); return; }
   if (menuPage === "achieve") { drawAchieve(ctx); drawPageVeil(ctx); return; }
   if (menuPage === "hangar") { drawHangar(ctx); drawPageVeil(ctx); return; }
   if (menuPage === "talent") { drawTalent(ctx); drawPageVeil(ctx); return; }
@@ -284,35 +300,31 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = []) {
   if (menuPage === "powerupCodex") { drawPowerupCodex(ctx, getDiscoveredPowerups()); drawPageVeil(ctx); return; }
   if (menuPage === "shop") { drawShop(ctx); drawPageVeil(ctx); return; }
 
-  // ---- 标题：渐变填充 + 辉光，底层放大制造光晕 ----
+  // ---- 标题：纯色填充 + 辉光，底层放大制造光晕 ----
   const ty = H * 0.08;
   ctx.save();
   ctx.textAlign = "center"; ctx.textBaseline = "top";
   ctx.globalAlpha = 0.55;
   ctx.shadowColor = "rgba(90,220,255,.9)";
   ctx.shadowBlur = 40;
-  ctx.fillStyle = "#04101f";
+  ctx.fillStyle = C.panelDark;
   setf(ctx, "bold 56px 'Courier New', monospace");
   ctx.fillText("飞机大战", W / 2, ty + 2);
   ctx.globalAlpha = 1;
   ctx.shadowBlur = 0;
-  const tg = ctx.createLinearGradient(0, ty, 0, ty + 60);
-  tg.addColorStop(0, "#c2f8ff");
-  tg.addColorStop(0.55, "#63d8ff");
-  tg.addColorStop(1, "#2f7bff");
   setf(ctx, "bold 52px 'Courier New', monospace");
-  ctx.fillStyle = tg;
+  ctx.fillStyle = C.cyan;
   ctx.fillText("飞机大战", W / 2, ty);
   ctx.restore();
 
   // 清除缓存按钮（右上角）
-  const ccx = W - 60, ccy = 20, ccw = 40, cch = 30;
+  const ccx = W - 92, ccy = 20, ccw = 80, cch = 30;
   ctx.fillStyle = "rgba(255,107,107,.15)";
-  ctx.strokeStyle = "#ff6b6b";
+  ctx.strokeStyle = C.redSoft;
   ctx.lineWidth = 1.5;
   roundRect(ctx, ccx, ccy, ccw, cch, 8);
   ctx.fill(); ctx.stroke();
-  ctx.fillStyle = "#ff6b6b";
+  ctx.fillStyle = C.redSoft;
   setf(ctx, "bold 11px 'sans-serif'");
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.fillText("清除缓存", ccx + ccw / 2, ccy + cch / 2 + 1);
@@ -332,14 +344,14 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = []) {
     bottom: "rgba(28,16,66,.62)", border: "rgba(208,166,255,.7)", glow: 10,
   });
   glowText(ctx, {
-    text: starStr, x: W / 2, y: H * 0.215 - 6, size: 15, weight: "bold",
-    color: "#ecd6ff", blur: 8, align: "center", baseline: "top", fontFamily: "'sans-serif'",
+    text: starStr, x: W / 2, y: H * 0.215 + 5, size: 15, weight: "bold",
+    color: C.lilacSoft, blur: 8, align: "center", baseline: "middle", fontFamily: "'sans-serif'",
   });
 
   if (best > 0) {
     glowText(ctx, {
       text: "★ 最高分  " + best, x: W / 2, y: H * 0.252, size: 15, weight: "bold",
-      color: "#ffd166", blur: 12, align: "center", baseline: "top", fontFamily: "'Courier New', monospace",
+      color: C.gold, blur: 12, align: "center", baseline: "top", fontFamily: "'Courier New', monospace",
     });
   }
 
@@ -366,23 +378,15 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = []) {
       ctx.shadowColor = p.color;
       ctx.shadowBlur = 12 + 8 * pulse(nowD, 3, i * 0.7);
     }
-    const g = ctx.createLinearGradient(0, dy, 0, dy + dh);
-    if (selected) {
-      g.addColorStop(0, hexToRgba(p.color, 0.92));
-      g.addColorStop(1, hexToRgba(p.color, 0.42));
-    } else {
-      g.addColorStop(0, "rgba(24,34,60,.9)");
-      g.addColorStop(1, "rgba(11,15,30,.95)");
-    }
     roundRect(ctx, x, dy, dw, dh, 10);
-    ctx.fillStyle = g;
+    ctx.fillStyle = selected ? hexToRgba(p.color, 0.7) : "rgba(14,20,40,.92)";
     ctx.fill();
     ctx.shadowBlur = 0;
     ctx.strokeStyle = p.color;
     ctx.lineWidth = selected ? 2.4 : 1.2;
     roundRect(ctx, x + 0.5, dy + 0.5, dw - 1, dh - 1, 9);
     ctx.stroke();
-    ctx.fillStyle = selected ? "#05121c" : p.color;
+    ctx.fillStyle = selected ? C.panelDark : p.color;
     setf(ctx, "bold 15px 'sans-serif'");
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText((selected ? "✓ " : "") + p.name, x + dw / 2, dy + dh / 2 + 1);
@@ -397,9 +401,9 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = []) {
 
   const bx = W / 2 - 90, by = H * 0.46, bw = 180, bh = 50;
   const pulseS = pulse(uiTime(), 2.6);
-  lineBtn(ctx, bx, by, bw, bh, "#31d6ff", "开始游戏", {
+  lineBtn(ctx, bx, by, bw, bh, C.cyan, "开始游戏", {
     size: 25, weight: "bold", glow: 16 + 14 * pulseS, r: 14,
-    fontFamily: "'Courier New', monospace", textColor: "#03202e",
+    fontFamily: "'Courier New', monospace", textColor: C.bgDark,
   });
   // CTA 顶部微光描线，呼应飞船驾驶舱玻璃质感
   ctx.save();
@@ -415,13 +419,13 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = []) {
 
   // 导航瓦片：机库 / 天赋 / 图鉴 / 成就 / 设置 / 道具图鉴 / 商城
   const nav = [
-    ["hangar", "机库", "#66e0ff"],
-    ["talent", "天赋", "#c8a6ff"],
-    ["codex", "图鉴 " + discovered.length + "/" + SKILLS.length, "#ffd93b"],
-    ["achieve", "成就任务", "#7CFC00"],
-    ["settings", "设置", "#9be8ff"],
-    ["powerupCodex", "道具图鉴", "#ff6b6b"],
-    ["shop", "系统商城", "#d0a6ff"],
+    ["hangar", "机库", C.cyan],
+    ["talent", "天赋", C.lilac],
+    ["codex", "图鉴 " + discovered.length + "/" + SKILLS.length, C.goldDark],
+    ["achieve", "成就任务", C.green],
+    ["settings", "设置", C.cyanSoft],
+    ["powerupCodex", "道具图鉴", C.redSoft],
+    ["shop", "系统商城", C.lilacDark],
   ];
   const nw = 148, nh = 40, ng = 8;
   const nStartY = H * 0.56;
@@ -431,13 +435,10 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = []) {
     const row = Math.floor(i / 2);
     const nx = i === nav.length - 1 ? W / 2 - nw / 2 : W / 2 - nw - ng / 2 + col * (nw + ng);
     const ny = nStartY + row * (nh + ng);
-    // 玻璃质感导航瓦片：渐变底 + 彩色描边 + 左侧色条
+    // 导航瓦片：纯色底 + 彩色描边 + 左侧色条
     ctx.save();
-    const g = ctx.createLinearGradient(0, ny, 0, ny + nh);
-    g.addColorStop(0, "rgba(34,46,78,.55)");
-    g.addColorStop(1, "rgba(10,14,30,.92)");
     roundRect(ctx, nx, ny, nw, nh, 10);
-    ctx.fillStyle = g;
+    ctx.fillStyle = "rgba(16,24,46,.66)";
     ctx.fill();
     ctx.lineWidth = 1.4;
     ctx.strokeStyle = hexToRgba(color, 0.8);
@@ -460,54 +461,90 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = []) {
     else btnShopRect = rect;
   }
 
+  // 反馈入口 + 版本号（右下角）
+  ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+  ctx.fillStyle = "rgba(255,255,255,.35)";
+  setf(ctx, "11px 'sans-serif'");
+  ctx.fillText("v" + APP_VERSION, W - 12, H - 10);
+  const fbW = 70, fbH = 24;
+  const fbX = W - 12 - ctx.measureText("v" + APP_VERSION).width - 6 - fbW;
+  const fbY = H - 30;
+  ctx.fillStyle = "rgba(20,34,58,.9)";
+  ctx.strokeStyle = "rgba(90,220,255,.85)";
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, fbX, fbY, fbW, fbH, 11);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = "rgba(255,255,255,.95)";
+  setf(ctx, "bold 12px 'sans-serif'");
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("反馈", fbX + fbW / 2, fbY + fbH / 2 + 1);
+  btnFeedbackRect = { x: fbX, y: fbY, w: fbW, h: fbH };
+
   drawPageVeil(ctx);
 }
 
 /** 技能图鉴：主菜单子页面，已习得的技能点亮，未习得置灰 */
-function drawSkillCodex(ctx, discovered) {
+function drawSkillCodex(ctx, discovered, player) {
   const total = SKILLS.length;
   const lit = discovered.length;
 
-  pageTitle(ctx, "技 能 图 鉴", W / 2, H * 0.055, "#ffd93b", 32);
-  titleRule(ctx, W / 2, H * 0.105, 90, "#ffd93b");
+  pageTitle(ctx, "技 能 图 鉴", W / 2, H * 0.055, C.goldDark, 32);
+  titleRule(ctx, W / 2, H * 0.105, 90, C.goldDark);
 
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   const full = lit >= total;
-  ctx.fillStyle = full ? "#7CFC00" : "rgba(255,255,255,.88)";
+  ctx.fillStyle = full ? C.green : "rgba(255,255,255,.88)";
   setf(ctx, "bold 15px 'sans-serif'");
   ctx.fillText("已收录 " + lit + " / " + total + (full ? " · 全部点亮！" : ""), W / 2, H * 0.12);
   const pbarW = 150, pbarX = W / 2 - pbarW / 2, pbarY = H * 0.16;
-  bar(ctx, pbarX, pbarY, pbarW, 6, lit / total, full ? "#7CFC00" : "#ffd93b", { rounded: 3, glow: 8 });
+  bar(ctx, pbarX, pbarY, pbarW, 6, lit / total, full ? C.green : C.goldDark, { rounded: 3, glow: 8 });
   ctx.fillStyle = "rgba(255,255,255,.4)";
   setf(ctx, "11px 'sans-serif'");
-  ctx.fillText("在游戏中习得技能，图鉴自动点亮", W / 2, pbarY + 14);
+  ctx.fillText("在游戏中习得技能，图鉴自动点亮", W / 2, pbarY + 13);
+  // 技能升级说明：自动升级已完全关闭，全部由玩家选择
+  ctx.fillStyle = "rgba(255,255,255,.32)";
+  setf(ctx, "10px 'sans-serif'");
+  ctx.fillText("技能仅在升级三选一或拾取道具时提升，由你完全掌控", W / 2, pbarY + 27);
 
-  // 网格：窄屏自动减列
-  const cols = W >= 360 ? 4 : 3;
+  // 网格：宽屏 4 列；中屏 3 列；窄屏 3 列
+  const cols = W >= 420 ? 4 : 3;
   const pad = 14, gap = 8;
   const cardW = Math.floor((W - pad * 2 - gap * (cols - 1)) / cols);
-  const cardH = W >= 360 ? 62 : 54;
-  const startY = H * 0.20;
+  // 加高到 76：为「名称/描述/成长进度条+Lv文本」三段留足垂直间距，杜绝文字重合
+  const cardH = 76;
+  const startY = H * 0.235;
   const gx = pad;
+
+  // 卡片可视区：从网格顶到返回按钮上方（返回按钮固定在视口外，不被卡片盖住）
+  const viewBot = H * 0.90;
+  codexViewport = { x: pad, y: startY, w: W - pad * 2, h: viewBot - startY };
+  const rows = Math.ceil(SKILLS.length / cols);
+  const contentH = rows * (cardH + gap) - gap;
+  // 最大滚动量 = 内容高 - 可视区高：滚到底时最后一行恰好完整露出在 viewBot
+  codexMaxScroll = Math.max(0, contentH - codexViewport.h);
+  if (codexScroll > codexMaxScroll) codexScroll = codexMaxScroll;
 
   ctx.textBaseline = "middle";
   codexCardRects = [];
+
+  // 滚动区：卡片网格整体裁剪在视口内绘制并随 scroll 上移
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(codexViewport.x, codexViewport.y, codexViewport.w, codexViewport.h);
+  ctx.clip();
   for (let i = 0; i < SKILLS.length; i++) {
     const s = SKILLS[i];
     const col = i % cols;
     const row = Math.floor(i / cols);
     const x = gx + col * (cardW + gap);
-    const y = startY + row * (cardH + gap);
+    const y = startY - codexScroll + row * (cardH + gap);
     const got = discovered.includes(s.id);
 
     // 卡片
     ctx.save();
-    const cg = ctx.createLinearGradient(0, y, 0, y + cardH);
-    cg.addColorStop(0, got ? hexToRgba(s.color, 0.28) : "rgba(255,255,255,.06)");
-    cg.addColorStop(1, got ? "rgba(22,30,52,.96)" : "rgba(8,11,22,.92)");
     roundRect(ctx, x, y, cardW, cardH, 9);
-    ctx.fillStyle = cg;
+    ctx.fillStyle = got ? hexToRgba(s.color, 0.20) : "rgba(10,14,28,.9)";
     ctx.fill();
     ctx.strokeStyle = got ? hexToRgba(s.color, 0.95) : "rgba(255,255,255,.16)";
     ctx.lineWidth = got ? 1.6 : 1.1;
@@ -522,20 +559,42 @@ function drawSkillCodex(ctx, discovered) {
       ctx.fill();
     }
 
-    // 名称
+    // 名称（顶部）
     ctx.fillStyle = got ? s.color : "rgba(255,255,255,.30)";
     setf(ctx, "bold 13px 'sans-serif'");
-    ctx.fillText(s.name, x + cardW / 2, y + cardH * 0.32);
+    ctx.fillText(s.name, x + cardW / 2, y + 12);
+    // 描述（名称下方，未点亮时显示「未点亮」）
     ctx.fillStyle = got ? "rgba(255,255,255,.55)" : "rgba(255,255,255,.22)";
     setf(ctx, "11px 'sans-serif'");
-    ctx.fillText(got ? s.desc : "未点亮", x + cardW / 2, y + cardH * 0.76);
-    codexCardRects.push({ x: { x, y, w: cardW, h: cardH }, skill: s, got });
+    ctx.fillText(got ? s.desc : "未点亮", x + cardW / 2, y + 30);
+
+    // 命中矩形裁剪到可视区：被 clip 掉的部分不可点，
+    // 否则滚动后点击标题/返回按钮区域会误开详情卡
+    const visTop = Math.max(y, codexViewport.y);
+    const visBot = Math.min(y + cardH, codexViewport.y + codexViewport.h);
+    if (visBot > visTop) {
+      codexCardRects.push({ x: { x, y: visTop, w: cardW, h: visBot - visTop }, skill: s, got });
+    }
+  }
+  ctx.restore();
+
+  // 滚动条指示（内容超出可视区时显示）
+  if (codexMaxScroll > 0) {
+    const sbX = W - 8, sbW = 4, div = 24;
+    const sbTop = startY, sbBot = viewBot;
+    const track = sbBot - sbTop - div;
+    const thumbH = Math.max(div, codexViewport.h / (codexViewport.h + codexMaxScroll) * (sbBot - sbTop));
+    const thumbY = thumbH >= div ? sbTop + (track - 0) * (codexScroll / codexMaxScroll) : sbTop;
+    ctx.fillStyle = "rgba(255,255,255,.12)";
+    roundRect(ctx, sbX, sbTop, sbW, sbBot - sbTop, 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(140,220,255,.55)";
+    roundRect(ctx, sbX, clamp(thumbY, sbTop, sbBot - thumbH), sbW, thumbH, 2);
+    ctx.fill();
   }
 
-  // 返回按钮
-  const bw = 180, bx = W / 2 - bw / 2, by = H * 0.90, bh = 44;
-  lineBtn(ctx, bx, by, bw, bh, "#5ee6ff", "← 返回主菜单", { size: 17, weight: "bold", glow: 10, r: 12 });
-  btnCodexBackRect = { x: bx, y: by, w: bw, h: bh };
+  // 返回按钮（固定于可视区下方，永远可点；与道具图鉴共用同一返回按钮样式）
+  btnCodexBackRect = drawBackButton(ctx);
   btnCodexRect = null;
 }
 
@@ -545,17 +604,17 @@ function drawShop(ctx) {
 
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  ctx.fillStyle = "#d0a6ff";
+  ctx.fillStyle = C.lilacDark;
   setf(ctx, "bold 30px 'sans-serif'");
   ctx.fillText("系 统 商 城", W / 2, H * 0.05);
-  ctx.fillStyle = "#ffd166";
+  ctx.fillStyle = C.gold;
   setf(ctx, "bold 16px 'sans-serif'");
   ctx.fillText("星尘  ✦ " + stardust, W / 2, H * 0.10);
   ctx.fillStyle = "rgba(255,255,255,.45)";
   setf(ctx, "12px 'sans-serif'");
   ctx.fillText("消耗星尘永久提升各项能力", W / 2, H * 0.135);
 
-  const cols = W >= 360 ? 2 : 1;
+  const cols = W >= 320 ? 2 : 1;
   const pad = 14, gap = 8;
   const cardW = Math.floor((W - pad * 2 - gap * (cols - 1)) / cols);
   const cardH = 52;
@@ -575,19 +634,19 @@ function drawShop(ctx) {
     const y = startY + row * (cardH + gap);
 
     ctx.fillStyle = maxed ? "rgba(124,252,0,.08)" : affordable ? "rgba(24,32,52,.92)" : "rgba(13,16,26,.85)";
-    ctx.strokeStyle = maxed ? "#7CFC00" : affordable ? "#d0a6ff" : "rgba(255,255,255,.22)";
+    ctx.strokeStyle = maxed ? C.green : affordable ? C.lilacDark : "rgba(255,255,255,.22)";
     ctx.lineWidth = affordable ? 2 : 1.2;
     roundRect(ctx, x, y, cardW, cardH, 9);
     ctx.fill(); ctx.stroke();
 
     // 图标
-    ctx.fillStyle = maxed ? "#7CFC00" : affordable ? "#d0a6ff" : "rgba(255,255,255,.30)";
+    ctx.fillStyle = maxed ? C.green : affordable ? C.lilacDark : "rgba(255,255,255,.30)";
     setf(ctx, "bold 18px monospace");
     ctx.textAlign = "left"; ctx.textBaseline = "middle";
     ctx.fillText(item.icon, x + 10, y + cardH * 0.5);
 
     // 名称 + 描述
-    ctx.fillStyle = maxed ? "#7CFC00" : affordable ? "#fff" : "rgba(255,255,255,.50)";
+    ctx.fillStyle = maxed ? C.green : affordable ? C.white : "rgba(255,255,255,.50)";
     setf(ctx, "bold 13px 'sans-serif'");
     ctx.fillText(item.name + " " + lv + "/" + item.max, x + 32, y + cardH * 0.32);
     ctx.fillStyle = "rgba(255,255,255,.50)";
@@ -597,11 +656,11 @@ function drawShop(ctx) {
     // 价格/已满
     ctx.textAlign = "right"; ctx.textBaseline = "middle";
     if (maxed) {
-      ctx.fillStyle = "#7CFC00";
+      ctx.fillStyle = C.green;
       setf(ctx, "bold 12px 'sans-serif'");
       ctx.fillText("已满级", x + cardW - 10, y + cardH * 0.5);
     } else {
-      ctx.fillStyle = affordable ? "#ffd166" : "rgba(255,255,255,.35)";
+      ctx.fillStyle = affordable ? C.gold : "rgba(255,255,255,.35)";
       setf(ctx, "bold 12px 'sans-serif'");
       ctx.fillText("✦ " + cost, x + cardW - 10, y + cardH * 0.5);
     }
@@ -616,44 +675,59 @@ function drawShop(ctx) {
 
 function drawBackButton(ctx, label = "← 返回主菜单") {
   const bw = 180, bx = W / 2 - bw / 2, by = H * 0.92, bh = 40;
-  lineBtn(ctx, bx, by, bw, bh, "#5ee6ff", label, { size: 16, weight: "bold", glow: 9, r: 12 });
+  lineBtn(ctx, bx, by, bw, bh, C.cyan, label, { size: 16, weight: "bold", glow: 9, r: 12 });
   return { x: bx, y: by, w: bw, h: bh };
 }
 
-/** 道具图鉴：主菜单子页面，已拾取的道具点亮，未拾取置灰 */
+/** 道具图鉴：主菜单子页面，已拾取的道具点亮，未拾取置灰（与技能图鉴同一套布局/滚动） */
 function drawPowerupCodex(ctx, discovered) {
   const allKeys = Object.keys(POWERUP_DEFS);
   const total = allKeys.length;
   const lit = discovered.length;
 
+  pageTitle(ctx, "道 具 图 鉴", W / 2, H * 0.055, C.redSoft, 32);
+  titleRule(ctx, W / 2, H * 0.105, 90, C.redSoft);
+
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
-  ctx.fillStyle = "#ff6b6b";
-  setf(ctx, "bold 32px 'sans-serif'");
-  ctx.fillText("道 具 图 鉴", W / 2, H * 0.06);
-  ctx.fillStyle = lit >= total ? "#7CFC00" : "rgba(255,255,255,.8)";
+  const full = lit >= total;
+  ctx.fillStyle = full ? C.green : "rgba(255,255,255,.88)";
   setf(ctx, "bold 15px 'sans-serif'");
-  ctx.fillText("已收录 " + lit + " / " + total + (lit >= total ? " · 全部点亮！" : ""), W / 2, H * 0.11);
-  ctx.fillStyle = "rgba(255,255,255,.45)";
-  setf(ctx, "12px 'sans-serif'");
-  ctx.fillText("在游戏中拾取道具，图鉴自动点亮", W / 2, H * 0.145);
+  ctx.fillText("已收录 " + lit + " / " + total + (full ? " · 全部点亮！" : ""), W / 2, H * 0.12);
+  const pbarW = 150, pbarX = W / 2 - pbarW / 2, pbarY = H * 0.16;
+  bar(ctx, pbarX, pbarY, pbarW, 6, lit / total, full ? C.green : C.redSoft, { rounded: 3, glow: 8 });
+  ctx.fillStyle = "rgba(255,255,255,.4)";
+  setf(ctx, "11px 'sans-serif'");
+  ctx.fillText("在游戏中拾取道具，图鉴自动点亮", W / 2, pbarY + 14);
 
-  const cols = W >= 360 ? 4 : 3;
+  const cols = W >= 420 ? 4 : W >= 360 ? 3 : 2;
   const pad = 14, gap = 8;
   const cardW = Math.floor((W - pad * 2 - gap * (cols - 1)) / cols);
-  const cardH = 60;
-  const startY = H * 0.19;
+  const cardH = 62;
+  const startY = H * 0.20;
   const gx = pad;
+
+  const viewBot = H * 0.90;
+  codexViewport = { x: pad, y: startY, w: W - pad * 2, h: viewBot - startY };
+  const rows = Math.ceil(total / cols);
+  const contentH = rows * (cardH + gap) - gap;
+  codexMaxScroll = Math.max(0, contentH - codexViewport.h);
+  if (codexScroll > codexMaxScroll) codexScroll = codexMaxScroll;
 
   ctx.textBaseline = "middle";
   powerupCardRects = [];
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(codexViewport.x, codexViewport.y, codexViewport.w, codexViewport.h);
+  ctx.clip();
   for (let i = 0; i < allKeys.length; i++) {
     const k = allKeys[i];
     const def = POWERUP_DEFS[k];
     const col = i % cols;
     const row = Math.floor(i / cols);
     const x = gx + col * (cardW + gap);
-    const y = startY + row * (cardH + gap);
+    const y = startY - codexScroll + row * (cardH + gap);
     const got = discovered.includes(k);
 
     ctx.fillStyle = got ? "rgba(24,32,52,.92)" : "rgba(13,16,26,.85)";
@@ -669,18 +743,46 @@ function drawPowerupCodex(ctx, discovered) {
       ctx.fill();
     }
 
-    // 名称
+    // 图标（顶部居中）：缺图时静默省略，卡片靠色框/文字仍可辨认
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    if (got) {
+      const prevAlpha = ctx.globalAlpha;
+      ctx.globalAlpha = 0.95;
+      drawSprite(ctx, "powerup_" + k, x + cardW / 2, y + 13, 17, 17);
+      ctx.globalAlpha = prevAlpha;
+    }
+
+    // 名称
     ctx.fillStyle = got ? def.color : "rgba(255,255,255,.30)";
     setf(ctx, "bold 13px 'sans-serif'");
-    ctx.fillText(def.name, x + cardW / 2, y + cardH * 0.32);
+    ctx.fillText(def.name, x + cardW / 2, y + 35);
 
     // 描述（已精简，无需截断）
     ctx.fillStyle = got ? "rgba(255,255,255,.55)" : "rgba(255,255,255,.22)";
     setf(ctx, "11px 'sans-serif'");
     const desc = got ? String(powerupDesc(k)) : "未拾取";
-    ctx.fillText(desc, x + cardW / 2, y + cardH * 0.76);
-    powerupCardRects.push({ x: { x, y, w: cardW, h: cardH }, key: k, def, got });
+    ctx.fillText(desc, x + cardW / 2, y + 52);
+    const visTop = Math.max(y, codexViewport.y);
+    const visBot = Math.min(y + cardH, codexViewport.y + codexViewport.h);
+    if (visBot > visTop) {
+      powerupCardRects.push({ x: { x, y: visTop, w: cardW, h: visBot - visTop }, key: k, def, got });
+    }
+  }
+  ctx.restore();
+
+  // 滚动条指示（内容超出可视区时显示，与技能图鉴同一逻辑）
+  if (codexMaxScroll > 0) {
+    const sbX = W - 8, sbW = 4, div = 24;
+    const sbTop = startY, sbBot = viewBot;
+    const track = sbBot - sbTop - div;
+    const thumbH = Math.max(div, codexViewport.h / (codexViewport.h + codexMaxScroll) * (sbBot - sbTop));
+    const thumbY = sbTop + track * (codexScroll / codexMaxScroll);
+    ctx.fillStyle = "rgba(255,255,255,.12)";
+    roundRect(ctx, sbX, sbTop, sbW, sbBot - sbTop, 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(140,220,255,.55)";
+    roundRect(ctx, sbX, clamp(thumbY, sbTop, sbBot - thumbH), sbW, thumbH, 2);
+    ctx.fill();
   }
 
   btnPowerupCodexBackRect = drawBackButton(ctx);
@@ -728,11 +830,11 @@ export function powerupDescFull(k) {
 }
 
 function drawHangar(ctx) {
-  pageTitle(ctx, "机  库", W / 2, H * 0.045, "#66e0ff", 32);
-  titleRule(ctx, W / 2, H * 0.095, 66, "#66e0ff");
+  pageTitle(ctx, "机  库", W / 2, H * 0.045, C.cyan, 32);
+  titleRule(ctx, W / 2, H * 0.095, 66, C.cyan);
   glowText(ctx, {
     text: "星尘 ✦ " + getStardust(), x: W / 2, y: H * 0.108,
-    size: 15, weight: "bold", color: "#e0c2ff", blur: 9,
+    size: 15, weight: "bold", color: C.lilacSoft, blur: 9,
     align: "center", baseline: "top", fontFamily: "'sans-serif'",
   });
 
@@ -754,22 +856,11 @@ function drawHangar(ctx) {
     const on = selected === id;
     ctx.save();
     if (on) { ctx.shadowColor = "rgba(102,224,255,.85)"; ctx.shadowBlur = 16; }
-    const g = ctx.createLinearGradient(0, y, 0, y + cardH);
-    if (on) {
-      g.addColorStop(0, "rgba(32,74,116,.95)");
-      g.addColorStop(1, "rgba(10,20,46,.97)");
-    } else if (unlocked) {
-      g.addColorStop(0, "rgba(32,46,82,.9)");
-      g.addColorStop(1, "rgba(12,17,34,.94)");
-    } else {
-      g.addColorStop(0, "rgba(20,22,38,.88)");
-      g.addColorStop(1, "rgba(8,9,20,.95)");
-    }
     roundRect(ctx, x, y, cardW, cardH, 12);
-    ctx.fillStyle = g;
+    ctx.fillStyle = on ? "rgba(24,58,92,.94)" : unlocked ? "rgba(22,32,62,.9)" : "rgba(14,16,28,.92)";
     ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = on ? "#66e0ff" : unlocked ? "rgba(255,255,255,.3)" : "rgba(255,255,255,.12)";
+    ctx.strokeStyle = on ? C.cyan : unlocked ? "rgba(255,255,255,.3)" : "rgba(255,255,255,.12)";
     ctx.lineWidth = on ? 2 : 1.1;
     roundRect(ctx, x + 0.5, y + 0.5, cardW - 1, cardH - 1, 11);
     ctx.stroke();
@@ -780,7 +871,7 @@ function drawHangar(ctx) {
 
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
-    ctx.fillStyle = on ? "#66e0ff" : unlocked ? "#fff" : "rgba(255,255,255,.4)";
+    ctx.fillStyle = on ? C.cyan : unlocked ? C.white : "rgba(255,255,255,.4)";
     setf(ctx, "bold 16px 'sans-serif'");
     ctx.fillText(cfg.name, x + cardW / 2, y + 10);
     ctx.fillStyle = "rgba(255,255,255,.55)";
@@ -788,7 +879,7 @@ function drawHangar(ctx) {
     ctx.fillText(cfg.desc, x + cardW / 2, y + 34);
     ctx.fillText("速" + cfg.speed + " 伤×" + cfg.baseDmg + " 射×" + cfg.fireRate, x + cardW / 2, y + 54);
     ctx.fillText("生命 " + cfg.startHp, x + cardW / 2, y + 72);
-    ctx.fillStyle = unlocked ? (on ? "#7CFC00" : "#ffd166") : "#d0a6ff";
+    ctx.fillStyle = unlocked ? (on ? C.green : C.gold) : C.lilacDark;
     setf(ctx, "bold 13px 'sans-serif'");
     let tag;
     if (on) tag = "出战中";
@@ -801,18 +892,18 @@ function drawHangar(ctx) {
 }
 
 function drawTalent(ctx) {
-  pageTitle(ctx, "天  赋", W / 2, H * 0.03, "#c8a6ff", 32);
-  titleRule(ctx, W / 2, H * 0.078, 56, "#c8a6ff");
+  pageTitle(ctx, "天  赋", W / 2, H * 0.03, C.lilac, 32);
+  titleRule(ctx, W / 2, H * 0.078, 56, C.lilac);
   glowText(ctx, {
     text: "星尘 ✦ " + getStardust(), x: W / 2, y: H * 0.095,
-    size: 15, weight: "bold", color: "#e0c2ff", blur: 9,
+    size: 15, weight: "bold", color: C.lilacSoft, blur: 9,
     align: "center", baseline: "top", fontFamily: "'sans-serif'",
   });
 
   const branches = [
-    ["offense", "进攻", "#ffd166"],
-    ["defense", "防御", "#66e0ff"],
-    ["utility", "辅助", "#8ad4ff"],
+    ["offense", "进攻", C.gold],
+    ["defense", "防御", C.cyan],
+    ["utility", "辅助", C.cyanSoft],
   ];
   talentCardRects = [];
   const colW = (W - 28) / 3;
@@ -829,18 +920,12 @@ function drawTalent(ctx) {
       const bought = isTalentPurchased(t.id);
       const locked = t.requires && !isTalentPurchased(t.requires);
       ctx.save();
-      const gy = ctx.createLinearGradient(0, y, 0, y + 104);
       if (bought) {
-        gy.addColorStop(0, hexToRgba(color, 0.32));
-        gy.addColorStop(1, "rgba(20,26,46,.97)");
         ctx.shadowColor = color;
         ctx.shadowBlur = 13;
-      } else {
-        gy.addColorStop(0, "rgba(27,34,58,.92)");
-        gy.addColorStop(1, "rgba(10,13,28,.96)");
       }
       roundRect(ctx, x + 4, y, colW - 12, 104, 10);
-      ctx.fillStyle = gy;
+      ctx.fillStyle = bought ? hexToRgba(color, 0.22) : "rgba(16,22,42,.94)";
       ctx.fill();
       ctx.shadowBlur = 0;
       ctx.strokeStyle = bought ? hexToRgba(color, 0.95) : locked ? "rgba(255,255,255,.14)" : hexToRgba(color, 0.5);
@@ -852,13 +937,13 @@ function drawTalent(ctx) {
         ctx.fill();
       }
       ctx.restore();
-      ctx.fillStyle = bought ? color : locked ? "rgba(255,255,255,.35)" : "#fff";
+      ctx.fillStyle = bought ? color : locked ? "rgba(255,255,255,.35)" : C.white;
       setf(ctx, "bold 12px 'sans-serif'");
       ctx.fillText(t.name, x + colW / 2, y + 12);
       ctx.fillStyle = "rgba(255,255,255,.55)";
       setf(ctx, "10px 'sans-serif'");
       ctx.fillText(t.desc, x + colW / 2, y + 36);
-      ctx.fillStyle = bought ? "#7CFC00" : locked ? "rgba(255,255,255,.3)" : "#ffd166";
+      ctx.fillStyle = bought ? C.green : locked ? "rgba(255,255,255,.3)" : C.gold;
       setf(ctx, "bold 12px 'sans-serif'");
       ctx.fillText(bought ? "已解锁" : (locked ? "需前置" : t.cost + " 星尘"), x + colW / 2, y + 72);
       talentCardRects.push({ id: t.id, x: x + 4, y, w: colW - 12, h: 104, bought, locked, cost: t.cost });
@@ -868,8 +953,8 @@ function drawTalent(ctx) {
 }
 
 function drawSettings(ctx) {
-  pageTitle(ctx, "设  置", W / 2, H * 0.07, "#9be8ff", 32);
-  titleRule(ctx, W / 2, H * 0.12, 52, "#9be8ff");
+  pageTitle(ctx, "设  置", W / 2, H * 0.07, C.cyanSoft, 32);
+  titleRule(ctx, W / 2, H * 0.12, 52, C.cyanSoft);
 
   const s = getSettings();
   const rows = [
@@ -883,11 +968,8 @@ function drawSettings(ctx) {
     const y = H * 0.2 + i * 92;
     const x = 40, w = W - 80, h = 78;
     ctx.save();
-    const g = ctx.createLinearGradient(0, y, 0, y + h);
-    g.addColorStop(0, "rgba(36,52,92,.5)");
-    g.addColorStop(1, "rgba(12,16,34,.92)");
     roundRect(ctx, x, y, w, h, 14);
-    ctx.fillStyle = g;
+    ctx.fillStyle = "rgba(18,28,52,.7)";
     ctx.fill();
     ctx.strokeStyle = on ? "rgba(155,232,255,.6)" : "rgba(155,232,255,.22)";
     ctx.lineWidth = 1.3;
@@ -898,7 +980,7 @@ function drawSettings(ctx) {
     ctx.restore();
 
     ctx.textAlign = "left"; ctx.textBaseline = "top";
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle = C.white;
     setf(ctx, "bold 18px 'sans-serif'");
     ctx.fillText(label, x + 22, y + 18);
     ctx.fillStyle = "rgba(255,255,255,.45)";
@@ -909,17 +991,14 @@ function drawSettings(ctx) {
     const swW = 52, swH = 28;
     const swX = x + w - swW - 20, swY = y + (h - swH) / 2;
     ctx.save();
-    ctx.shadowColor = on ? "#9be8ff" : "rgba(255,255,255,.2)";
+    ctx.shadowColor = on ? C.cyanSoft : "rgba(255,255,255,.2)";
     ctx.shadowBlur = on ? 10 : 0;
-    const tg = ctx.createLinearGradient(0, swY, 0, swY + swH);
-    if (on) { tg.addColorStop(0, "#5ee6ff"); tg.addColorStop(1, "#2f7bff"); }
-    else { tg.addColorStop(0, "rgba(90,100,130,.4)"); tg.addColorStop(1, "rgba(40,46,66,.5)"); }
     roundRect(ctx, swX, swY, swW, swH, swH / 2);
-    ctx.fillStyle = tg;
+    ctx.fillStyle = on ? C.cyan : "rgba(60,70,96,.5)";
     ctx.fill();
     ctx.shadowBlur = 0;
     const kx = on ? swX + swW - swH : swX;
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle = C.white;
     ctx.beginPath();
     ctx.arc(kx + swH / 2, swY + swH / 2, swH / 2 - 3, 0, TAU);
     ctx.fill();
@@ -932,21 +1011,15 @@ function drawSettings(ctx) {
 
 export function drawGameOver(ctx, score, best, isNewBest = false) {
   const now = uiTime();
-  // 聚焦暗角 + 底部红光
-  const dg = ctx.createRadialGradient(W / 2, H * 0.4, 20, W / 2, H * 0.42, H * 1.0);
-  dg.addColorStop(0, "rgba(30,8,18,.86)");
-  dg.addColorStop(1, "rgba(4,3,10,.93)");
-  ctx.fillStyle = dg;
+  // 聚焦暗角
+  ctx.fillStyle = "rgba(14,6,12,.92)";
   ctx.fillRect(0, 0, W, H);
-  const rg = ctx.createRadialGradient(W / 2, H * 0.88, 10, W / 2, H * 0.9, H * 0.5);
-  rg.addColorStop(0, "rgba(255,70,70,.18)");
-  rg.addColorStop(1, "rgba(255,70,70,0)");
-  ctx.fillStyle = rg;
+  ctx.fillStyle = "rgba(255,70,70,.08)";
   ctx.fillRect(0, H * 0.4, W, H * 0.6);
 
   glowText(ctx, {
     text: "游 戏 结 束", x: W / 2, y: H * 0.30, size: 50, weight: "bold",
-    color: "#ff9a9a", blur: 26 + 12 * pulse(now, 3.2),
+    color: C.pinkDark, blur: 26 + 12 * pulse(now, 3.2),
     align: "center", baseline: "top", fontFamily: "'sans-serif'",
   });
 
@@ -961,12 +1034,12 @@ export function drawGameOver(ctx, score, best, isNewBest = false) {
   ctx.textAlign = "center"; ctx.textBaseline = "top";
   glowText(ctx, {
     text: "得分  " + score, x: W / 2, y: py + 16, size: 28, weight: "bold",
-    color: "#ffffff", blur: 12, align: "center", baseline: "top", fontFamily: "'Courier New', monospace",
+    color: C.white, blur: 12, align: "center", baseline: "top", fontFamily: "'Courier New', monospace",
   });
   if (isNewBest) {
     glowText(ctx, {
       text: "★ 新纪录！", x: W / 2, y: py + 56, size: 18, weight: "bold",
-      color: "#ffd166", blur: 16 + 8 * pulse(now, 4), align: "center", baseline: "top", fontFamily: "'sans-serif'",
+      color: C.gold, blur: 16 + 8 * pulse(now, 4), align: "center", baseline: "top", fontFamily: "'sans-serif'",
     });
   } else {
     ctx.fillStyle = "rgba(255,255,255,.6)";
@@ -975,48 +1048,51 @@ export function drawGameOver(ctx, score, best, isNewBest = false) {
   }
 
   // 星尘奖励
-  const stardust = Math.floor(score / 10000);
+  const stardust = Math.floor(score / META.stardustPerScore);
   if (stardust > 0) {
     glowText(ctx, {
       text: "获得 " + stardust + " 星尘 ✦", x: W / 2, y: py + 86, size: 15, weight: "bold",
-      color: "#d0a6ff", blur: 9, align: "center", baseline: "top", fontFamily: "'sans-serif'",
+      color: C.lilacDark, blur: 9, align: "center", baseline: "top", fontFamily: "'sans-serif'",
     });
   }
 
-  // 重开按钮
-  const bx = W / 2 - 100, by = H * 0.58, bw = 200, bh = 54;
-  lineBtn(ctx, bx, by, bw, bh, "#ff5c6a", "重新开始", {
+  // 两个按钮：统一宽度/高度，间距固定 22px（旧版间距仅 3.6px 且高度 54/50 不一致，视觉很挤）
+  const bw = Math.min(216, W - 64);
+  const bh = 52;
+  const btnGap = 22;
+  const bx = W / 2 - bw / 2;
+  const by = H * 0.575;
+
+  // 重新开始
+  lineBtn(ctx, bx, by, bw, bh, C.red, "重新开始", {
     size: 24, weight: "bold", glow: 16 + 8 * pulse(now, 3), r: 14,
-    fontFamily: "'Courier New', monospace", textColor: "#fff",
+    fontFamily: "'Courier New', monospace", textColor: C.white,
   });
   btnRestartRect = { x: bx, y: by, w: bw, h: bh };
 
-  // 返回主界面按钮
-  const mx2 = W / 2 - 100, my2 = H * 0.66, mw2 = 200, mh2 = 50;
-  ctx.fillStyle = "rgba(94,230,255,.12)";
-  ctx.strokeStyle = "#5ee6ff";
+  // 返回主菜单
+  const my2 = by + bh + btnGap;
+  ctx.fillStyle = hexToRgba(C.cyan, 0.12);
+  ctx.strokeStyle = C.cyan;
   ctx.lineWidth = 2;
-  roundRect(ctx, mx2, my2, mw2, mh2, 12);
+  roundRect(ctx, bx, my2, bw, bh, 12);
   ctx.fill(); ctx.stroke();
-  ctx.fillStyle = "#5ee6ff";
+  ctx.fillStyle = C.cyan;
   setf(ctx, "bold 22px 'Courier New', monospace");
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText("返回主菜单", W / 2, my2 + mh2 / 2);
-  btnGameOverMenuRect = { x: mx2, y: my2, w: mw2, h: mh2 };
+  ctx.fillText("返回主菜单", W / 2, my2 + bh / 2);
+  btnGameOverMenuRect = { x: bx, y: my2, w: bw, h: bh };
 }
 
 export function drawLevelUp(ctx, choices, playerSkills) {
   if (!choices || choices.length === 0) return;
   const now = uiTime();
-  const ov = ctx.createRadialGradient(W / 2, H / 2, 40, W / 2, H / 2, H * 0.95);
-  ov.addColorStop(0, "rgba(10,16,34,.62)");
-  ov.addColorStop(1, "rgba(3,4,12,.94)");
-  ctx.fillStyle = ov;
+  ctx.fillStyle = "rgba(6,9,22,.8)";
   ctx.fillRect(0, 0, W, H);
 
   glowText(ctx, {
     text: "升 级 ！", x: W / 2, y: H * 0.145, size: 40, weight: "bold",
-    color: "#8ad4ff", blur: 26 + 10 * pulse(now, 3.4), align: "center", baseline: "top", fontFamily: "'sans-serif'",
+    color: C.cyanSoft, blur: 26 + 10 * pulse(now, 3.4), align: "center", baseline: "top", fontFamily: "'sans-serif'",
   });
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
@@ -1034,18 +1110,19 @@ export function drawLevelUp(ctx, choices, playerSkills) {
     const s = choices[i];
     const cy = startY + i * (cardH + gap);
     const cx = W / 2;
+    // 按当前等级取不同主题色：1级暗白 / 2-4功能组色 / 5+金
+    const cur = playerSkills[s.id] || 0;
+    const themeColor = skillLevelColor(cur) ?? s.color;
+    // 1级暗白：文字为白色(rgba)，底色必须是深色才能看清（hexToRgba 对非十六进制原样返回）
+    const isLv1White = themeColor[0] !== "#";
     ctx.save();
-    const cg = ctx.createLinearGradient(0, cy, 0, cy + cardH);
-    cg.addColorStop(0, hexToRgba(s.color, 0.26));
-    cg.addColorStop(0.45, "rgba(22,30,54,.92)");
-    cg.addColorStop(1, "rgba(9,12,26,.97)");
-    ctx.shadowColor = s.color;
+    ctx.shadowColor = themeColor;
     ctx.shadowBlur = 12;
     roundRect(ctx, cx - cardW / 2, cy, cardW, cardH, 14);
-    ctx.fillStyle = cg;
+    ctx.fillStyle = isLv1White ? "rgba(20,26,46,.96)" : hexToRgba(themeColor, 0.2);
     ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = hexToRgba(s.color, 0.9);
+    ctx.strokeStyle = isLv1White ? "rgba(255,255,255,.55)" : hexToRgba(themeColor, 0.9);
     ctx.lineWidth = 1.8;
     ctx.stroke();
     ctx.strokeStyle = "rgba(255,255,255,.14)";
@@ -1056,14 +1133,11 @@ export function drawLevelUp(ctx, choices, playerSkills) {
     const ncx = cx - cardW / 2 + 26;
     const ncy = cy + cardH / 2;
     ctx.save();
-    ctx.shadowColor = s.color;
+    ctx.shadowColor = themeColor;
     ctx.shadowBlur = 10;
-    const ng = ctx.createRadialGradient(ncx, ncy, 2, ncx, ncy, 17);
-    ng.addColorStop(0, hexToRgba(s.color, 1));
-    ng.addColorStop(1, hexToRgba(s.color, 0.55));
     ctx.beginPath();
     ctx.arc(ncx, ncy, 17, 0, TAU);
-    ctx.fillStyle = ng;
+    ctx.fillStyle = isLv1White ? "rgba(255,255,255,.85)" : hexToRgba(themeColor, 0.85);
     ctx.fill();
     ctx.shadowBlur = 0;
     ctx.lineWidth = 1.5;
@@ -1081,13 +1155,12 @@ export function drawLevelUp(ctx, choices, playerSkills) {
       ? (tm.actualBoundingBoxAscent - tm.actualBoundingBoxDescent) / 2
       : 0;
     ctx.fillText(numStr, ncx, ncy + aHeight);
-    // 技能名
+    // 技能名（颜色随等级：1级暗白 / 2-4组色 / 5+金）
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
-    ctx.fillStyle = s.color;
+    ctx.fillStyle = themeColor;
     setf(ctx, "bold 19px 'sans-serif'");
-    const cur = playerSkills[s.id] || 0;
-    ctx.fillText(s.name + (cur > 0 ? "  " + cur + "级" : ""), cx - cardW / 2 + 54, cy + 28);
+    ctx.fillText(s.name + (cur > 0 ? "  " + cur + "→" + (cur + 1) + "级" : "  新"), cx - cardW / 2 + 54, cy + 28);
     ctx.fillStyle = "rgba(255,255,255,.75)";
     setf(ctx, "14px 'sans-serif'");
     ctx.fillText(s.desc, cx - cardW / 2 + 54, cy + 58);
@@ -1095,6 +1168,7 @@ export function drawLevelUp(ctx, choices, playerSkills) {
     ctx.textBaseline = "middle";
     skillCards.push({ id: s.id, x: cx - cardW / 2, y: cy, w: cardW, h: cardH });
   }
+  ctx.restore();
 }
 
 // 游戏内顶部居中暂停按钮
@@ -1102,19 +1176,16 @@ export function drawPauseButton(ctx) {
   const bx = W / 2 - 19, by = 14, bw = 38, bh = 38;
   ctx.save();
   ctx.globalAlpha = 0.92;
-  const g = ctx.createLinearGradient(0, by, 0, by + bh);
-  g.addColorStop(0, "rgba(130,205,255,.34)");
-  g.addColorStop(1, "rgba(8,12,30,.55)");
   roundRect(ctx, bx, by, bw, bh, 10);
-  ctx.fillStyle = g;
+  ctx.fillStyle = "rgba(14,22,44,.55)";
   ctx.fill();
   ctx.strokeStyle = "rgba(255,255,255,.6)";
   ctx.lineWidth = 1.6;
   ctx.stroke();
   // 播放图标 ⏸（两道竖条）
-  ctx.shadowColor = "#fff";
+  ctx.shadowColor = C.white;
   ctx.shadowBlur = 6;
-  ctx.fillStyle = "#fff";
+  ctx.fillStyle = C.white;
   ctx.fillRect(bx + 13, by + 11, 4.5, 16);
   ctx.fillRect(bx + 22, by + 11, 4.5, 16);
   ctx.restore();
@@ -1138,7 +1209,7 @@ export function drawDetailCard(ctx) {
   const cw = Math.min(360, W - 40), ch = 220;
   const cx = W / 2 - cw / 2, cy = H / 2 - ch / 2;
   const isGot = data.got || data.achieved;
-  const color = data.color || "#5ee6ff";
+  const color = data.color || C.cyan;
 
   ctx.fillStyle = isGot ? "rgba(24,32,52,.98)" : "rgba(13,16,26,.98)";
   ctx.strokeStyle = color;
@@ -1148,10 +1219,17 @@ export function drawDetailCard(ctx) {
 
   ctx.textAlign = "center"; ctx.textBaseline = "top";
 
-  // 图标/标记
-  ctx.fillStyle = isGot ? color : "rgba(255,255,255,.30)";
-  setf(ctx, "bold 36px monospace");
-  ctx.fillText(data.icon || "✦", W / 2, cy + 14);
+  // 图标/标记：优先贴图（道具/技能），缺图回退字母或 ✦；未收录时压暗
+  const prevAlpha = ctx.globalAlpha;
+  if (!isGot) ctx.globalAlpha = 0.3;
+  const iconDrawn = !!data.spriteId
+    && drawSprite(ctx, data.spriteId, W / 2, cy + 33, 40, 40);
+  ctx.globalAlpha = prevAlpha;
+  if (!iconDrawn) {
+    ctx.fillStyle = isGot ? color : "rgba(255,255,255,.30)";
+    setf(ctx, "bold 36px monospace");
+    ctx.fillText(data.icon || "✦", W / 2, cy + 14);
+  }
 
   // 名称
   ctx.fillStyle = isGot ? color : "rgba(255,255,255,.50)";
@@ -1170,9 +1248,13 @@ export function drawDetailCard(ctx) {
   // 附加信息行
   let extra = "";
   if (type === "skill") {
-    extra = "当前等级 " + data.curLv + "/" + data.max;
+    // got=图鉴已收录（账号级），curLv=本局当前等级，二者需区分展示
+    if (!data.got) extra = "未习得 · 有概率随机获得";
+    else if (data.curLv >= data.max) extra = "已获得最大等级 Lv." + data.max + " / " + data.max;
+    else if (data.curLv > 0) extra = "已获得 Lv." + data.curLv + " / " + data.max;
+    else extra = "已习得 · 本局未获得";
   } else if (type === "powerup") {
-    extra = "稀有度 " + data.rarity + "/5 · 权重 " + (data.weight || "-");
+    extra = data.unique ? "稀有技能道具 · 拾取获得/升级技能" : "拾取后即时生效";
   } else if (type === "achievement") {
     extra = (data.achieved ? "✦ 已达成" : "未达成") + " · 奖励 " + (data.reward || 0) + " 星尘";
   }
@@ -1194,15 +1276,12 @@ export function drawDetailCard(ctx) {
 
 export function drawPause(ctx, player) {
   const now = uiTime();
-  const ov = ctx.createRadialGradient(W / 2, H * 0.12, 30, W / 2, H / 2, H * 0.95);
-  ov.addColorStop(0, "rgba(18,22,44,.6)");
-  ov.addColorStop(1, "rgba(2,3,10,.9)");
-  ctx.fillStyle = ov;
+  ctx.fillStyle = "rgba(8,11,26,.8)";
   ctx.fillRect(0, 0, W, H);
 
   glowText(ctx, {
     text: "暂 停", x: W / 2, y: H * 0.09, size: 48, weight: "bold",
-    color: "#ffd166", blur: 28 + 10 * pulse(now, 3), align: "center", baseline: "top",
+    color: C.gold, blur: 28 + 10 * pulse(now, 3), align: "center", baseline: "top",
     fontFamily: "'Courier New', monospace",
   });
 
@@ -1229,12 +1308,12 @@ export function drawPause(ctx, player) {
     const rangeM = Math.round(rangePx / 25);
 
     const stats = [
-      ["♥ 生命", player._maxLivesUpdate ? (player.baseHp + (player.skills.maxhp || 0)) : player.baseHp, "#ff6b9d"],
-      ["⚔ 攻击", 1 + (player.skills.dmg || 0), "#ffd166"],
-      ["🔥 射速", (baseFireRate * 1000).toFixed(0) + "ms", "#ffe066"],
-      ["🚀 移速", moveSpd, "#9be8ff"],
-      ["📏 射程", rangeM + "m", "#88ddff"],
-      ["🎯 暴击", Math.round(((player.skills.crit || 0) * 12 + (player.talentCrit || 0) * 100)) + "%", "#ff8fa3"],
+      ["♥ 生命", player._maxLivesUpdate ? (player.baseHp + (player.skills.maxhp || 0)) : player.baseHp, C.pink],
+      ["⚔ 攻击", 1 + (player.skills.dmg || 0), C.gold],
+      ["🔥 射速", (baseFireRate * 1000).toFixed(0) + "ms", C.gold],
+      ["🚀 移速", moveSpd, C.cyanSoft],
+      ["📏 射程", rangeM + "m", C.cyanSoft],
+      ["🎯 暴击", Math.round(((player.skills.crit || 0) * 12 + (player.talentCrit || 0) * 100)) + "%", C.pinkSoft],
     ];
 
     let sy = py;
@@ -1256,7 +1335,7 @@ export function drawPause(ctx, player) {
     const skillNames = {
       dmg:"火力", rate:"射速", range:"射程", move:"机动", maxhp:"生命",
       shield:"护盾", crit:"暴击", dual:"侧翼", sideBullets:"护法", explosion:"爆炸", expChance:"爆破", expDmg:"爆裂", expRange:"扩域", volley:"连射",
-      scatter:"散射", split:"分裂", penetrate:"穿透", guard:"护体",
+      scatter:"散射", split:"分裂", splitDist:"分距", penetrate:"穿透", guard:"护体",
       lifesteal:"吸取", xpboost:"经验", magnet:"磁力", score:"金币",
       bulletSpeed:"弹速", orbital:"天基", drop:"爆率", critdmg:"致命", knockback:"击退",
     };
@@ -1265,7 +1344,7 @@ export function drawPause(ctx, player) {
       if (lv > 0 && skillNames[id]) learned.push(skillNames[id] + lv + "级");
     }
     if (learned.length > 0) {
-      ctx.fillStyle = "#5ee6ff";
+      ctx.fillStyle = C.cyan;
       setf(ctx, "13px 'sans-serif'");
       // 分两列显示
       const colW = 100;
@@ -1284,17 +1363,17 @@ export function drawPause(ctx, player) {
 
   // 继续按钮
   const bx = W / 2 - 100, by = H * 0.78, bw = 200, bh = 46;
-  lineBtn(ctx, bx, by, bw, bh, "#31d6ff", "继续游戏", {
+  lineBtn(ctx, bx, by, bw, bh, C.cyan, "继续游戏", {
     size: 22, weight: "bold", glow: 15, r: 13,
-    fontFamily: "'Courier New', monospace", textColor: "#03202e",
+    fontFamily: "'Courier New', monospace", textColor: C.bgDark,
   });
   btnPauseResumeRect = { x: bx, y: by, w: bw, h: bh };
 
   // 返回菜单按钮
   const bx2 = W / 2 - 100, by2 = H * 0.88, bw2 = 200, bh2 = 46;
-  lineBtn(ctx, bx2, by2, bw2, bh2, "#ff5c6a", "返回菜单", {
+  lineBtn(ctx, bx2, by2, bw2, bh2, C.red, "返回菜单", {
     size: 22, weight: "bold", glow: 12, r: 13,
-    fontFamily: "'Courier New', monospace", textColor: "#fff",
+    fontFamily: "'Courier New', monospace", textColor: C.white,
   });
   btnPauseQuitRect = { x: bx2, y: by2, w: bw2, h: bh2 };
 }
@@ -1309,11 +1388,8 @@ export function drawToast(ctx, toast) {
   const mw = ctx.measureText ? (ctx.measureText(toast.text).width || toast.text.length * size) : toast.text.length * size;
   const w = mw + 56, h = 54;
   const x = W / 2 - w / 2, y = H * 0.38 - h / 2;
-  const g = ctx.createLinearGradient(0, y, 0, y + h);
-  g.addColorStop(0, hexToRgba(toast.color, 0.28));
-  g.addColorStop(1, "rgba(6,8,18,.92)");
   roundRect(ctx, x, y, w, h, h / 2);
-  ctx.fillStyle = g;
+  ctx.fillStyle = hexToRgba(toast.color, 0.22);
   ctx.fill();
   ctx.shadowColor = toast.color;
   ctx.shadowBlur = 16;
@@ -1328,83 +1404,17 @@ export function drawToast(ctx, toast) {
   ctx.restore();
 }
 
-/** 技能获得过场动画（skillup 升级 / randomSkill 随机获取） */
-export function drawSkillAnim(ctx, player) {
-  if (!player || !player._skillAnim) return;
-  const anim = player._skillAnim;
-  const p = 1 - anim.t / anim.maxT;  // 0→1
-  const s = anim.skill;
-  const isAcquire = anim.type === "acquire";
-  const color = s.color;
-  const title = isAcquire ? "随机获取技能" : "技能升级";
-
-  // 半透明遮罩（渐入渐出）
-  const alpha = p < 0.15 ? p / 0.15 : p > 0.85 ? (1 - p) / 0.15 : 1;
-  ctx.globalAlpha = alpha * 0.8;
-  ctx.fillStyle = "rgba(5,7,15,.7)";
-  ctx.fillRect(0, 0, W, H);
-  ctx.globalAlpha = 1;
-
-  // 扩散光环
-  for (let i = 0; i < 3; i++) {
-    const ringP = clamp((p * 3 + i * 0.2) % 1, 0, 1);
-    const radius = 30 + ringP * 80;
-    ctx.globalAlpha = (1 - ringP) * 0.6;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 3 * (1 - ringP) + 0.5;
-    ctx.beginPath();
-    ctx.arc(W / 2, H * 0.38, radius, 0, TAU);
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
-
-  // 卡片
-  const cw = Math.min(280, W - 60), ch = 140;
-  const cx = W / 2 - cw / 2, cy = H * 0.38 - ch / 2;
-  ctx.fillStyle = "rgba(24,32,52,.98)";
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2.5;
-  roundRect(ctx, cx, cy, cw, ch, 14);
-  ctx.fill(); ctx.stroke();
-
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-
-  // 标题
-  ctx.fillStyle = color;
-  setf(ctx, "bold 18px 'sans-serif'");
-  ctx.fillText(title, W / 2, cy + 28);
-
-  // 技能名
-  ctx.fillStyle = "#fff";
-  setf(ctx, "bold 26px 'sans-serif'");
-  ctx.fillText(s.name, W / 2, cy + 65);
-
-  // 描述
-  ctx.fillStyle = "rgba(255,255,255,.65)";
-  setf(ctx, "14px 'sans-serif'");
-  ctx.fillText(s.desc, W / 2, cy + 100);
-
-  // 等级
-  const lv = player.skills[s.id] || 0;
-  ctx.fillStyle = color;
-  setf(ctx, "bold 16px 'sans-serif'");
-  ctx.fillText("Lv." + lv + " / " + s.max, W / 2, cy + 125);
-}
-
 /** 复活面板：死亡后花星尘立即续命 */
 export function drawRevive(ctx, stardust, cost) {
   const now = uiTime();
-  const ov = ctx.createRadialGradient(W / 2, H * 0.28, 30, W / 2, H * 0.3, H * 0.95);
-  ov.addColorStop(0, "rgba(40,28,8,.6)");
-  ov.addColorStop(1, "rgba(3,3,8,.94)");
-  ctx.fillStyle = ov;
+  ctx.fillStyle = "rgba(20,16,8,.84)";
   ctx.fillRect(0, 0, W, H);
 
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   glowText(ctx, {
     text: "再战一次？", x: W / 2, y: H * 0.28, size: 40, weight: "bold",
-    color: "#ffd166", blur: 26 + 10 * pulse(now, 3), align: "center", baseline: "middle", fontFamily: "'sans-serif'",
+    color: C.gold, blur: 26 + 10 * pulse(now, 3), align: "center", baseline: "middle", fontFamily: "'sans-serif'",
   });
 
   ctx.fillStyle = "rgba(255,255,255,.9)";
@@ -1416,13 +1426,13 @@ export function drawRevive(ctx, stardust, cost) {
 
   glowText(ctx, {
     text: "当前星尘  ✦ " + stardust, x: W / 2, y: H * 0.5, size: 20, weight: "bold",
-    color: "#e0c2ff", blur: 12, align: "center", baseline: "middle", fontFamily: "'sans-serif'",
+    color: C.lilacSoft, blur: 12, align: "center", baseline: "middle", fontFamily: "'sans-serif'",
   });
 
   // 复活按钮
   const bw = 150, bh = 54, by = H * 0.60;
   const bx1 = W / 2 - 160;
-  lineBtn(ctx, bx1, by, bw, bh, "#ffd166", "复活  -" + cost, {
+  lineBtn(ctx, bx1, by, bw, bh, C.gold, "复活  -" + cost, {
     size: 20, weight: "bold", glow: 18 + 8 * pulse(now, 3.4), r: 14,
     fontFamily: "'Courier New', monospace", textColor: "#4a3000",
   });
@@ -1430,9 +1440,9 @@ export function drawRevive(ctx, stardust, cost) {
 
   // 放弃按钮
   const bx2 = W / 2 + 10;
-  lineBtn(ctx, bx2, by, bw, bh, "#ff5c6a", "放弃", {
+  lineBtn(ctx, bx2, by, bw, bh, C.red, "放弃", {
     size: 20, weight: "bold", glow: 10, r: 14,
-    fontFamily: "'Courier New', monospace", textColor: "#fff",
+    fontFamily: "'Courier New', monospace", textColor: C.white,
   });
   btnReviveNoRect = { x: bx2, y: by, w: bw, h: bh };
 
@@ -1443,11 +1453,11 @@ export function drawRevive(ctx, stardust, cost) {
 
 /** 成就 · 每日任务面板：上半部分每日任务（可领取），下半部分成就图鉴 */
 function drawAchieve(ctx) {
-  pageTitle(ctx, "成就 · 每日任务", W / 2, H * 0.048, "#9dff57", 30);
-  titleRule(ctx, W / 2, H * 0.10, 104, "#9dff57");
+  pageTitle(ctx, "成就 · 每日任务", W / 2, H * 0.048, C.greenSoft, 30);
+  titleRule(ctx, W / 2, H * 0.10, 104, C.greenSoft);
   glowText(ctx, {
     text: "星尘  ✦ " + getStardust(), x: W / 2, y: H * 0.115,
-    size: 16, weight: "bold", color: "#e0c2ff", blur: 10,
+    size: 16, weight: "bold", color: C.lilacSoft, blur: 10,
     align: "center", baseline: "top", fontFamily: "'sans-serif'",
   });
 
@@ -1466,11 +1476,8 @@ function drawAchieve(ctx) {
   for (let i = 0; i < qv.items.length; i++) {
     const it = qv.items[i];
     const ry = H * 0.19 + i * rowH;
-    const rG = ctx.createLinearGradient(0, ry, 0, ry + rowH - 6);
-    rG.addColorStop(0, "rgba(36,50,88,.55)");
-    rG.addColorStop(1, "rgba(12,16,34,.95)");
     roundRect(ctx, 10, ry, W - 20, rowH - 6, 10);
-    ctx.fillStyle = rG;
+    ctx.fillStyle = "rgba(18,28,52,.7)";
     ctx.fill();
     ctx.strokeStyle = "rgba(255,255,255,.2)";
     ctx.lineWidth = 1;
@@ -1481,7 +1488,7 @@ function drawAchieve(ctx) {
 
     // 名称
     ctx.textAlign = "left"; ctx.textBaseline = "top";
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle = C.white;
     setf(ctx, "bold 13px 'sans-serif'");
     ctx.fillText(it.def.name, 20, ry + 6);
     // 进度
@@ -1492,13 +1499,13 @@ function drawAchieve(ctx) {
     // 进度条
     const bx = 20, byy = ry + 40, bw = W - 176, bbh = 5;
     const p = it.claimed ? 0 : clamp(it.cur / it.def.target, 0, 1);
-    bar(ctx, bx, byy, bw, bbh, p, it.claimed ? "rgba(255,255,255,.4)" : "#7CFC00", { rounded: 2, glow: 6 });
+    bar(ctx, bx, byy, bw, bbh, p, it.claimed ? "rgba(255,255,255,.4)" : C.green, { rounded: 2, glow: 6 });
 
     // 领取按钮
     const cbtn = { x: W - 142, y: ry + 7, w: 124, h: 28 };
     let label, style;
     if (it.claimed) { label = "已领取"; style = "rgba(255,255,255,.35)"; }
-    else if (it.cur >= it.def.target) { label = "领取 +" + it.def.reward; style = "#7CFC00"; }
+    else if (it.cur >= it.def.target) { label = "领取 +" + it.def.reward; style = C.green; }
     else { label = "未完成"; style = "rgba(255,255,255,.28)"; }
     ctx.fillStyle = it.claimed ? "rgba(255,255,255,.08)" : "rgba(124,252,0,.10)";
     ctx.strokeStyle = style;
@@ -1516,7 +1523,8 @@ function drawAchieve(ctx) {
   ctx.fillStyle = "rgba(255,255,255,.75)";
   setf(ctx, "bold 15px 'sans-serif'");
   ctx.fillText("成就", 16, H * 0.535);
-  const done = ACHIEVEMENTS.filter(a => getAchievementView().find(v => v.def.id === a.id).achieved).length;
+  const views = getAchievementView();
+  const done = ACHIEVEMENTS.filter(a => views.find(v => v.def.id === a.id).achieved).length;
   ctx.fillStyle = "rgba(255,255,255,.45)";
   setf(ctx, "12px 'sans-serif'");
   ctx.fillText("已达成 " + done + " / " + ACHIEVEMENTS.length, 16, H * 0.555);
@@ -1526,7 +1534,6 @@ function drawAchieve(ctx) {
   const cardW = Math.floor((W - pad * 2 - gap * (cols - 1)) / cols);
   const cardH = W >= 360 ? 54 : 46;
   const startY = H * 0.585;
-  const views = getAchievementView();
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   achieveCardRects = [];
   for (let i = 0; i < views.length; i++) {
@@ -1536,11 +1543,8 @@ function drawAchieve(ctx) {
     const x = pad + col * (cardW + gap);
     const y = startY + row * (cardH + 6);
     ctx.save();
-    const ag = ctx.createLinearGradient(0, y, 0, y + cardH);
-    ag.addColorStop(0, v.achieved ? hexToRgba(v.def.color, 0.28) : "rgba(255,255,255,.05)");
-    ag.addColorStop(1, v.achieved ? "rgba(22,30,52,.96)" : "rgba(8,11,22,.92)");
     roundRect(ctx, x, y, cardW, cardH, 9);
-    ctx.fillStyle = ag;
+    ctx.fillStyle = v.achieved ? hexToRgba(v.def.color, 0.20) : "rgba(10,14,28,.9)";
     ctx.fill();
     ctx.strokeStyle = v.achieved ? hexToRgba(v.def.color, 0.95) : "rgba(255,255,255,.16)";
     ctx.lineWidth = v.achieved ? 1.6 : 1.1;
@@ -1557,7 +1561,7 @@ function drawAchieve(ctx) {
 
   // 返回按钮
   const bw = 180, bx = W / 2 - bw / 2, by = H * 0.935, bh = 40;
-  lineBtn(ctx, bx, by, bw, bh, "#5ee6ff", "← 返回主菜单", { size: 16, weight: "bold", glow: 9, r: 11 });
+  lineBtn(ctx, bx, by, bw, bh, C.cyan, "← 返回主菜单", { size: 16, weight: "bold", glow: 9, r: 11 });
   btnAchieveBackRect = { x: bx, y: by, w: bw, h: bh };
   btnCodexBackRect = null;
 }
@@ -1574,13 +1578,13 @@ export function drawClearCacheConfirm(ctx) {
   const cw = 280, ch = 200;
   const cx = W / 2 - cw / 2, cy = H * 0.27;
   ctx.fillStyle = "rgba(24,32,52,.98)";
-  ctx.strokeStyle = "#ff6b6b";
+  ctx.strokeStyle = C.redSoft;
   ctx.lineWidth = 2.5;
   roundRect(ctx, cx, cy, cw, ch, 14);
   ctx.fill(); ctx.stroke();
 
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillStyle = "#ff6b6b";
+  ctx.fillStyle = C.redSoft;
   setf(ctx, "bold 22px 'sans-serif'");
   ctx.fillText("清除缓存", W / 2, cy + 35);
 
@@ -1594,23 +1598,78 @@ export function drawClearCacheConfirm(ctx) {
   const bw = 100, bh = 44, by = cy + ch - 62;
   const bx1 = W / 2 - 130;
   ctx.fillStyle = "rgba(255,107,107,.15)";
-  ctx.strokeStyle = "#ff6b6b";
+  ctx.strokeStyle = C.redSoft;
   ctx.lineWidth = 2;
   roundRect(ctx, bx1, by, bw, bh, 11);
   ctx.fill(); ctx.stroke();
-  ctx.fillStyle = "#ff6b6b";
+  ctx.fillStyle = C.redSoft;
   setf(ctx, "bold 16px 'sans-serif'");
   ctx.fillText("确认清除", bx1 + bw / 2, by + bh / 2 + 1);
   btnClearYesRect = { x: bx1, y: by, w: bw, h: bh };
 
   const bx2 = W / 2 + 30;
-  ctx.fillStyle = "rgba(94,230,255,.12)";
-  ctx.strokeStyle = "#5ee6ff";
+  ctx.fillStyle = hexToRgba(C.cyan, 0.12);
+  ctx.strokeStyle = C.cyan;
   ctx.lineWidth = 2;
   roundRect(ctx, bx2, by, bw, bh, 11);
   ctx.fill(); ctx.stroke();
-  ctx.fillStyle = "#5ee6ff";
+  ctx.fillStyle = C.cyan;
   setf(ctx, "bold 16px 'sans-serif'");
   ctx.fillText("取消", bx2 + bw / 2, by + bh / 2 + 1);
   btnClearNoRect = { x: bx2, y: by, w: bw, h: bh };
+}
+
+export function drawHangarConfirm(ctx) {
+  if (!hangarConfirm) return;
+  btnHangarConfirmYesRect = null;
+  btnHangarConfirmNoRect = null;
+
+  ctx.fillStyle = "rgba(5,7,15,.82)";
+  ctx.fillRect(0, 0, W, H);
+
+  const cw = 300, ch = 218;
+  const cx = W / 2 - cw / 2, cy = H * 0.27;
+  ctx.fillStyle = "rgba(24,32,52,.98)";
+  ctx.strokeStyle = C.gold;
+  ctx.lineWidth = 2.5;
+  roundRect(ctx, cx, cy, cw, ch, 14);
+  ctx.fill(); ctx.stroke();
+
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = C.gold;
+  setf(ctx, "bold 22px 'sans-serif'");
+  ctx.fillText("确认购买", W / 2, cy + 36);
+
+  ctx.fillStyle = C.white;
+  setf(ctx, "bold 17px 'sans-serif'");
+  ctx.fillText("战机：" + (hangarConfirm.name || ""), W / 2, cy + 78);
+
+  ctx.fillStyle = C.lilacSoft;
+  setf(ctx, "15px 'sans-serif'");
+  ctx.fillText("花费 " + hangarConfirm.cost + " 星尘", W / 2, cy + 108);
+  ctx.fillStyle = "rgba(255,255,255,.6)";
+  ctx.fillText("当前星尘 ✦ " + getStardust(), W / 2, cy + 130);
+
+  const bw = 108, bh = 44, by = cy + ch - 60;
+  const bx1 = W / 2 - 132;
+  ctx.fillStyle = "rgba(255,107,107,.15)";
+  ctx.strokeStyle = C.redSoft;
+  ctx.lineWidth = 2;
+  roundRect(ctx, bx1, by, bw, bh, 11);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = C.redSoft;
+  setf(ctx, "bold 16px 'sans-serif'");
+  ctx.fillText("确认", bx1 + bw / 2, by + bh / 2 + 1);
+  btnHangarConfirmYesRect = { x: bx1, y: by, w: bw, h: bh };
+
+  const bx2 = W / 2 + 24;
+  ctx.fillStyle = hexToRgba(C.cyan, 0.12);
+  ctx.strokeStyle = C.cyan;
+  ctx.lineWidth = 2;
+  roundRect(ctx, bx2, by, bw, bh, 11);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = C.cyan;
+  setf(ctx, "bold 16px 'sans-serif'");
+  ctx.fillText("取消", bx2 + bw / 2, by + bh / 2 + 1);
+  btnHangarConfirmNoRect = { x: bx2, y: by, w: bw, h: bh };
 }

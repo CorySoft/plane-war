@@ -32,18 +32,62 @@ let metaData = defaultMeta();
 function sanitizeMeta(raw) {
   const next = defaultMeta();
   if (!raw || typeof raw !== "object") return next;
-  Object.assign(next, raw);
-  if (!Array.isArray(next.unlockedAircraft) || next.unlockedAircraft.length === 0) {
-    next.unlockedAircraft = ["falcon"];
+  // 逐键拷贝并跳过原型污染键：Object.assign(next, raw) 的 [[Set]] 会把
+  // 存档里的 "__proto__" 触发成原型 setter，改写 next 的原型
+  for (const k of Object.keys(raw)) {
+    if (k === "__proto__" || k === "constructor" || k === "prototype") continue;
+    next[k] = raw[k];
   }
+  // 飞机 id 白名单过滤：非法 id（被改写/损坏的存档）会让展开配置得到 undefined，
+  // 进而使 player.speed = undefined → 坐标 NaN、碰撞全部失效
+  if (Array.isArray(next.unlockedAircraft)) {
+    next.unlockedAircraft = next.unlockedAircraft.filter(
+      id => typeof id === "string" && Object.prototype.hasOwnProperty.call(META.aircraft, id)
+    );
+  } else {
+    next.unlockedAircraft = [];
+  }
+  if (next.unlockedAircraft.length === 0) next.unlockedAircraft = ["falcon"];
   if (!next.unlockedAircraft.includes("falcon")) next.unlockedAircraft.unshift("falcon");
+  if (typeof next.selectedAircraft !== "string" ||
+      !next.unlockedAircraft.includes(next.selectedAircraft) ||
+      !META.aircraft[next.selectedAircraft]) {
+    next.selectedAircraft = "falcon";
+  }
   if (!Array.isArray(next.purchasedTalents)) next.purchasedTalents = [];
   if (!Array.isArray(next.discoveredSkills)) next.discoveredSkills = [];
   if (!Array.isArray(next.discoveredPowerups)) next.discoveredPowerups = [];
   if (!next.shopLevels || typeof next.shopLevels !== "object" || Array.isArray(next.shopLevels)) next.shopLevels = {};
+  // 商城等级逐项校验：字符串/浮点/超上限会被 effect() 拼成 NaN（生命变 NaN=无敌）
+  const cleanShop = {};
+  for (const item of SHOP_ITEMS) {
+    const lv = next.shopLevels[item.id];
+    if (Number.isInteger(lv) && lv > 0) cleanShop[item.id] = Math.min(lv, item.max);
+  }
+  next.shopLevels = cleanShop;
   if (!Array.isArray(next.achievements)) next.achievements = [];
   if (typeof next.stardust !== "number" || !Number.isFinite(next.stardust) || next.stardust < 0) next.stardust = 0;
   if (typeof next.best !== "number" || !Number.isFinite(next.best) || next.best < 0) next.best = 0;
+  // 统计计数器数值加固（旧档/损坏档缺省或非法时回退）
+  for (const k of ["totalRuns", "totalKills", "totalBosses", "totalPowerups", "totalStardustEarned"]) {
+    if (typeof next[k] !== "number" || !Number.isFinite(next[k]) || next[k] < 0) next[k] = 0;
+  }
+  // quests 仅在结构合理时保留，否则交给 ensureQuests 重建（跨天也会重建）
+  const q = next.quests;
+  if (q && (typeof q !== "object" || Array.isArray(q) || typeof q.date !== "string" ||
+            !q.progress || typeof q.progress !== "object" || !Array.isArray(q.claimed))) {
+    next.quests = null;
+  }
+  if (next.quests) {
+    // 进度逐项数值化：字符串进度会让 claimQuest 的字符串比较恒真（任务白嫖）
+    const progress = {};
+    for (const def of DAILY_QUESTS) {
+      const v = next.quests.progress[def.type];
+      progress[def.type] = (typeof v === "number" && Number.isFinite(v) && v >= 0) ? v : 0;
+    }
+    next.quests.progress = progress;
+    next.quests.claimed = next.quests.claimed.filter(x => typeof x === "string");
+  }
   const s = next.settings && typeof next.settings === "object" ? next.settings : {};
   next.settings = {
     sfxMuted: !!s.sfxMuted,
@@ -76,22 +120,35 @@ export function toggleSetting(key) {
 
 export function resetMeta() {
   metaData = defaultMeta();
-  try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STORAGE_KEY + ".bak");
+  } catch (e) {}
   return metaData;
 }
 
 export function loadMeta() {
+  let raw = null;
+  try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { return metaData; }
+  if (!raw) return metaData;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) metaData = sanitizeMeta(JSON.parse(raw));
-  } catch (e) {}
+    metaData = sanitizeMeta(JSON.parse(raw));
+  } catch (e) {
+    // 解析失败：先把损坏的原始数据备份，避免下一次 saveMeta 用默认值永久覆盖
+    try { localStorage.setItem(STORAGE_KEY + ".bak", raw); } catch (_) {}
+    console.error("[meta] 存档解析失败，已备份到 " + STORAGE_KEY + ".bak 并降级为默认档");
+    metaData = defaultMeta();
+  }
   return metaData;
 }
 
 export function saveMeta() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(metaData));
-  } catch (e) {}
+  } catch (e) {
+    // 配额满/隐私模式：调用方无法感知，至少留下可诊断的日志
+    console.error("[meta] 存档写入失败:", e && (e.name || e.message));
+  }
 }
 
 export function earnStardust(score) {
@@ -182,10 +239,11 @@ export function setSelectedAircraft(id) {
   return false;
 }
 
-/** 返回当前选中飞机的完整配置 */
+/** 返回当前选中飞机的完整配置（id 非法时回退 falcon，防止展开 undefined 得到残缺配置） */
 export function getSelectedAircraftConfig() {
   const id = getSelectedAircraft();
-  return { ...META.aircraft[id], id };
+  const cfg = META.aircraft[id] || META.aircraft.falcon;
+  return { ...cfg, id: META.aircraft[id] ? id : "falcon" };
 }
 
 // ---------- 天赋树 ----------

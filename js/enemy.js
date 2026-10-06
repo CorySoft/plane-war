@@ -2,10 +2,15 @@
  * enemy.js — 敌机类型 + AI + 生成
  * =========================================================== */
 
-import { W, H, ENEMY_TYPES, DIFFICULTY, ENEMY_LEVEL, TAU } from "./config.js";
+import { W, H, ENEMY_TYPES, DIFFICULTY, ENEMY_LEVEL, TAU, enemyLevelScale } from "./config.js";
 import { rand, pick } from "./utils.js";
+import { drawSprite, drawSpriteFlash } from "./assets.js";
 
 export let enemies = [];
+
+// 敌机唯一 id：对象池会复用对象，碰撞去重必须靠 uid 而非对象引用
+let uidSeq = 1;
+export function nextEnemyUid() { return uidSeq++; }
 
 // ---------- 敌机对象池 ----------
 const pool = [];
@@ -17,6 +22,8 @@ function allocEnemy() {
 
 /** 释放敌机回池（重置动态字段） */
 function freeEnemy(e) {
+  // Boss 不回池：普通敌机池复用会残留 bossType/phases/spawnTimer 等专属字段
+  if (e.isBoss) return;
   if (pool.length < 60) pool.push(e);
 }
 
@@ -50,10 +57,12 @@ export function spawnEnemy(level, diff, enemyLevel = 1, atX, atY) {
   const cfg = ENEMY_TYPES[type];
   // 敌方等级缩放
   const elvl = Math.max(1, enemyLevel);
-  const hpMul = 1 + (elvl - 1) * ENEMY_LEVEL.hpPerLevel;
-  const rewardMul = 1 + (elvl - 1) * ENEMY_LEVEL.rewardPerLevel;
+  const scale = enemyLevelScale(elvl);
+  const hpMul = 1 + scale * ENEMY_LEVEL.hpPerLevel;
+  const rewardMul = 1 + scale * ENEMY_LEVEL.rewardPerLevel;
   const hp = Math.max(1, Math.round(cfg.hp * (diff?.hpScale ?? 1) * hpMul));
   const e = allocEnemy();
+  e.uid = nextEnemyUid();
   e.type = type;
   e.r = cfg.r;
   e.hp = hp;
@@ -66,7 +75,7 @@ export function spawnEnemy(level, diff, enemyLevel = 1, atX, atY) {
   e.y = atY ?? -cfg.r - 10;
   e.vy = cfg.speed * (diff?.speedScale ?? 1) * rand(0.8, 1.25) * (1 + level * DIFFICULTY.speedScalePerLevel);
   e.vx = rand(-0.4, 0.4);
-  e.fireCd = rand(cfg.fireCd[0], cfg.fireCd[1]) * (diff?.fireCdScale ?? 1) * (1 + (elvl - 1) * ENEMY_LEVEL.fireCdPerLevel);
+  e.fireCd = rand(cfg.fireCd[0], cfg.fireCd[1]) * (diff?.fireCdScale ?? 1) * (1 + scale * ENEMY_LEVEL.fireCdPerLevel);
   e.t = rand(0, TAU);
   e.hitFlash = 0;
   e.frozen = 0;
@@ -75,6 +84,7 @@ export function spawnEnemy(level, diff, enemyLevel = 1, atX, atY) {
   e.laserTimer = type === "laser" ? rand(1, 2) : 0;
   e.enemyLevel = elvl;
   e.isBoss = false;
+  e._laserShot = false;
   e._deathExplosion = null;
   e.kx = 0; e.ky = 0; e.kbTimer = 0;
   pushEnemy(e);
@@ -90,6 +100,7 @@ export function updateEnemies(dt, level, playerX, playerY, playerH) {
     // 避免普通敌机推进逻辑（如原生 vy 下坠）把 Boss 一路带出屏幕。
     if (e.isBoss) {
       if (e.frozen > 0) e.frozen -= dt;
+      e.hitFlash = Math.max(0, e.hitFlash - dt * 8);   // Boss 分支同样衰减，否则受击后永久白闪
       e.t += dt;
       continue;
     }
@@ -194,32 +205,40 @@ export function drawEnemies(ctx, frame) {
       }
     }
 
-    // 身体
-    ctx.fillStyle = e.hitFlash > 0 ? "#ffffff" : e.color;
-    ctx.beginPath();
-    if (e.type === "small" || e.type === "split") {
-      ctx.moveTo(0, -r);
-      ctx.lineTo(r * 0.85, r * 0.3);
-      ctx.lineTo(r * 0.5, r);
-      ctx.lineTo(-r * 0.5, r);
-      ctx.lineTo(-r * 0.85, r * 0.3);
-    } else if (e.type === "mid" || e.type === "laser") {
-      ctx.moveTo(0, -r);
-      ctx.lineTo(r, 0);
-      ctx.lineTo(r * 0.6, r);
-      ctx.lineTo(-r * 0.6, r);
-      ctx.lineTo(-r, 0);
-    } else if (e.type === "shield") {
-      // 菱形
-      ctx.moveTo(0, -r);
-      ctx.lineTo(r * 0.8, 0);
-      ctx.lineTo(0, r);
-      ctx.lineTo(-r * 0.8, 0);
+    // 身体：优先贴图（Boss 用 boss_<类型>，普通机用 enemy_<类型>）
+    const spriteId = e.type === "boss" ? `boss_${e.bossType}` : `enemy_${e.type}`;
+    const box = r * 2.35;   // 贴图带 4% 透明留白，略放大补偿
+    const skinned = drawSprite(ctx, spriteId, 0, 0, box, box);
+    if (skinned) {
+      // 受击白闪：叠一层白色剪影（无 document 环境返回 false，直接跳过）
+      if (e.hitFlash > 0) drawSpriteFlash(ctx, spriteId, 0, 0, box, box, e.hitFlash);
     } else {
-      ctx.arc(0, 0, r, 0, TAU);
+      ctx.fillStyle = e.hitFlash > 0 ? "#ffffff" : e.color;
+      ctx.beginPath();
+      if (e.type === "small" || e.type === "split") {
+        ctx.moveTo(0, -r);
+        ctx.lineTo(r * 0.85, r * 0.3);
+        ctx.lineTo(r * 0.5, r);
+        ctx.lineTo(-r * 0.5, r);
+        ctx.lineTo(-r * 0.85, r * 0.3);
+      } else if (e.type === "mid" || e.type === "laser") {
+        ctx.moveTo(0, -r);
+        ctx.lineTo(r, 0);
+        ctx.lineTo(r * 0.6, r);
+        ctx.lineTo(-r * 0.6, r);
+        ctx.lineTo(-r, 0);
+      } else if (e.type === "shield") {
+        // 菱形
+        ctx.moveTo(0, -r);
+        ctx.lineTo(r * 0.8, 0);
+        ctx.lineTo(0, r);
+        ctx.lineTo(-r * 0.8, 0);
+      } else {
+        ctx.arc(0, 0, r, 0, TAU);
+      }
+      ctx.closePath();
+      ctx.fill();
     }
-    ctx.closePath();
-    ctx.fill();
 
     if (e.type === "laser" && e.laserTimer > 0 && e.laserTimer < 0.55) {
       ctx.strokeStyle = `rgba(255,68,68,${0.45 + Math.sin(frame * 0.4) * 0.25})`;
@@ -249,13 +268,15 @@ export function drawEnemies(ctx, frame) {
       ctx.fillRect(-w / 2, r + 6, w * pct, 4);
     }
 
-    // 眼睛
-    ctx.fillStyle = "#fff";
-    ctx.beginPath(); ctx.arc(-r * 0.3, -r * 0.2, r * 0.18, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.arc(r * 0.3, -r * 0.2, r * 0.18, 0, TAU); ctx.fill();
-    ctx.fillStyle = "#222";
-    ctx.beginPath(); ctx.arc(-r * 0.3 + r * 0.05, -r * 0.2, r * 0.08, 0, TAU); ctx.fill();
-    ctx.beginPath(); ctx.arc(r * 0.3 + r * 0.05, -r * 0.2, r * 0.08, 0, TAU); ctx.fill();
+    // 眼睛（贴图自带面部细节，走贴图时不再画程序化眼睛）
+    if (!skinned) {
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.arc(-r * 0.3, -r * 0.2, r * 0.18, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(r * 0.3, -r * 0.2, r * 0.18, 0, TAU); ctx.fill();
+      ctx.fillStyle = "#222";
+      ctx.beginPath(); ctx.arc(-r * 0.3 + r * 0.05, -r * 0.2, r * 0.08, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(r * 0.3 + r * 0.05, -r * 0.2, r * 0.08, 0, TAU); ctx.fill();
+    }
 
     ctx.restore();
   }
@@ -269,9 +290,11 @@ export function clearEnemies() {
 /** 生成分裂子代 */
 export function spawnSplitChildren(parent) {
   for (let i = 0; i < parent.splitChildren; i++) {
+    if (enemies.length >= 60) return;   // 与 spawnEnemy 同款防爆量上限
     const cfg = ENEMY_TYPES.small;
     const angle = (i / parent.splitChildren) * Math.PI - Math.PI / 2;
     const e = allocEnemy();
+    e.uid = nextEnemyUid();
     e.type = "small";
     e.r = cfg.r * 0.7;
     e.hp = 1;

@@ -2,7 +2,7 @@
  * game.js — 主游戏循环 + 状态机 + 碰撞检测
  * =========================================================== */
 
-import { W, H, STATE, BULLET as BCFG, TAU, DIFFICULTY_PRESETS, ENEMY_LEVEL, POWERUP_DROP, META, computeViewport, setViewport } from "./config.js";
+import { W, H, STATE, BULLET as BCFG, TAU, DIFFICULTY_PRESETS, ENEMY_LEVEL, POWERUP_DROP, META, COMBO, XP_BASE, XP_GROWTH, PLAYER, computeViewport, setViewport, skillMax } from "./config.js";
 import { clamp, rand, hypot, setf } from "./utils.js";
 import { glowText } from "./theme.js";
 import { sfx, startMusic, stopMusic, initAudio, setSfxMuted, setMusicMuted } from "./audio.js";
@@ -10,15 +10,16 @@ import { initInput, bindTouchButtons, getStick, isStickActive, setDifficulty as 
 import { spawnParticles, updateParticles, drawParticles, clearParticles } from "./particles.js";
 import { triggerShake, updateCamera, applyCamera, resetCamera, slowmo } from "./camera.js";
 import {
-  bullets, fireBullet, spawnEnemyBullet, spawnSplitBullet, spawnLaserVolley,
+  bullets, fireBullet, spawnEnemyBullet, spawnSplitBurst, spawnLaserVolley,
   spawnHostileBullet, applyPierceOrRemove, removeBullet,
-  updateBullets, drawBullets, clearBullets, hasPlayerMainBullet, maxMainBulletTraveled, markMainBulletsTriggered
+  updateBullets, drawBullets, clearBullets, maxMainBulletTraveled, markMainBulletsTriggered,
+  canHitEnemy, markHitEnemy, headingToBulletAngle, countFriendlyBullets
 } from "./bullet.js";
 import {
   enemies, spawnEnemy, updateEnemies, getEnemyShooters,
   drawEnemies, clearEnemies, spawnSplitChildren, removeEnemyEx
 } from "./enemy.js";
-import { spawnPowerup, updatePowerups, drawPowerups, clearPowerups, updateGachaAnim, drawGachaAnim, getGachaAnim, clearGachaAnim, setGachaAnim } from "./powerup.js";
+import { spawnPowerup, updatePowerups, drawPowerups, clearPowerups, updateGachaAnim, drawGachaAnim, getGachaAnim, clearGachaAnim, setGachaAnim, xpPackAmount } from "./powerup.js";
 import { generateSkillChoices, applySkill, getMaxLives } from "./skill.js";
 import { createPlayer, updatePlayer, getShootPattern, drawPlayer, getOrbitBullets, removeOrbitBullet } from "./player.js";
 import {
@@ -30,7 +31,8 @@ import {
   drawMenu, drawGameOver, drawLevelUp, drawPause, drawPauseButton, drawToast, drawRevive,
   drawDetailCard, setDetailCard, getDetailCard,
   getDetailCloseRect, getCodexCardRects, getPowerupCardRects, getAchieveCardRects,
-  powerupDescFull, drawSkillAnim,
+  getCodexScroll, getCodexMaxScroll, getCodexViewport, setCodexScroll,
+  powerupDescFull,
   drawStars, updateStars, initStars,
   spawnDamageNumber, updateDamageNumbers, drawDamageNumbers, clearDamageNumbers,
   hitTestButton, getStartButton, getRestartButton, getGameOverMenuButton,
@@ -42,7 +44,11 @@ import {
   getTalentButton, getTalentBackButton, getTalentCards,
   getSettingsButton, getSettingsBackButton, getSettingToggles,
   getClearCacheButton, drawClearCacheConfirm, getClearYesButton, getClearNoButton, getShowClearCache, setShowClearCache,
+  getFeedbackButton,
+  getHangarConfirm, setHangarConfirm, getHangarConfirmYesButton, getHangarConfirmNoButton, drawHangarConfirm,
 } from "./ui.js";
+import { initFeedback, showFeedback, hideFeedback, isFeedbackOpen } from "./feedback.js";
+import { preloadSkin, drawBackground, skinProgress } from "./assets.js";
 
 // Debug mode
 const DEBUG_MODE = true;
@@ -51,6 +57,7 @@ import {
   discoverSkill, getDiscoveredSkills, spendStardust, getStardust,
   checkAchievements, getQuestView, claimQuest, addBossKill,
   getSettings, toggleSetting, unlockAircraft, setSelectedAircraft, purchaseTalent,
+  resetMeta,
 } from "./meta.js";
 
 // ---------- 画布初始化 ----------
@@ -85,6 +92,8 @@ function resize() {
 window.addEventListener("resize", resize);
 resize();
 initStars();   // 启动即铺好星野，主菜单背后不是死黑
+// 贴图异步预加载：不阻塞启动，加载完成前各绘制点自动回退程序化绘制
+try { preloadSkin(); } catch (e) { console.error("[plane_war] 贴图预加载失败:", e.message); }
 
 // ---------- 游戏变量 ----------
 let score = 0;
@@ -94,7 +103,7 @@ let level = 1;
 let enemyLevel = 1;
 let pLevel = 1;
 let xp = 0;
-let xpNeed = 60;
+let xpNeed = XP_BASE;
 let combo = 0;
 let comboTime = 0;
 let frame = 0;
@@ -113,6 +122,7 @@ let newBestFx = 0;          // 新突破特效计时（>0 时播放）
 let newBestOnce = false;    // 本局是否已触发过新突破特效
 let lastTime = performance.now();
 let now = 0;
+let levelledThisFrame = false;   // 本帧是否已触发过升级（连锁击杀防重复 doLevelUp）
 let toast = null;
 let difficultyKey = "normal";
 let difficulty = DIFFICULTY_PRESETS.normal;
@@ -124,16 +134,23 @@ let reviveUsed = false;    // 本局是否已用过复活（每局限 1 次）
 let spaceBgCache = { key: "", base: null, hz: null, vg: null };
 
 // ---------- 初始化（失败也尽量让 loading 走掉，靠兜底显示菜单） ----------
+// loadMeta 独立 try：UI 绑定（如触摸按钮 DOM 缺失）抛错不能连带跳过读档，
+// 否则内存档保持默认值，之后每次 saveMeta 都会覆盖掉用户真实存档
+try {
+  loadMeta();
+} catch (e) {
+  console.error("[plane_war] 读取存档失败:", e.message);
+}
 try {
   initInput(canvas);
   bindTouchButtons(
     document.getElementById("btnLeft"),
     document.getElementById("btnRight")
   );
-  loadMeta();
   applyAudioSettings();
   initStars();
   resetCamera();
+  initFeedback();
 } catch (e) {
   console.error("[plane_war] 初始化异常:", e.message, e.stack);
 }
@@ -187,7 +204,7 @@ function loop() {
     updateStars(dt);
 
     if (state === STATE.PLAYING) {
-      update(dt);
+      update(dt, rawDt);
       frame++;
       if (newBestFx > 0) newBestFx -= dt;
       // 道具拾取触发抽奖动画：自动暂停游戏，等待用户点击继续
@@ -228,8 +245,12 @@ function loop() {
 }
 
 // ---------- 更新 ----------
-function update(dt) {
-  updateCamera(dt, combo, deathTimer > 0 ? Math.max(0.1, deathTimer / 2.0) : 0);
+// @param dt      世界步进（已被 slowmo 缩放）
+// @param realDt  真实步进（相机/慢动作插值用：slowmo 就是本函数的被调量，
+//                若拿缩放后的 dt 回调会形成自反馈，慢动作进出被拉长数倍）
+function update(dt, realDt = dt) {
+  levelledThisFrame = false;   // 每帧重置：连锁击杀多级只在当帧保留一个升级
+  updateCamera(realDt, combo, deathTimer > 0 ? Math.max(0.1, deathTimer / 2.0) : 0);
   updateDamageNumbers(dt);
   if (player) {
     updateParticles(dt);
@@ -281,8 +302,8 @@ function update(dt) {
       if (comboTime <= 0) combo = 0;
     }
 
-    // 玩家移动 + 自动射击（距离/销毁触发：上一发主弹飞超 10m 或已销毁即可再射）
-    const shouldFire = updatePlayer(dt, player, BCFG.refireDist, maxMainBulletTraveled());
+    // 玩家移动 + 自动射击（闸门距离由 updatePlayer 按当前射速实时推导）
+    const shouldFire = updatePlayer(dt, player, 0, maxMainBulletTraveled());
 
     // 简单模式：仅拖动时跟随手指，不拖动时左右按钮/键盘正常生效
     if (isEasyMode()) {
@@ -294,10 +315,14 @@ function update(dt) {
       // 避免同一波多颗子弹依次越过 10m 时反复触发造成误连射。新发的子弹 traveled=0 仍可触发下一波。
       markMainBulletsTriggered();
       const patterns = getShootPattern(player);
-      for (const p of patterns) {
-        fireBullet(p.angle, p.dmg, player, p.x, p.y, p.spd, p.isExplosion, p.homing);
+      // 同屏密度兜底：射速拉满 + 长射程时屏上可能堆积上百发，
+      // 超过 screenCap 就跳过本轮，保证画面队形可读与帧率
+      if (countFriendlyBullets() + patterns.length <= BCFG.screenCap) {
+        for (const p of patterns) {
+          fireBullet(p.angle, p.dmg, player, p.x, p.y, p.spd, p.isExplosion, p.homing);
+        }
+        sfx.shoot();
       }
-      sfx.shoot();
     }
 
     // 圆弧爆炸波纹更新（收缩生命，越短越淡）
@@ -332,9 +357,11 @@ function update(dt) {
       toast = player._toast;
       player._toast = null;
     }
-    if (player._xp) {
-      addXp(player._xp);
-      player._xp = 0;
+    if (player._xpPack) {
+      // 经验包按当前升级需求折算，后期依然有价值（固定 50 点在后期形同虚设）
+      addXp(xpPackAmount(xpNeed));
+      player._xpPack = false;
+      toast = { text: "经验包 +" + xpPackAmount(xpNeed), color: "#8ad4ff", t: 1.2 };
     }
 
     // 道具掉落
@@ -358,8 +385,8 @@ function update(dt) {
       sfx.power();
     }
 
-    // 波次事件
-    const waveEvent = updateWaves(dt, level, now, difficulty);
+    // 波次事件（enemyLevel 传入：精英波此前漏传导致后期出 1 级白板敌机）
+    const waveEvent = updateWaves(dt, level, difficulty, enemyLevel);
     if (waveEvent === "boss") {
       const bossTypes = Object.keys(BOSS_TYPES);
       const bossType = bossTypes[Math.floor(Math.random() * bossTypes.length)];
@@ -408,9 +435,13 @@ function update(dt) {
 
 // ---------- 碰撞检测 ----------
 function checkCollisions() {
-  for (let i = enemies.length - 1; i >= 0; i--) {
-    const e = enemies[i];
-    if (!e) continue;
+  // 用快照迭代：连锁爆炸/护体弹会 splice 洗牌 enemies，需现场查询真实索引
+  const snapshot = enemies.slice();
+  for (const e of snapshot) {
+    const cur = enemies.indexOf(e);
+    if (cur === -1) continue;   // 已被连锁移除
+    if (e.hp <= 0) continue;    // 已被击杀结算
+    const i = cur;
 
     // 玩家 vs 敌机（冰冻中的敌机冻结不动、不造成伤害，但仍可被击毁）
     if (e.frozen <= 0 && player.invincible <= 0) {
@@ -439,6 +470,8 @@ function checkCollisions() {
       if (!b.friendly) continue;
       const dist = hypot(b.x, b.y, e.x, e.y);
       if (dist < e.r + b.r) {
+        // 穿透弹/分裂碎片命中后不销毁，必须按敌机去重，否则重叠的每一帧都会重复扣血
+        if (!canHitEnemy(b, e)) continue;
         // 处理伤害
         dealDamageToEnemy(e, b, i, j);
         break;
@@ -449,16 +482,19 @@ function checkCollisions() {
   // 护体弹 vs 敌机（击中后消失，一段时间后重生）
   const orbit = getOrbitBullets(player);
   if (orbit.length > 0) {
+    // 快照：连锁爆炸可能在命中后删除敌机并洗牌数组
+    const enSnap = enemies.slice();
     outer: for (let oi = orbit.length - 1; oi >= 0; oi--) {
       const ob = orbit[oi];
       if (!ob) continue;
-      for (let i = enemies.length - 1; i >= 0; i--) {
-        const e = enemies[i];
-        if (!e) continue;
-        if (e.frozen > 0) continue;
-        const dist = hypot(ob.x, ob.y, e.x, e.y);
-        if (dist < e.r + 10) {
-          orbitHitEnemy(e, ob, i);
+      for (const oe of enSnap) {
+        const i = enemies.indexOf(oe);
+        if (i === -1) continue;
+        if (oe.hp <= 0) continue;
+        if (oe.frozen > 0) continue;
+        const dist = hypot(ob.x, ob.y, oe.x, oe.y);
+        if (dist < oe.r + 10) {
+          orbitHitEnemy(oe, ob, i);
           removeOrbitBullet(player, ob);
           continue outer;
         }
@@ -473,7 +509,7 @@ function checkCollisions() {
     if (b.friendly) continue;
     if (player.invincible > 0) continue;
     const dist = hypot(player.x, player.y, b.x, b.y);
-    if (dist < 20) {
+    if (dist < PLAYER.hitRadius) {
       removeBullet(b);
       if (player.shield > 0) {
         player.shield--;
@@ -487,6 +523,9 @@ function checkCollisions() {
 }
 
 function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
+  // 合并上一轮连锁改动的防重复结算：hp<=0 说明已被击杀结算过
+  if (e.hp <= 0) return;
+  markHitEnemy(b, e);
   // 击退：按子弹飞行方向把敌机推开
   if (b.knockback > 0) {
     applyKnockback(e, b);
@@ -505,13 +544,11 @@ function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
   spawnDamageNumber(e.x, e.y, b.isCrit ? b.dmg + "!" : "" + b.dmg, b.isCrit ? "#ff8fa3" : "#fff", b.isCrit);
 
   // 分裂行为：命中时触发碎片（穿透弹也可叠加分裂）
+  // 方向必须用 headingToBulletAngle 换算，否则碎片会横向飞而不是沿主弹前进方向
   if (b.behaviors.has("split") && !b.isScatter) {
-    const cnt = b.splitCount || 1;
-    for (let k = 0; k < cnt; k++) {
-      const angle = (k / cnt) * Math.PI - Math.PI / 2;
-      const sdmg = Math.max(1, Math.round(b.dmg * BCFG.splitDmgRatio));
-      spawnSplitBullet(b.x, b.y, angle, sdmg, "#a0ffd0", b.r);
-    }
+    const travelDir = headingToBulletAngle(b.vx, b.vy);
+    const sdmg = Math.max(1, Math.round(b.dmg * BCFG.splitDmgRatio));
+    spawnSplitBurst(b.x, b.y, travelDir, b.splitCount || 1, sdmg, "#a0ffd0", b.r, b.splitRange || BCFG.splitFragBaseRange);
     sfx.scatter();
   }
 
@@ -520,9 +557,9 @@ function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
     addScore(e.score);
     addXp(e.xp);
     combo++;
-    comboTime = 2.5;
+    comboTime = COMBO.window;
     const comboBonus = combo >= 10;
-    if (comboBonus) addScore(500);
+    if (comboBonus) addScore(COMBO.bonus);
     spawnDamageNumber(e.x, e.y - e.r, "+" + Math.round(e.score * (difficulty.scoreScale ?? 1)), comboBonus ? "#ff8fa3" : "#ffd166", comboBonus);
     spawnParticles(e.x, e.y, e.color, 8, 4);
     spawnPowerup(e.x, e.y, level, getDropBonus());
@@ -553,7 +590,8 @@ function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
       });
     }
 
-    removeEnemy(enemyIdx);
+    const eidx = enemies.indexOf(e);
+    if (eidx !== -1) removeEnemy(eidx);
     applyPierceOrRemove(b);
   } else {
     applyPierceOrRemove(b);
@@ -600,9 +638,9 @@ function orbitHitEnemy(e, ob, enemyIdx) {
     addScore(e.score);
     addXp(e.xp);
     combo++;
-    comboTime = 2.5;
+    comboTime = COMBO.window;
     const comboBonus = combo >= 10;
-    if (comboBonus) addScore(500);
+    if (comboBonus) addScore(COMBO.bonus);
     spawnDamageNumber(e.x, e.y - e.r, "+" + Math.round(e.score * (difficulty.scoreScale ?? 1)), comboBonus ? "#ff8fa3" : "#ffd166", comboBonus);
     spawnParticles(e.x, e.y, e.color, 8, 4);
     spawnPowerup(e.x, e.y, level, getDropBonus());
@@ -665,6 +703,9 @@ function doEnemyDeathExplosion(e, info, depth = 0) {
   const chainVictims = [];
   for (const other of enemies) {
     if (other === e) continue;
+    // 已死但尚未从敌人数组移除（本帧连锁结算中）的敌机不再重复结算，
+    // 否则同一敌机会被多次 AOE 命中并重复计分/经验/连击/击杀数
+    if (other.hp <= 0) continue;
     const d = hypot(other.x, other.y, e.x, e.y);
     if (d < r) {
       if (other.shieldHp > 0) {
@@ -711,7 +752,7 @@ function doEnemyDeathExplosion(e, info, depth = 0) {
     addScore(v.score);
     addXp(v.xp);
     combo++;
-    comboTime = 2.5;
+    comboTime = COMBO.window;
     // 连锁层数越多粒子越少，超过上限直接跳过
     const vParts = Math.max(0, Math.min(BCFG.explosionParticlesPerHit, Math.floor(20 * depthVisualFactor)));
     spawnParticles(v.x, v.y, v.color, vParts, 5);
@@ -749,6 +790,9 @@ function removeEnemy(idx) {
 
 // ---------- Boss AI ----------
 function updateBossAI(e, dt, level, diff) {
+  // 冰冻全场：Boss 同样被冻住（不移动/传送/召唤/切相位），
+  // 否则 8 秒冰冻只冻住子弹，Boss 照常行动
+  if (e.frozen > 0) return;
   const phase = getCurrentBossPhase(e);
 
   // 相位切换：应用相位专属属性（如堡垒的护盾发生器），并刷新技能计时
@@ -757,6 +801,9 @@ function updateBossAI(e, dt, level, diff) {
     e.shieldHp = phase.shieldGens || 0;
     e.spawnTimer = phase.spawnInterval || 0;
     e.teleportTimer = phase.teleportInterval || 999;
+    // 重置开火计时：无枪相位（如母舰"空军召唤"，fireInterval=999）期间 fireCd 不递减，
+    // 切到射击相位若不重置会拖到 999 秒后才能开火
+    e.fireCd = 0;
     if (e.shieldHp > 0) {
       spawnParticles(e.x, e.y, "#44aaff", 24, 6);
       sfx.hit();
@@ -807,7 +854,7 @@ function updateBossAI(e, dt, level, diff) {
       }
     }
   }
-  e.t += dt;
+  // e.t 由 updateEnemies 的 Boss 分支统一累加（此处不再 +dt，否则时间以 2 倍速推进）
 }
 
 function bossFire(e) {
@@ -895,13 +942,20 @@ function addXp(n) {
     xp -= xpNeed;
     pLevel++;
     player.level = pLevel;
-    xpNeed = Math.round(60 * Math.pow(1.4, pLevel - 1));
+    xpNeed = Math.round(XP_BASE * Math.pow(XP_GROWTH, pLevel - 1));
+    // 多级升级只保留一个 doLevelUp：连锁击杀同帧触发多次时，后续只累积经验
+    // （否则一次连锁清怪会凭空多给多条生命且三选一被反复重roll）
+    if (levelledThisFrame) break;
+    levelledThisFrame = true;
     doLevelUp();
     if (state !== STATE.PLAYING) break;
   }
 }
 
 function doLevelUp() {
+  // 死亡结算中（lives 已扣到 0，慢动作/爆炸动画期间仍可能有连锁击杀死敌）不再续命，
+  // 否则升级会把死亡玩家“复活”，绕开支线/复活结算逻辑
+  if (lives <= 0) return;
   lives = Math.min(maxLives, lives + 1);
   sfx.power();
   skillChoices = generateSkillChoices(player.skills);
@@ -979,6 +1033,7 @@ function doRevive() {
   player.invincible = player.invincibleTime || 2.2;
   combo = 0; comboTime = 0;
   deathTimer = 0; deathFlash = 0;
+  resetCamera();           // 复活不复位会把慢动作冻结值（≈0.1）带进新一局，前 1 秒全程慢速
   clearBullets(true);      // 清掉敌方子弹，保留友方
   showAchievementToast(checkAchievements({ runScore: score, runLevel: pLevel, runCombo: combo, reviveUsed: true }));
   toast = { text: "复活成功！", color: "#ffd166", t: 1.8 };
@@ -1006,7 +1061,7 @@ function freezeAll() {
 
 function resetGame() {
   score = 0; lives = 3; level = 1; enemyLevel = 1; combo = 0; comboTime = 0;
-  pLevel = 1; xp = 0; xpNeed = 60;
+  pLevel = 1; xp = 0; xpNeed = XP_BASE;
   stardustEarned = 0;
   isNewBest = false;
   startBest = getBest();
@@ -1026,7 +1081,7 @@ function resetGame() {
   // 休闲模式：射程直接满级（fireBullet 按 player.skills.range 实时取，
   // 设为满级后每发子弹自动获最大射程；同时因 cur>=max 自动退出升级池）
   if (difficultyKey === "easy") {
-    player.skills.range = 5;              // SKILLS.range.max
+    player.skills.range = skillMax("range");   // 按 SKILLS 真实上限满级，避免写死后与配置脱节
   }
 
   // 难度档位开局技能（如休闲模式天基武器）
@@ -1049,6 +1104,14 @@ function resetGame() {
   skillChoices = null;
   frame = 0;
   toast = null;
+  // 清理可能从菜单/暂停残留的状态与特效（防死亡慢动作/闪光/弹窗串局）
+  deathTimer = 0;
+  deathFlash = 0;
+  levelledThisFrame = false;
+  clearGachaAnim?.();
+  setHangarConfirm(null);
+  setShowClearCache(false);
+  setDetailCard(null);
 
   const skipTutorial = !showTutorial || !!getSettings().skipTutorial;
   if (skipTutorial) {
@@ -1135,8 +1198,14 @@ function paintSpace(ctx, frame = 0) {
     spaceBgCache = { key: cacheKey, base, hz, vg };
   }
 
-  ctx.fillStyle = spaceBgCache.base;
-  ctx.fillRect(-10, -10, W + 20, H + 20);
+  // 背景贴图（Agnes 生成）就绪则铺满作为底图，否则回退渐变底。
+  // 菜单态用专属菜单背景（更戏剧化的地平线构图），其余状态用深空背景。
+  const bgId = state === STATE.MENU ? "bg_menu" : "bg_space";
+  const hasBg = drawBackground(ctx, bgId, W, H) || drawBackground(ctx, "bg_space", W, H);
+  if (!hasBg) {
+    ctx.fillStyle = spaceBgCache.base;
+    ctx.fillRect(-10, -10, W + 20, H + 20);
+  }
 
   // 星云随 frame 缓慢漂移，位置每帧变化，渐变保持即时创建
   const nebula = (x, y, r, c0) => {
@@ -1151,7 +1220,7 @@ function paintSpace(ctx, frame = 0) {
   nebula(W * 0.55 + Math.sin(t * 1.4) * 18, H * 0.05, H * 0.3, "rgba(44,205,255,.12)");
   nebula(W * 0.9 - Math.sin(t * 1.1) * 20, H * 0.9, H * 0.35, "rgba(255,120,190,.08)");
 
-  // 底部地平线微光，弱化滚动感
+  // 底部地平线微光，弱化滚动感（贴图底仍在时叠加，保持统一观感）
   ctx.fillStyle = spaceBgCache.hz;
   ctx.fillRect(-10, H * 0.8, W + 20, H * 0.2);
 
@@ -1234,7 +1303,7 @@ function draw() {
   if (player && state !== STATE.MENU && state !== STATE.REVIVE) {
     drawHUD(ctx, {
       score, best: getBest(), level, enemyLevel, pLevel, xp, xpNeed,
-      lives, maxLives, combo, player, frame,
+      lives, maxLives, combo, comboFrac: comboTime / COMBO.window, player, frame,
     });
     if (state === STATE.PLAYING) drawPauseButton(ctx);
   }
@@ -1266,10 +1335,7 @@ function draw() {
   if (state === STATE.TUTORIAL) {
     const a = 0.5 + 0.3 * clamp(tutorialTimer, 0, 1);
     ctx.globalAlpha = Math.min(0.78, a);
-    const dg = ctx.createRadialGradient(W / 2, H * 0.36, 40, W / 2, H * 0.42, H * 0.9);
-    dg.addColorStop(0, "rgba(8,12,28,.92)");
-    dg.addColorStop(1, "rgba(4,6,14,.72)");
-    ctx.fillStyle = dg;
+    ctx.fillStyle = "rgba(6,9,20,.85)";
     ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = 1;
 
@@ -1292,15 +1358,15 @@ function draw() {
     }
   }
 
-  if (state === STATE.MENU) drawMenu(ctx, getBest(), difficultyKey, DIFFICULTY_PRESETS, getDiscoveredSkills());
+  if (state === STATE.MENU) drawMenu(ctx, getBest(), difficultyKey, DIFFICULTY_PRESETS, getDiscoveredSkills(), player);
   else if (state === STATE.OVER) drawGameOver(ctx, score, getBest(), isNewBest);
   else if (state === STATE.REVIVE) drawRevive(ctx, getStardust(), META.reviveCost);
   else if (state === STATE.LEVELUP) drawLevelUp(ctx, skillChoices, player?.skills || {});
   else if (state === STATE.PAUSED) drawPause(ctx, player);
 
-  drawSkillAnim(ctx);
   drawGachaAnim(ctx);
 
+  drawHangarConfirm(ctx);
   drawClearCacheConfirm(ctx);
 
   // Toast：UI 层最后渲染，确保显示在最前面
@@ -1315,9 +1381,22 @@ function draw() {
 
 // ---------- 输入事件 ----------
 window.addEventListener("keydown", e => {
+  // 反馈面板打开时，键盘输入直达输入框，不触发游戏快捷键
+  if (isFeedbackOpen()) {
+    if (e.code === "Escape") { hideFeedback(); return; }
+    return;
+  }
   if (e.code === "Escape" || e.code === "KeyP") {
     if (state === STATE.PLAYING) { state = STATE.PAUSED; return; }
     if (state === STATE.PAUSED) { state = STATE.PLAYING; return; }
+  }
+  // GACHA 抽奖界面：键盘也可解除（与 pointerdown 逻辑一致），避免纯键盘玩家软锁
+  if (e.code === "Space" || e.code === "Enter" || e.code === "Escape") {
+    if (state === STATE.GACHA) {
+      state = skillChoices ? STATE.LEVELUP : STATE.PLAYING;
+      clearGachaAnim();
+      return;
+    }
   }
   if (e.code === "Space" || e.code === "Enter") {
     if (state === STATE.MENU) {
@@ -1339,6 +1418,41 @@ window.addEventListener("keydown", e => {
     }
   }
 });
+
+// 技能图鉴滚动拖拽状态：pointerdown 记录起点，pointermove 滚动，pointerup 判定轻点/拖动
+let codexDrag = null;
+
+// 图鉴卡片轻点（未拖动）：打开详情（技能 / 道具两页共用）
+function handleCodexTap(mx, my) {
+  if (state !== STATE.MENU) return;
+  const page = getMenuPage();
+  if (page === "codex") {
+    for (const c of getCodexCardRects()) {
+      if (hitTestButton(mx, my, c.x) && c.got) {
+        const curLv = (player?.skills?.[c.skill.id]) || 0;
+        setDetailCard({ type: "skill", data: {
+          name: c.skill.name, desc: c.skill.desc, color: c.skill.color,
+          icon: "✦", curLv, max: c.skill.max, got: c.got,
+          spriteId: "skill_" + c.skill.id,
+          fullDesc: c.skill.fullDesc || c.skill.desc,
+        } });
+        return;
+      }
+    }
+  } else if (page === "powerupCodex") {
+    for (const c of getPowerupCardRects()) {
+      if (hitTestButton(mx, my, c.x) && c.got) {
+        setDetailCard({ type: "powerup", data: {
+          name: c.def.name, desc: powerupDescFull(c.key), color: c.def.color,
+          icon: c.def.icon, got: c.got, unique: c.def.unique,
+          spriteId: "powerup_" + c.key,
+          fullDesc: powerupDescFull(c.key),
+        } });
+        return;
+      }
+    }
+  }
+}
 
 canvas.addEventListener("pointerdown", e => {
   const rect = canvas.getBoundingClientRect();
@@ -1368,34 +1482,45 @@ canvas.addEventListener("pointerdown", e => {
   // 简单模式 PLAYING 态：手指直接控制战机 X（input.js 已接管；此处不做重复处理）
 
   if (state === STATE.MENU) {
-    // 技能图鉴子页面：返回 / 点击卡片查看详情
-    if (getMenuPage() === "codex") {
-      if (hitTestButton(mx, my, getCodexBackButton())) { setMenuPage("main"); return; }
-      for (const c of getCodexCardRects()) {
-        if (hitTestButton(mx, my, c.x) && c.got) {
-          const curLv = (player?.skills?.[c.skill.id]) || 0;
-          setDetailCard({ type: "skill", data: {
-            name: c.skill.name, desc: c.skill.desc, color: c.skill.color,
-            icon: "✦", curLv, max: c.skill.max, got: c.got,
-            fullDesc: c.skill.fullDesc || c.skill.desc,
-          } });
-          return;
+    // 弹窗优先：机库购买确认框 / 清除缓存确认框，先于任何主菜单按钮与子页面
+    if (getHangarConfirm()) {
+      if (hitTestButton(mx, my, getHangarConfirmYesButton())) {
+        const c = getHangarConfirm();
+        setHangarConfirm(null);
+        if (unlockAircraft(c.id)) {
+          toast = { text: "解锁成功", color: "#7CFC00", t: 1.6 };
+          sfx.power();
+        } else {
+          toast = { text: "星尘不足", color: "#ff8fa3", t: 1.4 };
         }
+      } else if (hitTestButton(mx, my, getHangarConfirmNoButton())) {
+        setHangarConfirm(null);
+        sfx.click();
       }
       return;
     }
-    // 道具图鉴子页面：返回 / 点击卡片查看详情
-    if (getMenuPage() === "powerupCodex") {
-      if (hitTestButton(mx, my, getPowerupCodexBackButton())) { setMenuPage("main"); return; }
-      for (const c of getPowerupCardRects()) {
-        if (hitTestButton(mx, my, c.x) && c.got) {
-          setDetailCard({ type: "powerup", data: {
-            name: c.def.name, desc: powerupDescFull(c.key), color: c.def.color,
-            icon: c.def.icon, got: c.got, rarity: 3, weight: "-",
-            fullDesc: powerupDescFull(c.key),
-          } });
-          return;
-        }
+    if (getShowClearCache()) {
+      if (hitTestButton(mx, my, getClearYesButton())) {
+        // 走 resetMeta()：同时清内存与存储键，避免 300ms 内任何 saveMeta 把旧档写回
+        resetMeta();
+        setShowClearCache(false);
+        sfx.boom();
+        // 重新加载页面以重置内存数据
+        setTimeout(() => location.reload(), 300);
+      } else if (hitTestButton(mx, my, getClearNoButton())) {
+        setShowClearCache(false);
+      }
+      return;
+    }
+    // 技能/道具图鉴子页面：返回固定按钮点击；卡片区进入拖拽/轻点判定（支持滚动，两页统一）
+    if (getMenuPage() === "codex" || getMenuPage() === "powerupCodex") {
+      const backBtn = getMenuPage() === "codex" ? getCodexBackButton() : getPowerupCodexBackButton();
+      if (hitTestButton(mx, my, backBtn)) { setMenuPage("main"); return; }
+      const vp = getCodexViewport();
+      if (vp && mx >= vp.x && mx <= vp.x + vp.w && my >= vp.y && my <= vp.y + vp.h) {
+        // 记录拖动起点，等 pointerup 判定：轻点=打开详情，拖动=滚动
+        codexDrag = { startY: my, startScroll: getCodexScroll(), moved: false };
+        try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
       }
       return;
     }
@@ -1448,11 +1573,17 @@ canvas.addEventListener("pointerdown", e => {
         if (card.unlocked) {
           setSelectedAircraft(card.id);
           toast = { text: "已选择战机", color: "#66e0ff", t: 1.4 };
-        } else if (unlockAircraft(card.id)) {
-          toast = { text: "解锁成功", color: "#7CFC00", t: 1.6 };
-          sfx.power();
-        } else {
+        } else if (getStardust() < card.cost) {
           toast = { text: "星尘不足", color: "#ff8fa3", t: 1.4 };
+        } else {
+          // 防御：卡片数据若与 META.aircraft 不同步（旧存档/半途改配置）不再抛 TypeError
+          const cfg = META.aircraft[card.id];
+          if (!cfg) {
+            toast = { text: "该战机数据缺失", color: "#ff8fa3", t: 1.4 };
+            return;
+          }
+          setHangarConfirm({ id: card.id, name: cfg.name, cost: card.cost });
+          sfx.click();
         }
         return;
       }
@@ -1496,10 +1627,13 @@ canvas.addEventListener("pointerdown", e => {
     if (hitTestButton(mx, my, getShopButton())) { setMenuPage("shop"); return; }
     // 进入成就·每日任务
     if (hitTestButton(mx, my, getAchieveButton())) { setMenuPage("achieve"); return; }
-    if (hitTestButton(mx, my, getSettingsButton())) { setMenuPage("settings"); return; }
-    // 清除缓存按钮（调试模式）
+    if (getSettingsButton() && hitTestButton(mx, my, getSettingsButton())) { setMenuPage("settings"); return; }
+    // 反馈入口
+    if (getFeedbackButton() && hitTestButton(mx, my, getFeedbackButton())) { showFeedback(); return; }
+    // 清除缓存按钮（玩家可用：解决旧缓存导致的加载/存档异常）
     if (hitTestButton(mx, my, getClearCacheButton())) {
-      if (DEBUG_MODE) { setShowClearCache(true); return; }
+      setShowClearCache(true);
+      return;
     }
     // 难度选择
     for (const [k, rect] of Object.entries(getDifficultyRects())) {
@@ -1513,19 +1647,6 @@ canvas.addEventListener("pointerdown", e => {
     if (hitTestButton(mx, my, getStartButton())) { resetGame(); return; }
   }
 
-  // 清除缓存确认框
-  if (getShowClearCache()) {
-    if (hitTestButton(mx, my, getClearYesButton())) {
-      localStorage.removeItem('planeWarMeta');
-      setShowClearCache(false);
-      sfx.boom();
-      // 重新加载页面以重置内存数据
-      setTimeout(() => location.reload(), 300);
-    } else if (hitTestButton(mx, my, getClearNoButton())) {
-      setShowClearCache(false);
-    }
-    return;
-  }
   if (state === STATE.REVIVE) {
     if (hitTestButton(mx, my, getReviveYesButton())) { doRevive(); return; }
     if (hitTestButton(mx, my, getReviveNoButton())) { gameOver(); return; }
@@ -1552,6 +1673,37 @@ canvas.addEventListener("pointerdown", e => {
   }
 });
 
+// 图鉴滚动：pointermove 拖动更新 scroll；pointerup 判定轻点；wheel 滚动
+canvas.addEventListener("pointermove", e => {
+  const d = codexDrag;
+  if (!d) return;
+  const rect = canvas.getBoundingClientRect();
+  const my = (e.clientY - rect.top) / rect.height * H;
+  const dy = my - d.startY;
+  if (Math.abs(dy) > 6) d.moved = true;
+  setCodexScroll(d.startScroll - dy);
+});
+
+window.addEventListener("pointerup", e => {
+  const d = codexDrag;
+  if (!d) return;
+  codexDrag = null;
+  if (d.moved) return;   // 拖动结束，不视为点击
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) / rect.width * W;
+  const my = (e.clientY - rect.top) / rect.height * H;
+  handleCodexTap(mx, my);
+});
+window.addEventListener("pointercancel", () => { codexDrag = null; });
+
+canvas.addEventListener("wheel", e => {
+  const page = getMenuPage();
+  if (state === STATE.MENU && (page === "codex" || page === "powerupCodex") && getCodexMaxScroll() > 0) {
+    e.preventDefault();
+    setCodexScroll(getCodexScroll() + Math.sign(e.deltaY) * 40);
+  }
+}, { passive: false });
+
 // 导出给外部（调试用）
 window.__game = {
   resetGame, freezeAll,
@@ -1562,9 +1714,11 @@ window.__game = {
   get enemies() { return enemies; },
   get bullets() { return bullets; },
   spawnEnemy, fireBullet, getShootPattern,
+  spawnPowerup, clearPowerups,
   setScore: (v) => { score = v; },
   setLevel: (v) => { level = v; },
   setDifficulty: (key) => { difficultyKey = key; difficulty = DIFFICULTY_PRESETS[key]; setPlayerDifficulty(key); },
   setGachaAnim,
   getGachaAnim,
+  getSkinProgress: skinProgress,
 };

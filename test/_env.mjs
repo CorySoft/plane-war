@@ -60,3 +60,50 @@ export function stubRandom(sequence) {
   };
   return () => { Math.random = orig; };
 }
+
+/**
+ * 装一个可控的假 Image（Node 无此构造器，皮肤加载器会整层回退）。
+ * 返回按创建顺序排列的数组，用 `succeed()` / `fail()` 手动触发 onload/onerror。
+ */
+export function installFakeImage() {
+  const created = [];
+  class FakeImage {
+    constructor() {
+      this.width = 0;
+      this.height = 0;
+      this.onload = null;
+      this.onerror = null;
+      this._src = "";
+      created.push(this);
+    }
+    set src(v) { this._src = v; }
+    get src() { return this._src; }
+    succeed(w = 320, h = 256) {
+      this.width = w;
+      this.height = h;
+      if (this.onload) this.onload();
+    }
+    fail() { if (this.onerror) this.onerror(); }
+  }
+  globalThis.Image = FakeImage;
+  return created;
+}
+
+/** 卸载假 Image（还原 Node 默认的「无 Image」态） */
+export function removeFakeImage(hadImage, savedImage) {
+  if (hadImage) globalThis.Image = savedImage;
+  else delete globalThis.Image;
+}
+
+/**
+ * 画布调用探针：记录 drawImage / fillText 的调用参数，
+ * 用于断言「画了哪张贴图」「文字落在哪个坐标」。
+ */
+export function makeSpyCtx() {
+  const ctx = makeCtx();
+  const images = [];
+  const texts = [];
+  ctx.drawImage = (img, x, y, w, h) => { images.push({ src: String(img && img.src), x, y, w, h }); };
+  ctx.fillText = (t, x, y) => { texts.push({ t, x, y }); };
+  return { ctx, images, texts };
+}

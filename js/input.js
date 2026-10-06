@@ -33,8 +33,6 @@ let stick = {
 };
 let touchId = null;
 
-export const isTouchControl = () => stick.active;
-
 // 供绘制与逻辑读取当前摇杆状态
 export function getStick() { return stick; }
 
@@ -42,7 +40,8 @@ export function getStick() { return stick; }
 export function getStickDir() {
   // 简单模式下强制摇杆失效（无延迟、无跟随目标，直接瞬移）
   if (easyMode || !stick.active) return 0;
-  return stick.nx;
+  // 乘上推动强度：STICK_MAX_DX 注释即“满速所需偏移”，1px 抖动不应直接满速
+  return stick.nx * stick.intensity;
 }
 
 // 简单模式下是否应忽略虚拟摇杆（用于绘制隐藏）
@@ -92,20 +91,37 @@ function updateStick(cur) {
 }
 
 // ---------- 键盘 ----------
+// 焦点在输入控件（反馈输入框/可编辑区）时，方向键、空格、WASD 都属于文本编辑，
+// 不能拦截也不能映射成游戏按键（否则反馈框打不出空格、方向键无法移动光标）
+function isEditableTarget(e) {
+  const t = e.target;
+  if (!t || typeof t !== "object" || !t.tagName) return false;
+  return t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable === true;
+}
 function onKeyDown(e) {
   initAudio();
+  if (isEditableTarget(e)) return;
   const k = keyMap[e.code];
   if (k) { pressed[k] = true; if (k === "fire") e.preventDefault(); }
 }
 function onKeyUp(e) {
+  if (isEditableTarget(e)) return;
   const k = keyMap[e.code];
   if (k) pressed[k] = false;
+}
+// 失焦兜底：按键/触摸按住时切标签页，keyup/pointerup 不再派发，回来后会“卡键”
+function releaseAllInput() {
+  pressed.left = pressed.right = pressed.up = pressed.down = pressed.fire = false;
+  easyTouchActive = false;
+  resetStick();
 }
 
 // ---------- 虚拟摇杆 ----------
 function onPointerDown(e) {
   initAudio();
   if (e.pointerType !== "touch") return;
+  // 单指接管：已有手指控制摇杆时忽略第二根手指（否则底座被劫持、方向跳变）
+  if (touchId !== null) return;
   try { e.target.setPointerCapture(e.pointerId); } catch (_) {}
   const p = toLogic(e, e.target);
   touchId = e.pointerId;
@@ -154,26 +170,42 @@ export function initInput(canvas) {
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);
 
+  // 失焦/切后台：清空按键与摇杆状态，避免“卡键”让战机顶墙不停
+  window.addEventListener("blur", releaseAllInput);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) releaseAllInput();
+  });
+
   canvas.addEventListener("pointerdown", onPointerDown);
   canvas.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp);
   window.addEventListener("pointercancel", onPointerUp);
 
-  // 防止方向键/空格滚动页面
+  // 防止方向键/空格滚动页面（输入控件聚焦时不拦截）
   window.addEventListener("keydown", e => {
+    if (isEditableTarget(e)) return;
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code)) e.preventDefault();
   }, { passive: false });
 }
 
 /** 左右虚拟按钮（补充控制，可作为摇杆之外的备用） */
 export function bindTouchButtons(btnLeft, btnRight) {
-  function bind(btn, on) {
-    const f = ev => { ev.preventDefault(); ev.stopPropagation(); initAudio(); on(); };
-    btn.addEventListener("touchstart", f, { passive: false });
-    btn.addEventListener("mousedown", f);
+  // 判空：DOM 缺失时不能抛 TypeError——调用方把本函数包在启动 try 里，
+  // 抛错会连带跳过 loadMeta 等关键初始化
+  if (!btnLeft || !btnRight) {
+    console.warn("[input] 左右控制按钮缺失，跳过触摸按钮绑定");
+    return;
   }
-  bind(btnLeft, () => { pressed.left = true; });
-  bind(btnRight, () => { pressed.right = true; });
-  window.addEventListener("touchend", () => { pressed.left = false; pressed.right = false; });
+  function bind(btn, key) {
+    const down = ev => { ev.preventDefault(); ev.stopPropagation(); initAudio(); pressed[key] = true; };
+    const up = () => { pressed[key] = false; };
+    btn.addEventListener("touchstart", down, { passive: false });
+    btn.addEventListener("touchend", up);        // 逐按钮释放：双指按住左右键互不影响
+    btn.addEventListener("touchcancel", up);     // 系统取消（来电/手势）不卡键
+    btn.addEventListener("mousedown", down);
+  }
+  bind(btnLeft, "left");
+  bind(btnRight, "right");
+  // 鼠标可能在按钮外松开：全局兜底（鼠标单指，无多指互清问题）
   window.addEventListener("mouseup", () => { pressed.left = false; pressed.right = false; });
 }

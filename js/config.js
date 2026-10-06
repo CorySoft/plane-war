@@ -54,12 +54,17 @@ export const PLAYER_BASE = {
 
 // ---------- 子弹 ----------
 export const BULLET = {
-  baseSpeed: 6,
+  baseSpeed: 3,          // 玩家主弹初速；已较初版再减半，配合更慢射速让前期更吃力（敌弹速度独立，不受影响）
   baseRange: 250,          // 起始射程(像素)
   rangePerLevel: 50,       // 射程延伸技能：每级射程+2m（1m=25px）
   levelRangePerLevel: 2.5,   // 升级加成：玩家每升1级射程+0.1m（线性，避免指数放大）
   rangeCapMargin: 80,      // 射程硬上限 = 屏幕高度 + 80，防止溢出屏外
   refireDist: 250,      // 再次发射所需子弹飞行距离（10m，1m=25px）：子弹飞超此距离或销毁即可再射
+  // 每波子弹总量上限：按通道对称裁剪，保持弹道美观。
+  // 注：射击模型改为「按间隔驱动」后同屏波数约为此前的 4 倍，
+  // 因此单波上限由 24 下调到 16，避免后期一屏上百发失去队形感。
+  waveCap: 16,
+  screenCap: 140,       // 同屏友方子弹硬上限：超过则本轮不发射（性能与画面密度兜底）
   baseRadius: 4,
   critRadius: 5.5,
   baseDmg: 1,
@@ -68,23 +73,23 @@ export const BULLET = {
   // 击退：每级 30% 伤害转成击退力（像素），护体弹自动拥有击退
   knockbackPerLevel: 0.30,
   // 分裂弹（命中后分裂）
-  splitDmgRatio: 0.35,     // 分裂弹碎片伤害比例
-  splitCountPerLevel: 2,   // 每级分裂弹额外分裂数量（1级=2碎片）
-  splitSpeed: 7,
-  splitLife: 0.6,
+  splitDmgRatio: 0.30,     // 分裂弹碎片伤害比例（满级6片，降权防爆量）
+  splitCountPerLevel: 1,   // 每级 +1 个碎片：1级 = 2 片，2级 = 3 片 …… 满级 6 片
+  splitSpeed: 6,
+  // 分裂弹·距离技能「分裂距离」：碎片射程（飞行距离）随等级增长
+  splitFragBaseRange: 25,      // 碎片基础射程 = 1m（1m=25px）：未学「分裂距离」时碎片近距爆散
+  splitFragRangePerLevel: 60,  // 每级碎片射程 +60px，满级 +300px
   // 连射 / 散射（发射时多发子弹）
-  volleySpacing: 14,       // 连射子弹前后间距
-  scatterSpread: 0.09,     // 散射每发子弹的扩散角
-  // explosionDmgRatio：伤害比不再在这里配置，改用技能 expDmg 等级计算
-  explosionDmgPerLevel: 0,  // 废弃：由 expDmg 技能替代
+  volleyAngleGap: 0.04,    // 连射子弹之间的等间距偏转角（弧度）：收窄成束，不占横向宽度
+  scatterSpread: 0.06,     // 散射每发子弹的扩散角：每级 ± 等距对称展开（略收窄，让散射优先于连射入队）
   explosionBaseRadius: 40,
   explosionRadiusPerLevel: 12,  // 每级 +12px 半径
   // 爆炸几率基础值（explosion 技能解锁后），expChance 技能每级再加
-  explosionBaseChance: 0.08,
+  explosionBaseChance: 0.10,
   explosionChancePerLevel: 0.10,
   // 爆炸伤害基础值（explosion 技能解锁后），expDmg 技能每级再加
   explosionBaseDmgRatio: 0.45,
-  explosionDmgRatioPerLevel: 0.18,
+  explosionDmgRatioPerLevel: 0.15,
   // 性能极限
   explosionMaxRadius: 250,
   explosionMaxChainDepth: 2,
@@ -94,17 +99,40 @@ export const BULLET = {
   orbitalAccel: 0.035,          // 每帧加速度基数
   orbitalAccelPerLevel: 0.015,  // 每级额外加速度
   orbitalMaxSpeed: 22,          // 速度上限
-  orbitalTrailRate: 3,          // 每N帧生成一个拖尾粒子
 };
 
 // ---------- 敌方等级 ----------
 export const ENEMY_LEVEL = {
-  scorePerLevel: 8000,    // 每8000分敌方升1级
+  scorePerLevel: 6000,    // 每6000分敌方升1级（原 8000 太慢，中期几乎感觉不到成长）
   hpPerLevel: 0.10,       // 每级HP +10%
   fireCdPerLevel: -0.03,  // 每级开火间隔 -3%（越快）
   rewardPerLevel: 0.10,   // 每级得分/经验 +10%
-  maxLevel: 30,           // 敌方等级硬上限
+  maxLevel: 99,           // 敌方等级硬上限（不再卡在 30 级停涨）
+  softCapLevel: 30,       // 超过此等级后成长减半，避免后期数值爆炸
+  softCapFactor: 0.5,     // 软上限后每级只按 50% 计入成长
 };
+
+/**
+ * 敌方等级 → 成长系数（等价于旧版的 elvl-1）。
+ * 30 级以内线性成长；之后每级只按 softCapFactor 计入，
+ * 保证「等级一直涨」但难度曲线不失控。
+ */
+export function enemyLevelScale(elvl) {
+  const lv = Math.max(1, Math.floor(elvl || 1));
+  const linear = Math.min(lv, ENEMY_LEVEL.softCapLevel) - 1;
+  const over = Math.max(0, lv - ENEMY_LEVEL.softCapLevel);
+  return linear + over * ENEMY_LEVEL.softCapFactor;
+}
+
+/**
+ * 射击波间隔距离：与射击间隔联动，使射速提升真正生效。
+ * 旧实现固定 250px，导致射速技能/急速道具被飞行距离闸门抵消。
+ * @param {number} fireRate 当前射击间隔(秒)
+ */
+export function refireGateDistance(fireRate) {
+  const px = BULLET.baseSpeed * 60 * Math.max(0.02, fireRate);
+  return Math.min(BULLET.refireDist, Math.max(36, px));
+}
 
 // ---------- 敌机 ----------
 export const ENEMY_TYPES = {
@@ -137,7 +165,7 @@ export const POWERUP_DEFS = {
 
 // ---------- 道具掉落率 ----------
 export const POWERUP_DROP = {
-  base: 0.15,            // 击杀基础掉落率
+  base: 0.18,            // 击杀基础掉落率（原 0.15，配合更高的敌机密度略上调）
   skillPerLevel: 0.05,   // 爆率技能每级 +5%
   buffBonus: 0.10,        // 幸运爆率 buff 期间额外 +10%
 };
@@ -159,61 +187,77 @@ export const POWERUP_WEIGHTS_LATE = [
 
 // ---------- 系统商城：星尘兑换永久加成（500起，每级翻倍） ----------
 export const SHOP_ITEMS = [
-  { id: "baseDmg",    name: "基础火力",   icon: "⚔", desc: "基础伤害 +1",           baseCost: 500, max: 5, effect: (n) => ({ baseDmg: n }) },
-  { id: "baseFire",   name: "基础射速",   icon: "⚡", desc: "射击间隔 -4%",         baseCost: 500, max: 5, effect: (n) => ({ fireRateMul: 1 - 0.04 * n }) },
-  { id: "startHp",    name: "起始生命",   icon: "♥", desc: "开局生命 +1",          baseCost: 500, max: 3, effect: (n) => ({ startHp: n }) },
-  { id: "startShield",name: "起始护盾",   icon: "S", desc: "开局护盾 +1",          baseCost: 500, max: 2, effect: (n) => ({ maxShield: n }) },
-  { id: "explosion",  name: "爆炸伤害",   icon: "✴", desc: "爆炸AOE伤害 +10%",    baseCost: 500, max: 4, effect: (n) => ({ expDmgBonus: 0.10 * n }) },
-  { id: "xpGain",     name: "经验获取",   icon: "X", desc: "获得经验 +10%",         baseCost: 500, max: 5, effect: (n) => ({ xpGain: 0.10 * n }) },
-  { id: "score",      name: "金币加成",   icon: "¥", desc: "得分 +5%",            baseCost: 500, max: 5, effect: (n) => ({ scoreBonus: 0.05 * n }) },
-  { id: "dropRate",   name: "道具掉落",   icon: "☘", desc: "掉落率 +5%",           baseCost: 500, max: 4, effect: (n) => ({ dropRate: 0.05 * n }) },
-  { id: "invTime",    name: "无敌时间",   icon: "✦", desc: "受伤无敌时间 +0.2s",   baseCost: 500, max: 3, effect: (n) => ({ invTime: 0.2 * n }) },
+  { id: "baseDmg",    name: "基础火力",   icon: "⚔", desc: "基础伤害 +1",           baseCost: 150, max: 5, effect: (n) => ({ baseDmg: n }) },
+  { id: "baseFire",   name: "基础射速",   icon: "⚡", desc: "射击间隔 -4%",         baseCost: 150, max: 5, effect: (n) => ({ fireRateMul: 1 - 0.04 * n }) },
+  { id: "startHp",    name: "起始生命",   icon: "♥", desc: "开局生命 +1",          baseCost: 150, max: 3, effect: (n) => ({ startHp: n }) },
+  { id: "startShield",name: "起始护盾",   icon: "S", desc: "开局护盾 +1",          baseCost: 150, max: 2, effect: (n) => ({ maxShield: n }) },
+  { id: "explosion",  name: "爆炸伤害",   icon: "✴", desc: "爆炸AOE伤害 +10%",    baseCost: 150, max: 4, effect: (n) => ({ expDmgBonus: 0.10 * n }) },
+  { id: "xpGain",     name: "经验获取",   icon: "X", desc: "获得经验 +10%",         baseCost: 150, max: 5, effect: (n) => ({ xpGain: 0.10 * n }) },
+  { id: "score",      name: "金币加成",   icon: "¥", desc: "得分 +5%",            baseCost: 150, max: 5, effect: (n) => ({ scoreBonus: 0.05 * n }) },
+  { id: "dropRate",   name: "道具掉落",   icon: "☘", desc: "掉落率 +5%",           baseCost: 150, max: 4, effect: (n) => ({ dropRate: 0.05 * n }) },
+  { id: "invTime",    name: "无敌时间",   icon: "✦", desc: "受伤无敌时间 +0.2s",   baseCost: 150, max: 3, effect: (n) => ({ invTime: 0.2 * n }) },
 ];
 
+// 每级成本按 1.6 倍递增（原 2 倍：满级单件要 15500 星尘，配合旧的星尘产出几乎不可能点满）
 export function getShopItemCost(item, owned) {
-  return item.baseCost * Math.pow(2, owned);
+  return Math.round(item.baseCost * Math.pow(1.6, owned));
 }
 
 // ---------- 技能 ----------
 export const SKILLS = [
-  { id: "dmg",       name: "火力强化",   desc: "伤害+1",         fullDesc: "每级子弹基础伤害 +1，满级 +5",               color: "#ffd166", max: 5 },
-  { id: "rate",      name: "射速提升",   desc: "间隔-8%",        fullDesc: "每级射击间隔缩短 8%，满级 -24%",              color: "#ffe066", max: 3 },
-  { id: "range",     name: "射程延伸",   desc: "射程+2m",        fullDesc: "每级子弹射程 +2m，满级 +10m",                 color: "#88ddff", max: 5 },
-  { id: "move",      name: "机动强化",   desc: "移速+10%",       fullDesc: "每级移动速度 +10%，满级 +30%",                color: "#9be8ff", max: 3 },
-  { id: "maxhp",     name: "生命强化",   desc: "最大生命+1",     fullDesc: "每级最大生命 +1 并立即回复 1 点",             color: "#7CFC00", max: 2 },
-  { id: "shield",    name: "护盾强化",   desc: "获得1层护盾",    fullDesc: "获得 1 层护盾，可抵消 1 次伤害",              color: "#66e0ff", max: 2 },
-  { id: "crit",      name: "精准打击",   desc: "12%暴击",        fullDesc: "每级 12% 概率触发暴击，满级 36%",            color: "#ff8fa3", max: 3 },
-  { id: "critdmg",   name: "致命暴击",   desc: "暴击伤害+0.5",   fullDesc: "每级暴击伤害倍率 +0.5，满级 +1.5",           color: "#ff4d7d", max: 3 },
-  { id: "dual",      name: "侧翼炮",     desc: "+2发侧翼子弹",   fullDesc: "增加 2 发侧翼子弹，满级 4 发",                color: "#c8a6ff", max: 2 },
-  { id: "sideBullets", name: "左右护法", desc: "左右发射子弹",   fullDesc: "学习后同时向左右发射子弹，每级伤害+20%",       color: "#9b6bff", max: 3 },
-  { id: "explosion", name: "爆炸弹",     desc: "解锁爆炸弹",     fullDesc: "子弹命中时有概率产生范围爆炸，是爆炸系技能的基础",         color: "#ff6633", max: 1 },
-  { id: "expChance", name: "爆破掌握",   desc: "爆炸几率+10%",  fullDesc: "每级爆炸触发几率 +10%，满级 +30%",                    color: "#ff8855", max: 3, requires: "explosion" },
-  { id: "expDmg",    name: "爆裂强化",   desc: "爆炸伤害+18%",  fullDesc: "每级爆炸 AOE 伤害 +18%，满级 +54%",                   color: "#ff5533", max: 3, requires: "explosion" },
-  { id: "expRange",  name: "冲击扩域",   desc: "爆炸范围+12px", fullDesc: "每级爆炸半径 +12px，满级 +36px",                       color: "#ff9944", max: 3, requires: "explosion" },
-  { id: "volley",    name: "连射",       desc: "多射1发",        fullDesc: "每轮多射出一发连射子弹，满级 4 发",          color: "#ffe066", max: 4 },
-  { id: "scatter",   name: "散射",       desc: "多发1发",        fullDesc: "每次发射同时增加一发散射子弹，满级 4 发",      color: "#44ee88", max: 4 },
-  { id: "split",     name: "分裂弹",     desc: "命中后分裂",     fullDesc: "子弹命中后分裂出碎片，等级越高分裂越多",        color: "#7bd67b", max: 3 },
-  { id: "penetrate", name: "穿透弹",     desc: "穿透+1敌",       fullDesc: "子弹可穿透额外 +1 个敌人，满级穿透 3 个",      color: "#aa66ff", max: 3 },
-  { id: "guard",     name: "护体弹",     desc: "环绕子弹击退",   fullDesc: "环绕子弹自动击退敌机，每级上限 +2",            color: "#7bf1a8", max: 3 },
-  { id: "lifesteal", name: "能量吸取",   desc: "15%击杀回血",    fullDesc: "每级 15% 概率击毁敌机回复 1 生命",            color: "#ff6b9d", max: 2 },
-  { id: "xpboost",   name: "经验增幅",   desc: "经验+15%",       fullDesc: "每级获得经验 +15%，满级 +45%",                color: "#8ad4ff", max: 3 },
-  { id: "magnet",    name: "磁力核心",   desc: "永久吸道具",     fullDesc: "永久自动吸引附近道具",                        color: "#d0a6ff", max: 1 },
-  { id: "score",     name: "幸运金币",   desc: "得分+10%",       fullDesc: "每级得分 +10%，满级 +30%",                    color: "#f4c95d", max: 3 },
-  { id: "drop",      name: "爆率提升",   desc: "掉落+5%",        fullDesc: "每级道具掉落率 +5%，满级 +15%",               color: "#ffd93b", max: 3 },
-  { id: "knockback", name: "子弹击退",   desc: "击退+30%",       fullDesc: "子弹命中击退敌机，每级 +30% 击退力",          color: "#5ee6ff", max: 3 },
-  { id: "bulletSpeed", name: "子弹加速", desc: "弹速+20%",      fullDesc: "每级子弹飞行速度 +20%，满级 +60%",            color: "#74c0fc", max: 3 },
-  { id: "orbital",   name: "天基武器",   desc: "加速递增",       fullDesc: "子弹射出后不断加速，威力递增",                color: "#fca311", max: 3 },
+  { id: "dmg",       name: "火力强化",   desc: "伤害+1",         fullDesc: "每级子弹基础伤害 +1，满级 +10",               color: "#5ee6ff", max: 10 },
+  { id: "rate",      name: "射速提升",   desc: "间隔-8%",        fullDesc: "每级射击间隔缩短 8%，满级 -48%",              color: "#5ee6ff", max: 6 },
+  { id: "range",     name: "射程延伸",   desc: "射程+2m",        fullDesc: "每级子弹射程 +2m，满级 +20m",                 color: "#5ee6ff", max: 10 },
+  { id: "move",      name: "机动强化",   desc: "移速+12%",       fullDesc: "每级移动速度 +12%，满级 +72%",                color: "#5ee6ff", max: 6 },
+  { id: "maxhp",     name: "生命强化",   desc: "最大生命+1",     fullDesc: "每级最大生命 +1 并立即回复 1 点",             color: "#7CFC00", max: 4 },
+  { id: "shield",    name: "护盾强化",   desc: "获得1层护盾",    fullDesc: "获得 1 层护盾，可抵消 1 次伤害",              color: "#7CFC00", max: 4 },
+  { id: "crit",      name: "精准打击",   desc: "12%暴击",        fullDesc: "每级 12% 概率触发暴击，满级 72%",            color: "#ff8fa3", max: 6 },
+  { id: "critdmg",   name: "致命暴击",   desc: "暴击伤害+0.5",   fullDesc: "每级暴击伤害倍率 +0.5，满级 +3",             color: "#ff8fa3", max: 6 },
+  { id: "dual",      name: "侧翼炮",     desc: "+2发侧翼子弹",   fullDesc: "增加 2 发侧翼子弹，满级 8 发",                color: "#5ee6ff", max: 4 },
+  { id: "sideBullets", name: "左右护法", desc: "左右缓慢发射", fullDesc: "从机身两侧缓慢向左、右水平发射副炮，每级 +20% 伤害，满级左右各 5 发", color: "#5ee6ff", max: 5 },
+  { id: "explosion", name: "爆炸弹",     desc: "解锁爆炸弹",     fullDesc: "子弹命中时有概率产生范围爆炸，是爆炸系技能的基础",         color: "#ff8a55", max: 1 },
+  { id: "expChance", name: "爆破掌握",   desc: "爆炸几率+10%",  fullDesc: "每级爆炸触发几率 +10%，满级 +60%",                    color: "#ff8a55", max: 6, requires: "explosion" },
+  { id: "expDmg",    name: "爆裂强化",   desc: "爆炸伤害+18%",  fullDesc: "每级爆炸 AOE 伤害 +18%，满级 +108%",                   color: "#ff8a55", max: 6, requires: "explosion" },
+  { id: "expRange",  name: "冲击扩域",   desc: "爆炸范围+12px", fullDesc: "每级爆炸半径 +12px，满级 +72px",                       color: "#ff8a55", max: 6, requires: "explosion" },
+  { id: "volley",    name: "连射",       desc: "多射1发",        fullDesc: "每轮多射出一发连射子弹，收束于主弹道侧，满级 6 发", color: "#5ee6ff", max: 6 },
+  { id: "scatter",   name: "散射",       desc: "多发1发",        fullDesc: "每次升级增加一发散射，左右交替展开，满级 6 发",      color: "#5ee6ff", max: 6 },
+  { id: "split",     name: "分裂弹",     desc: "命中后分裂",     fullDesc: "命中后碎裂出弹片并继续沿原方向飞行：1级 2 片，每级 +1，满级 6 片", color: "#ff8a55", max: 5 },
+  { id: "splitDist", name: "分裂距离",   desc: "碎片射程+60",    fullDesc: "分裂碎片飞行距离每级 +60，满级碎片飞得更远",    color: "#ff8a55", max: 5, requires: "split" },
+  { id: "penetrate", name: "穿透弹",     desc: "穿透+1敌",       fullDesc: "子弹可穿透额外 +1 个敌人，满级穿透 6 个",      color: "#5ee6ff", max: 6 },
+  { id: "guard",     name: "护体弹",     desc: "环绕子弹击退",   fullDesc: "环绕子弹自动击退敌机，每级上限 +1（1级2颗、满级6颗），间隔随等级缩短", color: "#7CFC00", max: 5 },
+  { id: "lifesteal", name: "能量吸取",   desc: "15%击杀回血",    fullDesc: "每级 15% 概率击毁敌机回复 1 生命",            color: "#7CFC00", max: 4 },
+  { id: "xpboost",   name: "经验增幅",   desc: "经验+15%",       fullDesc: "每级获得经验 +15%，满级 +90%",                color: "#c8a6ff", max: 6 },
+  { id: "magnet",    name: "磁力核心",   desc: "永久吸道具",     fullDesc: "永久自动吸引附近道具",                        color: "#c8a6ff", max: 1 },
+  { id: "score",     name: "幸运金币",   desc: "得分+10%",       fullDesc: "每级得分 +10%，满级 +60%",                    color: "#c8a6ff", max: 6 },
+  { id: "drop",      name: "爆率提升",   desc: "掉落+5%",        fullDesc: "每级道具掉落率 +5%，满级 +30%",               color: "#c8a6ff", max: 6 },
+  { id: "knockback", name: "子弹击退",   desc: "击退+30%",       fullDesc: "子弹命中击退敌机，每级 +30% 击退力",          color: "#c8a6ff", max: 6 },
+  { id: "bulletSpeed", name: "子弹加速", desc: "弹速+15%",      fullDesc: "每级子弹飞行速度 +15%，满级 +90%",            color: "#5ee6ff", max: 6 },
+  { id: "orbital",   name: "天基武器",   desc: "加速递增",       fullDesc: "子弹射出后不断加速，威力递增",                color: "#5ee6ff", max: 5 },
 ];
+
+/** 取技能满级上限（供难度档位/道具授予按真实上限钳制，避免写死数字后与 SKILLS 脱节） */
+export function skillMax(id) {
+  const s = SKILLS.find(x => x.id === id);
+  return s ? s.max : 0;
+}
+
+// 技能等级 → 颜色档位（选择界面按当前等级着色）
+// 1: 暗白(新技能/低级)  2-4: 功能组色(中级)  5+: 金(高级/大师)
+export function skillLevelColor(lv) {
+  if (lv >= 5) return "#ffd166";  // 金：高级/大师
+  if (lv >= 2) return null;       // null = 用技能本身的功能组色
+  return "rgba(255,255,255,.6)";  // 1级：暗白
+}
 
 // ---------- 难度 ----------
 export const DIFFICULTY = {
-  levelUpScore: 5000,       // 每多少分升一级
-  maxLevel: 10,
+  levelUpScore: 4500,       // 每多少分升一级
+  maxLevel: 14,             // 原 10 级（5 万分）就封顶，后期只剩敌方等级在涨，压迫感断档
   eliteWaveInterval: 12,    // 精英波间隔(秒)
   spawnBase: 1.6,
-  spawnPerLevel: 0.12,
-  spawnCap: 4.2,
-  speedScalePerLevel: 0.06,
+  spawnPerLevel: 0.18,      // 原 0.12：满级也只到 2.8/s，提升幅度偏弱
+  spawnCap: 4.0,
+  speedScalePerLevel: 0.045, // 原 0.06：敌机下落太快会挤压闪避空间，手感变差
   bossInterval: 5,          // 每N个难度等级出Boss
   swarmInterval: 30,        // 虫群波间隔(秒)
   swarmWarnTime: 3,         // 虫群波提前预警时间(秒)
@@ -261,10 +305,24 @@ export const DIFFICULTY_PRESETS = {
   },
 };
 
+// ---------- 连击 / 经验 / 近战判定 ----------
+export const COMBO = {
+  window: 2.5,        // 连击窗口（秒）：窗口内继续击杀则连击延续
+  bonus: 500,         // 每次击杀的连击加分
+};
+export const XP_BASE = 60;          // 1 级升 2 级所需经验
+// 升级需求增长系数：原 1.4 时 20 级需近万点经验，后期几乎升不动
+export const XP_GROWTH = 1.32;
+export const PLAYER = {
+  hitRadius: 20,      // 敌方子弹判定玩家半径（略宽于贴图便于弹幕贴身擦过）
+};
+
 // ---------- 元进度 ----------
 export const META = {
-  stardustPerScore: 10000,   // 每10000分=1星尘
-  reviveCost: 50,           // 死亡后立即复活所需星尘（对局内 1 次）
+  // 星尘产出：原「每 10000 分 = 1 星尘」意味着一局 2 万分只给 2 星尘，
+  // 而商城/飞机/天赋动辄几百，元进度等于不存在。
+  stardustPerScore: 400,     // 每400分=1星尘（一局 2 万分 ≈ 50 星尘）
+  reviveCost: 40,           // 死亡后立即复活所需星尘（对局内 1 次）
   aircraft: {
     falcon:  { name: "战隼", desc: "均衡型", speed: 6.2, baseDmg: 1, fireRate: 1, startHp: 3, cost: 0 },
     blaze:   { name: "烈焰", desc: "高射速", speed: 5.8, baseDmg: 0.8, fireRate: 1.3, startHp: 2, cost: 500 },

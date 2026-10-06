@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import "./_env.mjs";
 import { makeCtx } from "./_env.mjs";
 import {
-  glowText, softPanel, lineBtn, bar, vGrad, hexToRgba, pulse, C,
+  glowText, softPanel, lineBtn, bar, hexToRgba, pulse, C,
 } from "../js/theme.js";
 import { drawHUD } from "../js/hud.js";
 
@@ -25,7 +25,6 @@ test("theme: 绘制助手在 mock ctx 上不抛错", () => {
     softPanel(ctx, 5, 5, 100, 60, 12, { glow: 4 });
     lineBtn(ctx, 10, 10, 90, 34, "#5ee6ff", "确定", { size: 16 });
     bar(ctx, 5, 5, 80, 8, 0.6, "#7dffb0", { glow: 5 });
-    vGrad(ctx, 0, 0, 10, 10, "#000", "#fff");
   });
 });
 

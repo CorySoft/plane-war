@@ -2,7 +2,7 @@ import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import "./_env.mjs";
 import { resetStorage } from "./_env.mjs";
-import { SKILLS } from "../js/config.js";
+import { SKILLS, skillLevelColor } from "../js/config.js";
 import { getMaxLives, generateSkillChoices, applySkill } from "../js/skill.js";
 import { createPlayer } from "../js/player.js";
 import { META } from "../js/config.js";
@@ -48,6 +48,21 @@ describe("skill", () => {
     assert.ok(getDiscoveredSkills().includes("dmg"));
   });
 
+  it("applySkill 拒绝绕过前置的技能（随机道具防绕过）", () => {
+    const p = createPlayer(META.aircraft.falcon, {});
+    const splitDist = SKILLS.find(s => s.id === "splitDist");
+    assert.ok(splitDist.requires === "split");
+    // 未学 split 时授予被拒
+    const t = applySkill(splitDist, p);
+    assert.equal(p.skills.splitDist || 0, 0);
+    assert.ok(t.text.includes("前置"));
+    // 学到 split 后可授予
+    p.skills.split = 1;
+    const ok = applySkill(splitDist, p);
+    assert.equal(p.skills.splitDist, 1);
+    assert.ok(ok.text.includes(splitDist.name));
+  });
+
   it("生命强化标记回血", () => {
     const p = createPlayer(META.aircraft.falcon, {});
     applySkill(SKILLS.find(s => s.id === "maxhp"), p);
@@ -63,5 +78,23 @@ describe("skill", () => {
     p.shield = 0;
     applySkill(SKILLS.find(s => s.id === "shield"), p);
     assert.equal(p.shield, 1);
+  });
+
+  it("技能等级颜色分档", () => {
+    assert.equal(skillLevelColor(1), "rgba(255,255,255,.6)");
+    assert.equal(skillLevelColor(2), null);
+    assert.equal(skillLevelColor(3), null);
+    assert.equal(skillLevelColor(4), null);
+    assert.equal(skillLevelColor(5), "#ffd166");
+    assert.equal(skillLevelColor(6), "#ffd166");
+    assert.equal(skillLevelColor(7), "#ffd166");
+    assert.equal(skillLevelColor(10), "#ffd166");
+  });
+
+  it("关键玩法技能具备合理的多级上限", () => {
+    const dmg = SKILLS.find(s => s.id === "dmg");
+    assert.equal(dmg.max, 10);
+    const rate = SKILLS.find(s => s.id === "rate");
+    assert.equal(rate.max, 6);
   });
 });

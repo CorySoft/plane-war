@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { makeCtx } from "./_env.mjs";
 import { STATE } from "../js/config.js";
 import { getSettings } from "../js/meta.js";
+import { spawnBoss } from "../js/wave.js";
 
 const noop = () => {};
 
@@ -80,6 +81,17 @@ describe("game 集成冒烟", () => {
     game().setLevel(9);
     for (let i = 0; i < 400 && typeof rafCb === "function"; i++) rafCb();
     assert.ok(Array.isArray(game().enemies));
+    assert.equal(errors.length, 0, errors.join("\n"));
+  });
+
+  it("母舰由空军召唤相位切入射击相位后重置开火计时", () => {
+    getSettings().skipTutorial = true;
+    game().resetGame();
+    const boss = spawnBoss("mothership", 1);
+    assert.equal(boss.fireCd, 999, "母舰第一相位为空军召唤（无枪），开火计时初始为 999");
+    boss.hp = boss.maxHp * 0.49;   // 切到 spread 射击相位
+    for (let i = 0; i < 30 && typeof rafCb === "function"; i++) rafCb();
+    assert.ok(boss.fireCd <= 5, "相位切换后应重置开火计时（当前 " + boss.fireCd + "，未重置会停留 ~999）");
     assert.equal(errors.length, 0, errors.join("\n"));
   });
 });

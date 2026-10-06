@@ -39,7 +39,7 @@
   .touch-ui .tbtn {
     pointer-events: auto;
     width: 76px; height: 76px; border-radius: 50%;
-    background: linear-gradient(165deg, rgba(94,230,255,.18), rgba(22,34,70,.28));
+    background: rgba(16,28,52,.45);
     border: 1px solid rgba(130,205,255,.45);
     color: #eaf6ff; font-size: 30px;
     display: flex; align-items: center; justify-content: center;
@@ -49,7 +49,7 @@
   }
   .touch-ui .tbtn:active {
     transform: scale(.93);
-    background: linear-gradient(165deg, rgba(94,230,255,.3), rgba(26,40,84,.4));
+    background: rgba(26,40,84,.5);
   }
   @media (pointer: coarse) {
     .touch-ui.show { display: flex; }
@@ -77,12 +77,52 @@
   }
   .loader-bar {
     height: 100%; width: 0%;
-    background: linear-gradient(90deg, #4cc9f0, #8ff2ff, #5ee6ff);
+    background: #5ee6ff;
     border-radius: 6px;
     transition: width .25s ease;
     box-shadow: 0 0 12px rgba(94,230,255,.8);
   }
   .loader-text { margin-top: 12px; color: rgba(255,255,255,.6); font-size: 14px; text-shadow: 0 0 6px rgba(0,0,0,.6); }
+  /* ---------- 反馈面板 ---------- */
+  .fb-mask {
+    position: fixed; inset: 0; z-index: 300;
+    background: rgba(4,7,16,.78);
+    display: none; align-items: center; justify-content: center;
+  }
+  .fb-mask.show { display: flex; }
+  .fb-panel {
+    width: min(92vw, 380px);
+    background: #101828;
+    border: 1px solid rgba(150,210,255,.4);
+    border-radius: 16px;
+    padding: 20px 18px 16px;
+    box-shadow: 0 0 30px rgba(80,170,255,.25), inset 0 1px 0 rgba(255,255,255,.08);
+  }
+  .fb-title { color: #8ff2ff; font-size: 18px; font-weight: bold; letter-spacing: 3px; margin-bottom: 6px; }
+  .fb-tip { color: rgba(255,255,255,.5); font-size: 12px; margin-bottom: 12px; }
+  .fb-input {
+    width: 100%; height: 120px; resize: none;
+    background: rgba(6,10,22,.9);
+    border: 1px solid rgba(120,190,255,.35);
+    border-radius: 10px;
+    color: #eaf6ff; font-size: 14px; line-height: 1.6;
+    padding: 10px 12px; outline: none;
+    font-family: inherit;
+  }
+  .fb-input:focus { border-color: #5ee6ff; box-shadow: 0 0 10px rgba(94,230,255,.3); }
+  .fb-actions { display: flex; gap: 10px; margin-top: 14px; }
+  .fb-btn {
+    flex: 1; height: 40px; border-radius: 10px;
+    font-size: 15px; font-weight: bold; letter-spacing: 2px;
+    cursor: pointer; border: none; font-family: inherit;
+    touch-action: manipulation;
+  }
+  .fb-btn-submit { background: #2f7bff; color: #fff; }
+  .fb-btn-submit:hover { background: #4a90ff; }
+  .fb-btn-close { background: rgba(255,255,255,.08); color: rgba(255,255,255,.8); border: 1px solid rgba(255,255,255,.2); }
+  .fb-status { margin-top: 10px; font-size: 12px; text-align: center; min-height: 16px; }
+  .fb-status.ok { color: #7CFC00; }
+  .fb-status.err { color: #ff6b6b; }
 </style>
 </head>
 <body>
@@ -105,6 +145,22 @@
   <div class="tbtn" id="btnLeft">◀</div>
   <div class="tbtn" id="btnRight">▶</div>
 </div>
+<!-- 反馈面板 -->
+<div class="fb-mask" id="fbMask">
+  <div class="fb-panel">
+    <div class="fb-title">反  馈</div>
+    <div class="fb-tip">说说你的建议或遇到的问题，提交后写入服务器日志并推送到微信</div>
+    <textarea class="fb-input" id="fbInput" placeholder="请填写反馈内容…" maxlength="1000"></textarea>
+    <div class="fb-actions">
+      <button class="fb-btn fb-btn-close" id="fbCancel">取消</button>
+      <button class="fb-btn fb-btn-submit" id="fbSubmit">提交反馈</button>
+    </div>
+    <div class="fb-status" id="fbStatus"></div>
+  </div>
+</div>
+<script>
+  window.__feedbackLoaded = false;
+</script>
 <script>
   window.__loaderProgress = 0;
   window.__doneLoading = function () {
@@ -174,7 +230,7 @@
     }
   }, 12000);
 </script>
-<script type="module" src="js/game.js"></script>
+<script type="module" src="js/game.v__VERSION__.js"></script>
 <!-- 非 ESM 兜底脚本：ESM 在 file:// 下整块失效，用普通脚本检测 game 是否启动成功 -->
 <script>
   // 15 秒后若 __gameReady 未被模块标记 → 说明 ESM 整体加载失败（file:// 或不支持 ESM 的浏览器）

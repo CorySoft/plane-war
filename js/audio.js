@@ -6,9 +6,6 @@ let audioCtx = null;
 let sfxMuted = false;
 let musicMuted = false;
 
-export function isSfxMuted() { return sfxMuted; }
-export function isMusicMuted() { return musicMuted; }
-
 export function setSfxMuted(muted) {
   sfxMuted = !!muted;
 }
@@ -17,7 +14,7 @@ export function initAudio() {
   if (!audioCtx) {
     try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
   }
-  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
 }
 
 function beep(freq, dur, type = "square", vol = 0.12, slideTo = null) {
@@ -35,6 +32,8 @@ function beep(freq, dur, type = "square", vol = 0.12, slideTo = null) {
 }
 
 export const sfx = {
+  // UI 点击音（菜单/机库确认等）：缺失会让点击处理直接抛 TypeError
+  click()    { beep(760, .04, "square", .05, 520); },
   shoot()    { beep(880, .06, "square", .05, 440); },
   hit()      { beep(220, .12, "sawtooth", .10, 110); },
   boom()     { beep(140, .5, "sawtooth", .18, 30); },
@@ -47,7 +46,7 @@ export const sfx = {
 };
 
 // ---------- 背景音乐（简化的循环铺底） ----------
-let musicNodes = null;
+let musicNodes = [];   // 已调度但未播完的音乐节点（stopMusic 立即静音用）
 let musicTimer = null;
 const MUSIC_BASS = [55, 55, 65.4, 55, 73.4, 55, 65.4, 49];
 const MUSIC_ARP = [220, 277.2, 329.6, 440];
@@ -62,6 +61,11 @@ function playbackNote(freq, t, dur, vol, type = "triangle") {
   g.gain.linearRampToValueAtTime(vol, t + 0.02);
   g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
   osc.connect(g); g.connect(audioCtx.destination);
+  musicNodes.push(osc);
+  osc.onended = () => {
+    const i = musicNodes.indexOf(osc);
+    if (i !== -1) musicNodes.splice(i, 1);
+  };
   osc.start(t); osc.stop(t + dur + 0.02);
 }
 
@@ -71,7 +75,7 @@ export function startMusic() {
   if (musicMuted) return;
   if (!audioCtx) initAudio();
   if (!audioCtx) return;
-  if (audioCtx.state !== "running") audioCtx.resume();
+  if (audioCtx.state !== "running") audioCtx.resume().catch(() => {});
   const step = 0.35; // 每步时长
   let stepIndex = 0;
   let next = audioCtx.currentTime + 0.05;
@@ -92,6 +96,11 @@ export function startMusic() {
 
 export function stopMusic() {
   if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
+  // 已调度但未播完的音符立即停止（否则停止音乐会漏出最长 ~0.56s 的余音）
+  for (const osc of musicNodes) {
+    try { osc.stop(0); } catch (_) {}
+  }
+  musicNodes = [];
 }
 
 export function setMusicMuted(muted) {

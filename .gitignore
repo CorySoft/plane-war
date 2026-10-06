@@ -2,3 +2,8 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
+.deploy.env
+# 服务端反馈接口：内含方糖写入 token，只随 deploy.sh 上传，不进仓库
+feedback.php
+# Agnes 生成的原图缓存（可重新生成，且体积大）
+tools/raw/
