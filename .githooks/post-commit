@@ -13,7 +13,10 @@ if [ ! -f ".deploy.env" ]; then
 fi
 
 # 只在实际修改了可部署文件时才部署
-changed=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null | grep -Ev '^(test/|test-results/|\.gitignore|DEPLOY\.md|deploy\.sh|node_modules/)' || true)
+# 排除：测试、文档、部署脚本自身、以及 deploy.sh 生成的版本文件
+# （VERSION / js/version.js 单独提交不应再触发一次部署，否则版本号会连环 +1）
+changed=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null \
+  | grep -Ev '^(test/|test-results/|\.gitignore|DEPLOY\.md|deploy\.sh|\.githooks/|node_modules/|VERSION$|js/version\.js$)' || true)
 if [ -z "$changed" ]; then
   exit 0
 fi

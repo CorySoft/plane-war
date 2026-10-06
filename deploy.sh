@@ -37,7 +37,7 @@ done
 # lftp 设置（必须在同一 -e 中生效，SSL 校验关闭以适配 Byethost 证书）
 LF_SET="set ssl:verify-certificate no; set ftp:ssl-force off; set ftp:ssl-allow no;"
 
-# ---------- 版本号管理（每次部署 +1，逢十进位） ----------
+# ---------- 版本号管理（每次上传 +1，逢十进位；--verify 不改版本） ----------
 VERSION_FILE="VERSION"
 if [ -f "$VERSION_FILE" ]; then
   CUR_VER=$(cat "$VERSION_FILE" | tr -d '[:space:]')
@@ -45,19 +45,23 @@ else
   CUR_VER="0.0.1"
 fi
 
-IFS='.' read -r VMAJOR VMINOR VMICRO <<< "$CUR_VER"
-VMICRO=$((VMICRO + 1))
-if [ "$VMICRO" -ge 10 ]; then VMICRO=0; VMINOR=$((VMINOR+1)); fi
-if [ "$VMINOR" -ge 10 ]; then VMINOR=0; VMAJOR=$((VMAJOR+1)); fi
-NEW_VER="${VMAJOR}.${VMINOR}.${VMICRO}"
-echo "$NEW_VER" > "$VERSION_FILE"
+if [ "$MODE" = "verify" ]; then
+  NEW_VER="$CUR_VER"
+else
+  IFS='.' read -r VMAJOR VMINOR VMICRO <<< "$CUR_VER"
+  VMICRO=$((VMICRO + 1))
+  if [ "$VMICRO" -ge 10 ]; then VMICRO=0; VMINOR=$((VMINOR+1)); fi
+  if [ "$VMINOR" -ge 10 ]; then VMINOR=0; VMAJOR=$((VMAJOR+1)); fi
+  NEW_VER="${VMAJOR}.${VMINOR}.${VMICRO}"
+  echo "$NEW_VER" > "$VERSION_FILE"
 
-# 生成 js/version.js
-cat > js/version.js <<EOF
+  # 生成 js/version.js
+  cat > js/version.js <<EOF
 /* 版本号由 deploy.sh 每次部署自动递增生成，勿手动修改 */
 export const APP_VERSION = "${NEW_VER}";
 EOF
-echo ">> 版本 ${CUR_VER} → ${NEW_VER}"
+  echo ">> 版本 ${CUR_VER} → ${NEW_VER}"
+fi
 
 # ---------- 排除项：测试 / node_modules / 部署元文件 ----------
 # （mirror 目标为 $FTP_REMOTE_DIR，.htaccess 需单独上传到其上级目录）
@@ -78,9 +82,11 @@ EXCLUDES=(
 upload() {
   local flag="$1"
   echo ">> 上传 [${flag}] → ftp://${FTP_HOST}/${FTP_REMOTE_DIR}/"
+  # --parallel 必须为 1：并行传输时 lftp 会先于父目录确认完成就去 mkdir 子目录，
+  # Byethost 返回 550「No such file or directory」导致 mirror 中断（set -e 直接终止整个部署）。
+  # 注意：注释必须写在 lftp 命令之前——写在续行里会被当成 -e 的参数，导致
+  # 「open: option requires an argument -- 'e'」整条命令失效。
   lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" -e \
-    # --parallel 必须为 1：并行传输时 lftp 会先于父目录确认完成就去 mkdir 子目录，
-    # Byethost 返回 550「No such file or directory」导致 mirror 中断（set -e 直接终止整个部署）。
     "$LF_SET mirror -R $flag --parallel=1 ${EXCLUDES[*]} ./ $FTP_REMOTE_DIR/; quit"
 
   # 版本化 js：把每个模块复制为「文件名.v版本.js」并重写相对 import 指向版本化文件名。
