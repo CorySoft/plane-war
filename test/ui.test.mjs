@@ -17,7 +17,8 @@ import {
   drawGameOver, getRestartButton, getGameOverMenuButton,
   getCodexCardRects, getPowerupCardRects, getCodexScroll, getCodexMaxScroll,
   getCodexViewport, setCodexScroll,
-  setDetailCard, getDetailCard, drawDetailCard,
+  setDetailCard, getDetailCard, drawDetailCard, drawToast,
+  setTalentConfirm, getTalentConfirm, getTalentConfirmYesButton, getTalentConfirmNoButton, drawTalentConfirm,
 } from "../js/ui.js";
 import { H, META, POWERUP_DEFS, DIFFICULTY_PRESETS, setViewport } from "../js/config.js";
 import { preloadSkin, _resetSkinForTest } from "../js/assets.js";
@@ -133,7 +134,7 @@ describe("ui", () => {
       assert.ok(Math.abs(getCodexScroll() - max) <= 1, "滚动能钳制到最大滚动量");
       const rects = getCodexCardRects();
       assert.ok(rects.length > 0);
-      const last = rects[rects.length - 1].x;
+      const last = rects[rects.length - 1].rect;
       assert.ok(last.y + last.h <= vp.y + vp.h + 0.5, "滚到底后最后一行必须落在可视区内");
     } finally {
       setViewport(480, 720);
@@ -152,8 +153,8 @@ describe("ui", () => {
       drawMenu(makeCtx(), 0, "normal", DIFFICULTY_PRESETS, []);
       const vp = getCodexViewport();
       for (const c of getCodexCardRects()) {
-        assert.ok(c.x.y >= vp.y - 0.5, "命中区不得越过可视区顶部");
-        assert.ok(c.x.y + c.x.h <= vp.y + vp.h + 0.5, "命中区不得越过可视区底部");
+        assert.ok(c.rect.y >= vp.y - 0.5, "命中区不得越过可视区顶部");
+        assert.ok(c.rect.y + c.rect.h <= vp.y + vp.h + 0.5, "命中区不得越过可视区底部");
       }
     } finally {
       setViewport(480, 720);
@@ -166,8 +167,8 @@ describe("ui", () => {
     drawMenu(makeCtx(), 0, "normal", DIFFICULTY_PRESETS, []);
     const vp = getCodexViewport();
     for (const c of getPowerupCardRects()) {
-      assert.ok(c.x.y >= vp.y - 0.5);
-      assert.ok(c.x.y + c.x.h <= vp.y + vp.h + 0.5);
+      assert.ok(c.rect.y >= vp.y - 0.5);
+      assert.ok(c.rect.y + c.rect.h <= vp.y + vp.h + 0.5);
     }
   });
 
@@ -271,10 +272,10 @@ describe("ui", () => {
       // 图标水平居中、且落在名称（y+35）之上，避免压字
       const first = rects[0];
       const icon = images.find((m) => m.src.includes(`/powerup_${first.key}.png`));
-      assert.ok(Math.abs(icon.x + icon.w / 2 - (first.x.x + first.x.w / 2)) < 0.5,
+      assert.ok(Math.abs(icon.x + icon.w / 2 - (first.rect.x + first.rect.w / 2)) < 0.5,
         "图标必须水平居中于卡片");
-      assert.ok(icon.y >= first.x.y - 1, "图标不得越出卡片顶部");
-      assert.ok(icon.y + icon.h <= first.x.y + 28.5, "图标不得压到名称文字");
+      assert.ok(icon.y >= first.rect.y - 1, "图标不得越出卡片顶部");
+      assert.ok(icon.y + icon.h <= first.rect.y + 28.5, "图标不得压到名称文字");
     });
 
     it("道具图鉴：未发现的道具不画贴图（保持未点亮态）", () => {
@@ -291,8 +292,8 @@ describe("ui", () => {
       const { ctx, texts } = makeSpyCtx();
       drawMenu(ctx, 0, "normal", DIFFICULTY_PRESETS, []);
       const first = getPowerupCardRects()[0];
-      const cy = first.x.y;
-      const cardCx = first.x.x + first.x.w / 2;
+      const cy = first.rect.y;
+      const cardCx = first.rect.x + first.rect.w / 2;
       const name = POWERUP_DEFS[first.key].name;
       const nameHit = texts.find((t) => t.t === name && Math.abs(t.x - cardCx) < 0.5
         && Math.abs(t.y - (cy + 35)) < 0.5);
@@ -356,5 +357,45 @@ describe("ui", () => {
       assert.ok(texts.some((t) => t.t === "A"), "应保留原字母绘制");
       setDetailCard(null);
     });
+  });
+
+  // ---------- 回归：toast 可指定纵向位置，不再压住结算大标题 ----------
+  it("drawToast 默认位于 0.38H，结算态可下移/上移避让", () => {
+    const { ctx, texts } = makeSpyCtx();
+    drawToast(ctx, { text: "成就达成", color: "#7CFC00", t: 1 }, 0.38);
+    const y38 = texts.find(t => t.t === "成就达成").y;
+    assert.ok(Math.abs(y38 - H * 0.38) < 0.5, "默认应落在 0.38H，实测 " + y38);
+
+    texts.length = 0;
+    drawToast(ctx, { text: "成就达成", color: "#7CFC00", t: 1 }, 0.20);
+    const y20 = texts.find(t => t.t === "成就达成").y;
+    assert.ok(Math.abs(y20 - H * 0.20) < 0.5, "结算态应落在 0.20H，实测 " + y20);
+    assert.ok(y20 < y38, "结算态的横幅必须离开大标题所在的 0.30~0.40H 区间");
+  });
+
+  it("drawToast 对 t<=0 或空对象不绘制", () => {
+    const { ctx, texts } = makeSpyCtx();
+    drawToast(ctx, null);
+    drawToast(ctx, { text: "x", color: "#fff", t: 0 });
+    assert.equal(texts.length, 0);
+  });
+
+  // ---------- 回归：天赋购买确认框 ----------
+  it("天赋确认框绘制标题/天赋名/确认与取消按钮", () => {
+    setTalentConfirm({ id: "t_dmg1", name: "攻击强化I", cost: 100, desc: "基础伤害+1" });
+    drawTalentConfirm(makeCtx());
+    assert.ok(getTalentConfirmYesButton(), "应暴露确认按钮");
+    assert.ok(getTalentConfirmNoButton(), "应暴露取消按钮");
+    const yes = getTalentConfirmYesButton(), no = getTalentConfirmNoButton();
+    assert.ok(yes.x + yes.w <= no.x || no.x + no.w <= yes.x, "确认/取消按钮不得重叠");
+    setTalentConfirm(null);
+    assert.doesNotThrow(() => drawTalentConfirm(makeCtx()));
+  });
+
+  it("setMenuPage 切页时清掉 talentConfirm，避免跨页残留", () => {
+    setMenuPage("talent");   // 先到一个非 main 页
+    setTalentConfirm({ id: "x", name: "x", cost: 1, desc: "" });
+    setMenuPage("main");     // 切回 main 应顺带清掉确认框
+    assert.equal(getTalentConfirm(), null);
   });
 });

@@ -5,7 +5,7 @@
 import { W, H, STATE, BULLET as BCFG, TAU, DIFFICULTY_PRESETS, ENEMY_LEVEL, POWERUP_DROP, META, COMBO, XP_BASE, XP_GROWTH, PLAYER, computeViewport, setViewport, skillMax } from "./config.js";
 import { clamp, rand, hypot, setf } from "./utils.js";
 import { glowText } from "./theme.js";
-import { sfx, startMusic, stopMusic, initAudio, setSfxMuted, setMusicMuted } from "./audio.js";
+import { sfx, startMusic, stopMusic, initAudio, setSfxMuted, setMusicMuted, setMusicIntensity, duckMusic } from "./audio.js";
 import { initInput, bindTouchButtons, getStick, isStickActive, setDifficulty as setPlayerDifficulty, isEasyMode, getEasyTouch } from "./input.js";
 import { spawnParticles, updateParticles, drawParticles, clearParticles } from "./particles.js";
 import { triggerShake, updateCamera, applyCamera, resetCamera, slowmo } from "./camera.js";
@@ -30,7 +30,7 @@ import { drawHUD } from "./hud.js";
 import {
   drawMenu, drawGameOver, drawLevelUp, drawPause, drawPauseButton, drawToast, drawRevive,
   drawDetailCard, setDetailCard, getDetailCard,
-  getDetailCloseRect, getCodexCardRects, getPowerupCardRects, getAchieveCardRects,
+  getCodexCardRects, getPowerupCardRects, getAchieveCardRects,
   getCodexScroll, getCodexMaxScroll, getCodexViewport, setCodexScroll,
   powerupDescFull,
   drawStars, updateStars, initStars,
@@ -46,6 +46,7 @@ import {
   getClearCacheButton, drawClearCacheConfirm, getClearYesButton, getClearNoButton, getShowClearCache, setShowClearCache,
   getFeedbackButton,
   getHangarConfirm, setHangarConfirm, getHangarConfirmYesButton, getHangarConfirmNoButton, drawHangarConfirm,
+  getTalentConfirm, setTalentConfirm, getTalentConfirmYesButton, getTalentConfirmNoButton, drawTalentConfirm,
 } from "./ui.js";
 import { initFeedback, showFeedback, hideFeedback, isFeedbackOpen } from "./feedback.js";
 import { preloadSkin, drawBackground, skinProgress } from "./assets.js";
@@ -56,7 +57,8 @@ import {
   loadMeta, earnStardust, getBest, getTalentEffects, getShopEffects, purchaseShopItem, addKill, getSelectedAircraftConfig,
   discoverSkill, getDiscoveredSkills, spendStardust, getStardust,
   checkAchievements, getQuestView, claimQuest, addBossKill,
-  getSettings, toggleSetting, unlockAircraft, setSelectedAircraft, purchaseTalent,
+  getSettings, toggleSetting, setDifficulty as setMetaDifficulty,
+  unlockAircraft, setSelectedAircraft, purchaseTalent,
   resetMeta,
 } from "./meta.js";
 
@@ -109,7 +111,6 @@ let comboTime = 0;
 let frame = 0;
 let player = null;
 let skillChoices = null;
-let stardustEarned = 0;
 let isNewBest = false;        // 本局是否刷新最高分（earnStardust 更新前判定）
 let talentFxCache = null;    // 本局天赋效果缓存（一局内不变，避免 addXp 每次重算）
 let shopFxCache = null;      // 本局商店加成缓存
@@ -126,7 +127,6 @@ let levelledThisFrame = false;   // 本帧是否已触发过升级（连锁击�
 let toast = null;
 let difficultyKey = "normal";
 let difficulty = DIFFICULTY_PRESETS.normal;
-let showTutorial = true;   // 新手教程提示
 let tutorialTimer = 0;     // 教程剩余显示时间
 let musicStarted = false;
 let reviveUsed = false;    // 本局是否已用过复活（每局限 1 次）
@@ -138,6 +138,13 @@ let spaceBgCache = { key: "", base: null, hz: null, vg: null };
 // 否则内存档保持默认值，之后每次 saveMeta 都会覆盖掉用户真实存档
 try {
   loadMeta();
+  // 难度跨会话保留：此前 difficultyKey 只存在内存里，刷新页面就退回 normal
+  const saved = getSettings().difficulty;
+  if (saved && DIFFICULTY_PRESETS[saved] && saved !== difficultyKey) {
+    difficultyKey = saved;
+    difficulty = DIFFICULTY_PRESETS[saved];
+    setPlayerDifficulty(saved);
+  }
 } catch (e) {
   console.error("[plane_war] 读取存档失败:", e.message);
 }
@@ -151,6 +158,16 @@ try {
   initStars();
   resetCamera();
   initFeedback();
+
+  // 切后台/失焦自动暂停：旧版只清空按键但游戏继续跑，回来发现已经死了
+  if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden && state === STATE.PLAYING) {
+        state = STATE.PAUSED;
+        duckMusic(true);
+      }
+    });
+  }
 } catch (e) {
   console.error("[plane_war] 初始化异常:", e.message, e.stack);
 }
@@ -251,6 +268,8 @@ function loop() {
 function update(dt, realDt = dt) {
   levelledThisFrame = false;   // 每帧重置：连锁击杀多级只在当帧保留一个升级
   updateCamera(realDt, combo, deathTimer > 0 ? Math.max(0.1, deathTimer / 2.0) : 0);
+  // BGM 强度随连击微调：连击越高琶音越激昂，让玩家有「打得起劲」的听感反馈
+  setMusicIntensity(1 + Math.min(0.4, combo * 0.02));
   updateDamageNumbers(dt);
   if (player) {
     updateParticles(dt);
@@ -359,9 +378,10 @@ function update(dt, realDt = dt) {
     }
     if (player._xpPack) {
       // 经验包按当前升级需求折算，后期依然有价值（固定 50 点在后期形同虚设）
-      addXp(xpPackAmount(xpNeed));
+      const amount = xpPackAmount(xpNeed);
+      addXp(amount);
       player._xpPack = false;
-      toast = { text: "经验包 +" + xpPackAmount(xpNeed), color: "#8ad4ff", t: 1.2 };
+      toast = { text: "经验包 +" + amount, color: "#8ad4ff", t: 1.2 };
     }
 
     // 道具掉落
@@ -392,18 +412,18 @@ function update(dt, realDt = dt) {
       const bossType = bossTypes[Math.floor(Math.random() * bossTypes.length)];
       spawnBoss(bossType, level);
       toast = { text: "Boss 来袭！", color: "#ff6b6b", t: 2.5 };
-      sfx.boom();
+      sfx.bossSpawn();
       triggerShake(1.2);
     } else if (waveEvent === "bossWarn") {
       toast = { text: "⚠ Boss 即将来袭！", color: "#ff8fa3", t: 2.5 };
-      sfx.power();
+      sfx.warn();
     } else if (waveEvent === "swarmWarn") {
       toast = { text: "⚠ 大波敌机正在赶来！", color: "#ff8fa3", t: 3 };
-      sfx.power();
+      sfx.warn();
     } else if (waveEvent === "swarm") {
       spawnSwarm(level, difficulty, enemyLevel);
       toast = { text: "虫群来袭！", color: "#ff6b6b", t: 2 };
-      sfx.boom();
+      sfx.bossSpawn();
     }
 
     // 生成敌人
@@ -435,6 +455,9 @@ function update(dt, realDt = dt) {
 
 // ---------- 碰撞检测 ----------
 function checkCollisions() {
+  // 玩家已死（死亡慢动作阶段）就不再做任何涉及玩家的碰撞：
+  // 此刻玩家已从画面移除，敌机/敌弹不该还能打中它
+  const playerAlive = lives > 0;
   // 用快照迭代：连锁爆炸/护体弹会 splice 洗牌 enemies，需现场查询真实索引
   const snapshot = enemies.slice();
   for (const e of snapshot) {
@@ -444,7 +467,7 @@ function checkCollisions() {
     const i = cur;
 
     // 玩家 vs 敌机（冰冻中的敌机冻结不动、不造成伤害，但仍可被击毁）
-    if (e.frozen <= 0 && player.invincible <= 0) {
+    if (playerAlive && e.frozen <= 0 && player.invincible <= 0) {
       const dist = hypot(player.x, player.y, e.x, e.y);
       if (dist < e.r + player.radius) {
         if (player.shield > 0) {
@@ -507,6 +530,7 @@ function checkCollisions() {
     const b = bullets[i];
     if (!b) continue;
     if (b.friendly) continue;
+    if (!playerAlive) continue;
     if (player.invincible > 0) continue;
     const dist = hypot(player.x, player.y, b.x, b.y);
     if (dist < PLAYER.hitRadius) {
@@ -696,8 +720,11 @@ function doEnemyDeathExplosion(e, info, depth = 0) {
   // 深度衰减：连锁越深粒子/波纹越少（第 2 层 50%，第 3 层 20%，第 4 层+ 不再生成粒子/波纹）
   const depthVisualFactor = Math.pow(0.5, depth);
 
-  // 爆炸瞬间填充闪：0→真实伤害半径在 0.15s 内膨胀完毕，让视觉与伤害同步
-  fxBlasts.push({ x: e.x, y: e.y, rMax: r, life: 0.15, maxLife: 0.15, color: "#ff6633" });
+  // 爆炸瞬间填充闪：0→真实伤害半径在 0.15s 内膨胀完毕，让视觉与伤害同步。
+  // 封顶：连锁清屏会一帧塞进几十个，每个都要逐帧新建径向渐变。
+  if (fxBlasts.length < BCFG.fxBlastsCap) {
+    fxBlasts.push({ x: e.x, y: e.y, rMax: r, life: 0.15, maxLife: 0.15, color: "#ff6633" });
+  }
 
   // AOE 伤害周围敌机（连带可能引发连锁爆炸）
   const chainVictims = [];
@@ -806,8 +833,9 @@ function updateBossAI(e, dt, level, diff) {
     e.fireCd = 0;
     if (e.shieldHp > 0) {
       spawnParticles(e.x, e.y, "#44aaff", 24, 6);
-      sfx.hit();
     }
+    // 相位切换：金属击打音 + 提示，让玩家感知到 Boss 进入新阶段
+    sfx.bossPhase();
   }
 
   // 缓慢移动到屏幕中上部
@@ -823,7 +851,7 @@ function updateBossAI(e, dt, level, diff) {
         e.teleportTimer = phase.teleportInterval;
         spawnParticles(e.x, e.y, "#aa44ff", 24, 6);
         spawnParticles(e.x, e.y, "#aa44ff", 24, 6);
-        sfx.power();
+        sfx.scatter();   // 传送：高频"嗒"比 power 更有"瞬移"感
       }
     } else {
       e.x += Math.sin(e.t * 0.5) * 1.2;
@@ -907,7 +935,7 @@ function addScore(n) {
   if (!newBestOnce && startBest > 0 && score > startBest) {
     newBestOnce = true;
     newBestFx = 2.4;
-    sfx.power();
+    sfx.newbest();
   }
   // 成就结算（分数/连击里程碑在得分瞬间即可判定）
   showAchievementToast(checkAchievements({ runScore: score, runLevel: pLevel, runCombo: combo }));
@@ -978,6 +1006,11 @@ function chooseSkill(skillId) {
 }
 
 function hitPlayer() {
+  // 玩家已死就不再结算：否则死亡动画（2s）一结束，还压在身上的敌机会立刻
+  // 再打中一次，deathTimer 又被重置成 2s，进入「死了却永远不结算」的死循环，
+  // lives 一路扣成负数。正常对局靠 2.2s 无敌帧掩盖了它（动画 2s < 无敌 2.2s），
+  // 但无敌时间被压缩过或死亡动画拉长时必现。
+  if (lives <= 0) return;
   lives--;
   player.invincible = player.invincibleTime || 2.2;
   triggerShake(1);
@@ -1009,15 +1042,16 @@ function hitPlayer() {
 function showAchievementToast(list) {
   if (!list || !list.length) return;
   toast = { text: "成就达成  " + list.map(a => a.name).join("、"), color: "#7CFC00", t: 2.6 };
-  sfx.power();
+  sfx.achievement();
 }
 
 /** 正常结算（未复活/放弃复活）：结算星尘、最高分与成就 */
 function gameOver() {
   state = STATE.OVER;
   isNewBest = score > getBest();
-  stardustEarned = earnStardust(score);
+  earnStardust(score);
   stopMusic();
+  duckMusic(false);
   musicStarted = false;
   deathFlash = 0;
   showAchievementToast(checkAchievements({ runScore: score, runLevel: pLevel, runCombo: combo }));
@@ -1037,7 +1071,7 @@ function doRevive() {
   clearBullets(true);      // 清掉敌方子弹，保留友方
   showAchievementToast(checkAchievements({ runScore: score, runLevel: pLevel, runCombo: combo, reviveUsed: true }));
   toast = { text: "复活成功！", color: "#ffd166", t: 1.8 };
-  sfx.power();
+  sfx.revive();
   state = STATE.PLAYING;
   startMusic();
   musicStarted = true;
@@ -1062,7 +1096,6 @@ function freezeAll() {
 function resetGame() {
   score = 0; lives = 3; level = 1; enemyLevel = 1; combo = 0; comboTime = 0;
   pLevel = 1; xp = 0; xpNeed = XP_BASE;
-  stardustEarned = 0;
   isNewBest = false;
   startBest = getBest();
   newBestOnce = false;
@@ -1100,6 +1133,7 @@ function resetGame() {
   fxRings = [];
   fxBlasts = [];
   resetCamera();
+  duckMusic(false);   // 复位上一局暂停时压低的 BGM 增益
   resetWaves();
   skillChoices = null;
   frame = 0;
@@ -1113,7 +1147,7 @@ function resetGame() {
   setShowClearCache(false);
   setDetailCard(null);
 
-  const skipTutorial = !showTutorial || !!getSettings().skipTutorial;
+  const skipTutorial = !!getSettings().skipTutorial;
   if (skipTutorial) {
     state = STATE.PLAYING;
     startMusic();
@@ -1258,6 +1292,16 @@ function draw() {
       ctx.fillStyle = `rgba(255,255,255,${deathFlash * 0.6})`;
       ctx.fillRect(0, 0, W, H);
     }
+
+    // 残血警告：只剩 1 条命时屏幕边缘脉动红光，提示玩家谨慎
+    if (lives === 1 && deathTimer <= 0) {
+      const a = 0.10 + 0.08 * Math.sin(frame * 0.15);
+      const grad = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.7);
+      grad.addColorStop(0, "rgba(255,40,40,0)");
+      grad.addColorStop(1, `rgba(255,40,40,${a})`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+    }
   }
 
   ctx.restore();
@@ -1340,14 +1384,18 @@ function draw() {
     ctx.globalAlpha = 1;
 
     glowText(ctx, {
-      text: "左 / 右 移动躲避敌机", x: W / 2, y: H * 0.36,
+      text: "左 / 右 移动躲避敌机", x: W / 2, y: H * 0.32,
       size: 26, weight: "bold", color: "#ffd166", blur: 22, fontFamily: "'sans-serif'",
     });
     ctx.fillStyle = "rgba(255,255,255,.92)";
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     setf(ctx, "16px 'sans-serif'");
-    ctx.fillText("射击为自动 · 子弹命中后消失", W / 2, H * 0.42);
-    ctx.fillText("击落敌机积经验，升级可选择技能", W / 2, H * 0.46);
+    ctx.fillText("射击为自动 · 子弹命中后消失", W / 2, H * 0.38);
+    ctx.fillText("击落敌机积经验，升级可选择技能", W / 2, H * 0.42);
+    ctx.fillText("拾取道具获得火力 / 护盾 / 加速等增益", W / 2, H * 0.46);
+    ctx.fillStyle = "rgba(255,255,255,.55)";
+    setf(ctx, "13px 'sans-serif'");
+    ctx.fillText("星尘与最高分会自动保存，每局结算获得星尘", W / 2, H * 0.50);
 
     // 点击开始提示（呼吸闪烁）
     if (Math.sin(frame * 0.08) > -0.3) {
@@ -1367,10 +1415,16 @@ function draw() {
   drawGachaAnim(ctx);
 
   drawHangarConfirm(ctx);
+  drawTalentConfirm(ctx);
   drawClearCacheConfirm(ctx);
 
-  // Toast：UI 层最后渲染，确保显示在最前面
-  if (toast && toast.t > 0) drawToast(ctx, toast);
+  // Toast：UI 层最后渲染，确保显示在最前面。
+  // 结算/复活界面从 0.28H 起就是大标题与按钮，中间没有空档，
+  // 所以这两个状态把 toast 挪到顶部（0.20H，位于 HUD 之下、大标题之上）。
+  if (toast && toast.t > 0) {
+    const yFrac = (state === STATE.OVER || state === STATE.REVIVE) ? 0.20 : 0.38;
+    drawToast(ctx, toast, yFrac);
+  }
 
   drawDetailCard(ctx);
 
@@ -1387,8 +1441,8 @@ window.addEventListener("keydown", e => {
     return;
   }
   if (e.code === "Escape" || e.code === "KeyP") {
-    if (state === STATE.PLAYING) { state = STATE.PAUSED; return; }
-    if (state === STATE.PAUSED) { state = STATE.PLAYING; return; }
+    if (state === STATE.PLAYING) { state = STATE.PAUSED; sfx.click(); duckMusic(true); return; }
+    if (state === STATE.PAUSED) { state = STATE.PLAYING; sfx.click(); duckMusic(false); return; }
   }
   // GACHA 抽奖界面：键盘也可解除（与 pointerdown 逻辑一致），避免纯键盘玩家软锁
   if (e.code === "Space" || e.code === "Enter" || e.code === "Escape") {
@@ -1400,12 +1454,13 @@ window.addEventListener("keydown", e => {
   }
   if (e.code === "Space" || e.code === "Enter") {
     if (state === STATE.MENU) {
-      if (getMenuPage() !== "main") { setMenuPage("main"); return; }
+      if (getMenuPage() !== "main") { setMenuPage("main"); sfx.click(); return; }
+      sfx.click();
       resetGame();
     }
-    else if (state === STATE.OVER) resetGame();
-    else if (state === STATE.REVIVE) doRevive();
-    else if (state === STATE.TUTORIAL) startPlaying();
+    else if (state === STATE.OVER) { sfx.click(); resetGame(); }
+    else if (state === STATE.REVIVE) doRevive();   // doRevive 内部已播 sfx.revive()
+    else if (state === STATE.TUTORIAL) { sfx.click(); startPlaying(); }
   }
   if (state === STATE.REVIVE && (e.code === "Escape" || e.code === "KeyQ" || e.code === "KeyN")) {
     gameOver();
@@ -1428,7 +1483,7 @@ function handleCodexTap(mx, my) {
   const page = getMenuPage();
   if (page === "codex") {
     for (const c of getCodexCardRects()) {
-      if (hitTestButton(mx, my, c.x) && c.got) {
+      if (hitTestButton(mx, my, c.rect) && c.got) {
         const curLv = (player?.skills?.[c.skill.id]) || 0;
         setDetailCard({ type: "skill", data: {
           name: c.skill.name, desc: c.skill.desc, color: c.skill.color,
@@ -1441,7 +1496,7 @@ function handleCodexTap(mx, my) {
     }
   } else if (page === "powerupCodex") {
     for (const c of getPowerupCardRects()) {
-      if (hitTestButton(mx, my, c.x) && c.got) {
+      if (hitTestButton(mx, my, c.rect) && c.got) {
         setDetailCard({ type: "powerup", data: {
           name: c.def.name, desc: powerupDescFull(c.key), color: c.def.color,
           icon: c.def.icon, got: c.got, unique: c.def.unique,
@@ -1472,29 +1527,47 @@ canvas.addEventListener("pointerdown", e => {
     return;
   }
 
-  if (state === STATE.TUTORIAL) { startPlaying(); return; }
+  if (state === STATE.TUTORIAL) { sfx.click(); startPlaying(); return; }
 
   if (state === STATE.PLAYING && hitTestButton(mx, my, getPauseButton())) {
-    state = STATE.PAUSED;
+    state = STATE.PAUSED; sfx.click(); duckMusic(true);
     return;
   }
 
   // 简单模式 PLAYING 态：手指直接控制战机 X（input.js 已接管；此处不做重复处理）
 
   if (state === STATE.MENU) {
-    // 弹窗优先：机库购买确认框 / 清除缓存确认框，先于任何主菜单按钮与子页面
+    // 弹窗优先：机库/天赋 购买确认框 / 清除缓存确认框，先于任何主菜单按钮与子页面
     if (getHangarConfirm()) {
       if (hitTestButton(mx, my, getHangarConfirmYesButton())) {
         const c = getHangarConfirm();
         setHangarConfirm(null);
         if (unlockAircraft(c.id)) {
           toast = { text: "解锁成功", color: "#7CFC00", t: 1.6 };
-          sfx.power();
+          sfx.unlock();
         } else {
           toast = { text: "星尘不足", color: "#ff8fa3", t: 1.4 };
+          sfx.deny();
         }
       } else if (hitTestButton(mx, my, getHangarConfirmNoButton())) {
         setHangarConfirm(null);
+        sfx.click();
+      }
+      return;
+    }
+    if (getTalentConfirm()) {
+      if (hitTestButton(mx, my, getTalentConfirmYesButton())) {
+        const c = getTalentConfirm();
+        setTalentConfirm(null);
+        if (purchaseTalent(c.id)) {
+          toast = { text: "天赋已解锁", color: "#7CFC00", t: 1.6 };
+          sfx.unlock();
+        } else {
+          toast = { text: "星尘不足", color: "#ff8fa3", t: 1.4 };
+          sfx.deny();
+        }
+      } else if (hitTestButton(mx, my, getTalentConfirmNoButton())) {
+        setTalentConfirm(null);
         sfx.click();
       }
       return;
@@ -1509,13 +1582,14 @@ canvas.addEventListener("pointerdown", e => {
         setTimeout(() => location.reload(), 300);
       } else if (hitTestButton(mx, my, getClearNoButton())) {
         setShowClearCache(false);
+        sfx.click();
       }
       return;
     }
     // 技能/道具图鉴子页面：返回固定按钮点击；卡片区进入拖拽/轻点判定（支持滚动，两页统一）
     if (getMenuPage() === "codex" || getMenuPage() === "powerupCodex") {
       const backBtn = getMenuPage() === "codex" ? getCodexBackButton() : getPowerupCodexBackButton();
-      if (hitTestButton(mx, my, backBtn)) { setMenuPage("main"); return; }
+      if (hitTestButton(mx, my, backBtn)) { setMenuPage("main"); sfx.click(); return; }
       const vp = getCodexViewport();
       if (vp && mx >= vp.x && mx <= vp.x + vp.w && my >= vp.y && my <= vp.y + vp.h) {
         // 记录拖动起点，等 pointerup 判定：轻点=打开详情，拖动=滚动
@@ -1526,12 +1600,12 @@ canvas.addEventListener("pointerdown", e => {
     }
     // 系统商城子页面：返回 / 购买
     if (getMenuPage() === "shop") {
-      if (hitTestButton(mx, my, getShopBackButton())) { setMenuPage("main"); return; }
+      if (hitTestButton(mx, my, getShopBackButton())) { setMenuPage("main"); sfx.click(); return; }
       for (const btn of getShopBuyButtons()) {
         if (hitTestButton(mx, my, btn)) {
           const ok = purchaseShopItem(btn.id);
-          if (ok) { toast = { text: "购买成功！", color: "#d0a6ff", t: 1.5 }; sfx.power(); }
-          else { toast = { text: "星尘不足", color: "#ff6b6b", t: 1.5 }; }
+          if (ok) { toast = { text: "购买成功！", color: "#d0a6ff", t: 1.5 }; sfx.unlock(); }
+          else { toast = { text: "星尘不足", color: "#ff6b6b", t: 1.5 }; sfx.deny(); }
           return;
         }
       }
@@ -1539,7 +1613,7 @@ canvas.addEventListener("pointerdown", e => {
     }
     // 成就·每日任务子页面：返回 / 领取任务奖励 / 点击成就卡片查看详情
     if (getMenuPage() === "achieve") {
-      if (hitTestButton(mx, my, getAchieveBackButton())) { setMenuPage("main"); return; }
+      if (hitTestButton(mx, my, getAchieveBackButton())) { setMenuPage("main"); sfx.click(); return; }
       const claims = getQuestClaimButtons();
       const items = getQuestView().items;
       for (let i = 0; i < claims.length && i < items.length; i++) {
@@ -1547,14 +1621,16 @@ canvas.addEventListener("pointerdown", e => {
           const reward = claimQuest(items[i].def.id);
           if (reward > 0) {
             toast = { text: "任务完成  +" + reward + " 星尘", color: "#7CFC00", t: 3 };
-            sfx.power();
+            sfx.unlock();
+          } else {
+            sfx.deny();
           }
           return;
         }
       }
       // 点击成就卡片
       for (const c of getAchieveCardRects()) {
-        if (hitTestButton(mx, my, c.x) && c.achieved) {
+        if (hitTestButton(mx, my, c.rect) && c.achieved) {
           setDetailCard({ type: "achievement", data: {
             name: c.def.name, desc: c.def.desc, color: c.def.color,
             icon: c.achieved ? "★" : "☆", achieved: c.achieved, reward: c.def.reward,
@@ -1567,19 +1643,22 @@ canvas.addEventListener("pointerdown", e => {
     }
     const page = getMenuPage();
     if (page === "hangar") {
-      if (hitTestButton(mx, my, getHangarBackButton())) { setMenuPage("main"); return; }
+      if (hitTestButton(mx, my, getHangarBackButton())) { setMenuPage("main"); sfx.click(); return; }
       for (const card of getHangarCards()) {
         if (!hitTestButton(mx, my, card)) continue;
         if (card.unlocked) {
           setSelectedAircraft(card.id);
           toast = { text: "已选择战机", color: "#66e0ff", t: 1.4 };
+          sfx.click();
         } else if (getStardust() < card.cost) {
           toast = { text: "星尘不足", color: "#ff8fa3", t: 1.4 };
+          sfx.deny();
         } else {
           // 防御：卡片数据若与 META.aircraft 不同步（旧存档/半途改配置）不再抛 TypeError
           const cfg = META.aircraft[card.id];
           if (!cfg) {
             toast = { text: "该战机数据缺失", color: "#ff8fa3", t: 1.4 };
+            sfx.deny();
             return;
           }
           setHangarConfirm({ id: card.id, name: cfg.name, cost: card.cost });
@@ -1590,61 +1669,72 @@ canvas.addEventListener("pointerdown", e => {
       return;
     }
     if (page === "talent") {
-      if (hitTestButton(mx, my, getTalentBackButton())) { setMenuPage("main"); return; }
+      if (hitTestButton(mx, my, getTalentBackButton())) { setMenuPage("main"); sfx.click(); return; }
       for (const card of getTalentCards()) {
         if (!hitTestButton(mx, my, card)) continue;
         if (card.bought) {
           toast = { text: "已解锁", color: "#c8a6ff", t: 1.2 };
+          sfx.deny();
         } else if (card.locked) {
           toast = { text: "需要前置天赋", color: "#ff8fa3", t: 1.4 };
-        } else if (purchaseTalent(card.id)) {
-          toast = { text: "天赋已解锁", color: "#7CFC00", t: 1.6 };
-          sfx.power();
-        } else {
+          sfx.deny();
+        } else if (getStardust() < card.cost) {
+          // 直接点未解锁天赋卡但星尘不足：也走确认框会更绕，这里直接 deny
           toast = { text: "星尘不足", color: "#ff8fa3", t: 1.4 };
+          sfx.deny();
+        } else {
+          // 星尘够：弹确认框（与机库一致），避免误触花掉大额星尘
+          const cfg = META.talents.find(t => t.id === card.id);
+          if (!cfg) { toast = { text: "该天赋数据缺失", color: "#ff8fa3", t: 1.4 }; sfx.deny(); return; }
+          setTalentConfirm({ id: card.id, name: cfg.name, cost: card.cost, desc: cfg.desc });
+          sfx.click();
         }
         return;
       }
       return;
     }
     if (page === "settings") {
-      if (hitTestButton(mx, my, getSettingsBackButton())) { setMenuPage("main"); return; }
+      if (hitTestButton(mx, my, getSettingsBackButton())) { setMenuPage("main"); sfx.click(); return; }
       for (const row of getSettingToggles()) {
         if (hitTestButton(mx, my, row)) {
           toggleSetting(row.key);
           applyAudioSettings();
+          sfx.click();
           return;
         }
       }
       return;
     }
-    if (hitTestButton(mx, my, getHangarButton())) { setMenuPage("hangar"); return; }
-    if (hitTestButton(mx, my, getTalentButton())) { setMenuPage("talent"); return; }
-    if (hitTestButton(mx, my, getCodexButton())) { setMenuPage("codex"); return; }
+    if (hitTestButton(mx, my, getHangarButton())) { setMenuPage("hangar"); sfx.click(); return; }
+    if (hitTestButton(mx, my, getTalentButton())) { setMenuPage("talent"); sfx.click(); return; }
+    if (hitTestButton(mx, my, getCodexButton())) { setMenuPage("codex"); sfx.click(); return; }
     // 进入道具图鉴
-    if (hitTestButton(mx, my, getPowerupCodexButton())) { setMenuPage("powerupCodex"); return; }
+    if (hitTestButton(mx, my, getPowerupCodexButton())) { setMenuPage("powerupCodex"); sfx.click(); return; }
     // 进入系统商城
-    if (hitTestButton(mx, my, getShopButton())) { setMenuPage("shop"); return; }
+    if (hitTestButton(mx, my, getShopButton())) { setMenuPage("shop"); sfx.click(); return; }
     // 进入成就·每日任务
-    if (hitTestButton(mx, my, getAchieveButton())) { setMenuPage("achieve"); return; }
-    if (getSettingsButton() && hitTestButton(mx, my, getSettingsButton())) { setMenuPage("settings"); return; }
+    if (hitTestButton(mx, my, getAchieveButton())) { setMenuPage("achieve"); sfx.click(); return; }
+    if (getSettingsButton() && hitTestButton(mx, my, getSettingsButton())) { setMenuPage("settings"); sfx.click(); return; }
     // 反馈入口
-    if (getFeedbackButton() && hitTestButton(mx, my, getFeedbackButton())) { showFeedback(); return; }
+    if (getFeedbackButton() && hitTestButton(mx, my, getFeedbackButton())) { showFeedback(); sfx.click(); return; }
     // 清除缓存按钮（玩家可用：解决旧缓存导致的加载/存档异常）
     if (hitTestButton(mx, my, getClearCacheButton())) {
       setShowClearCache(true);
+      sfx.click();
       return;
     }
-    // 难度选择
+    // 难度选择（顺带持久化：此前只存在内存里，刷新页面就退回 normal）
     for (const [k, rect] of Object.entries(getDifficultyRects())) {
       if (hitTestButton(mx, my, rect)) {
         difficultyKey = k;
         difficulty = DIFFICULTY_PRESETS[k];
         setPlayerDifficulty(k);   // 通知 player/input：切换难度（simple 关闭摇杆）
+        setMetaDifficulty(k);     // 存进 settings，下次进游戏保持
+        sfx.click();
         return;
       }
     }
-    if (hitTestButton(mx, my, getStartButton())) { resetGame(); return; }
+    if (hitTestButton(mx, my, getStartButton())) { sfx.click(); resetGame(); return; }
   }
 
   if (state === STATE.REVIVE) {
@@ -1660,8 +1750,9 @@ canvas.addEventListener("pointerdown", e => {
     return;
   }
   if (state === STATE.PAUSED) {
-    if (hitTestButton(mx, my, getPauseResumeButton())) { state = STATE.PLAYING; return; }
+    if (hitTestButton(mx, my, getPauseResumeButton())) { state = STATE.PLAYING; sfx.click(); duckMusic(false); return; }
     if (hitTestButton(mx, my, getPauseQuitButton())) {
+      sfx.click();
       gameOver();
       return;
     }
@@ -1717,8 +1808,15 @@ window.__game = {
   spawnPowerup, clearPowerups,
   setScore: (v) => { score = v; },
   setLevel: (v) => { level = v; },
-  setDifficulty: (key) => { difficultyKey = key; difficulty = DIFFICULTY_PRESETS[key]; setPlayerDifficulty(key); },
+  setDifficulty: (key) => {
+    difficultyKey = key;
+    difficulty = DIFFICULTY_PRESETS[key];
+    setPlayerDifficulty(key);
+    setMetaDifficulty(key);
+  },
   setGachaAnim,
   getGachaAnim,
   getSkinProgress: skinProgress,
+  // 特效池水位（调参/压测用）
+  getFxCounts: () => ({ rings: fxRings.length, blasts: fxBlasts.length }),
 };

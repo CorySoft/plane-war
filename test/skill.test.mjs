@@ -67,7 +67,6 @@ describe("skill", () => {
     const p = createPlayer(META.aircraft.falcon, {});
     applySkill(SKILLS.find(s => s.id === "maxhp"), p);
     assert.equal(p._heal, 1);
-    assert.equal(p._maxLivesUpdate, true);
   });
 
   it("护盾强化不超过上限", () => {

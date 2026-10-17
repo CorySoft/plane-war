@@ -43,9 +43,28 @@ htdocs/                  ← web 根
 ./deploy.sh                # 增量上传（仅上传变更文件）
 ./deploy.sh --force        # 强制全量上传
 ./deploy.sh --verify       # 只校验远程文件清单
+./deploy.sh --prune        # 额外清理远程 js/ 下的历史版本副本
 ```
 
 依赖 `lftp`（未安装时：`apt-get install -y lftp`）。
+
+**关于旧版本堆积**：每次部署都会在 `js/` 里多留 20 个 `<name>.v<旧版本>.js`，
+只增不删。攒多了用 `--prune` 清掉非当前版本的副本（当前版本由脚本自动排除）。
+
+**关于 FTP 凭据**：
+
+- 默认把密码放在 `.deploy.env`（已 gitignore），并通过 `lftp -u user,pass` 传递，
+  密码会出现在进程参数里，同机其他用户 `ps` 可见
+- 想避免，把凭据写进 `~/.netrc`（权限 600）即可，脚本会自动检测到并改用
+  `-u user`（不传密码）：
+
+  ```bash
+  printf 'machine %s login %s password %s\n' ftp.byethost8.com b8_42906515 '你的密码' > ~/.netrc
+  chmod 600 ~/.netrc
+  ```
+
+- 想启用显式 FTPS：在 `.deploy.env` 里加 `FTP_SSL=1`（默认 0，
+  因为免费空间多用自签证书，强开会直接连不上）
 
 ### 自动部署约定
 
@@ -76,12 +95,42 @@ htdocs/                  ← web 根
 
 ```bash
 python3 -m http.server 8080 --bind 0.0.0.0   # 在项目根启动
-npm test                                      # 运行 144 项单元测试
+npm test                                      # 单元测试（当前 237+ 项）
+node tools/dev/smoke.mjs                      # 真机冒烟（需 playwright）
 ```
+
+**关于 `index.html` 的入口**：HTML 里写的是 `js/game.v<版本>.js`（部署时生成，
+换文件名是破除 Byethost 路径缓存的关键）。本地仓库里只有 `js/game.js`，
+所以页面用动态 import：**先试版本化副本，404 时自动回退到 `js/game.js`**，
+直接起 http server 打开就能跑，不用先跑一次部署。
+
+## 服务端安全（重要）
+
+**`feedback.php` 的推送凭据不要写进仓库**。当前实现：
+
+- `feedback.secret.php`（本地文件，**已 gitignore**）存放方糖 `SCT_TOKEN`、
+  统一网关地址与 `WP_SECRET`；缺失时推送自动停用（失败关闭），接口其余部分照常工作
+- 接口只接受**同源**请求（旧版 `Access-Control-Allow-Origin: *` 相当于公开的微信推送机）
+- 单 IP 滑窗限流：60 秒 5 次，超出返回 429
+- 日志与限流计数优先写到**文档根之外**（`htdocs/..`），不可写才退回 `wwwroot/`，
+  届时由根 `.htaccess` 的 403 规则兜底
+
+根 `.htaccess` 里挡日志的规则**必须带 `wwwroot/` 前缀**：
+
+```apache
+RewriteRule ^wwwroot/(feedback\.log|\.push_throttle)$ - [F]
+```
+
+原因：per-directory 上下文中 `RewriteRule` 匹配的是**剥掉本目录前缀后的相对路径**。
+.htaccess 在 `htdocs/`、日志在 `htdocs/wwwroot/` 下，请求 `/wwwroot/feedback.log`
+时匹配串是 `wwwroot/feedback.log`；只写 `^(feedback\.log)$` 匹配不上，
+文件会被原样下载出去。
 
 ## 部署清单（Checklist）
 
 1. [ ] 文案/数值改动 → `js/config.js`、`js/*.js`
 2. [ ] 运行 `npm test` 全部通过
-3. [ ] 运行 `./deploy.sh`（增量）或 `--force`（重要改动）
-4. [ ] `./deploy.sh --verify` 确认远程文件大小与本地一致
+3. [ ] 运行 `node tools/dev/smoke.mjs` 确认真机无 console error / 404
+4. [ ] 运行 `./deploy.sh`（增量）或 `--force`（重要改动）
+5. [ ] `./deploy.sh --verify` 确认远程文件大小与本地一致
+6. [ ] 首次上线后自查：`GET /wwwroot/feedback.log` 应返回 403、`GET /js/` 应返回 403

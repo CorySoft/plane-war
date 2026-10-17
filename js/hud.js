@@ -2,7 +2,7 @@
  * hud.js — HUD 绘制
  * =========================================================== */
 
-import { W, H } from "./config.js";
+import { W, H, calcRangePx } from "./config.js";
 import { clamp, roundRect, setf } from "./utils.js";
 import { bar, glowText, hexToRgba, pulse, C } from "./theme.js";
 
@@ -101,15 +101,12 @@ export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNee
     blur: player.power >= 4 ? 8 : 0, align: "right", baseline: "top", fontFamily: "'sans-serif'",
   });
 
-  // 射程指示
+  // 射程指示：直接读共享公式，旧实现在此硬编码了 250/50/2.5/80 四份常量
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
-  const rangeLvl = player.skills.range || 0;
-  const levelBonus = ((player.level || 1) - 1) * 2.5;
-  const rangePx = Math.min(250 + rangeLvl * 50 + levelBonus, H + 80);
-  const rangeM = Math.round(rangePx / 25);
+  const rangeM = Math.round(calcRangePx(player) / 25);
   const rangeText = "射程 " + rangeM + "m";
-  ctx.fillStyle = rangeLvl > 0 ? "#88ddff" : "rgba(255,255,255,.35)";
+  ctx.fillStyle = (player.skills.range || 0) > 0 ? "#88ddff" : "rgba(255,255,255,.35)";
   setf(ctx, "13px 'sans-serif'");
   ctx.fillText(rangeText, 18, H - 56);
 

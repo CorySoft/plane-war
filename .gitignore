@@ -5,5 +5,10 @@ Thumbs.db
 .deploy.env
 # 服务端反馈接口：内含方糖写入 token，只随 deploy.sh 上传，不进仓库
 feedback.php
+# 推送凭据（token / 网关密钥）：同样只随 deploy.sh 上传
+feedback.secret.php
+# 测试产物与调试截图
+test-results/
+screenshot*.png
 # Agnes 生成的原图缓存（可重新生成，且体积大）
 tools/raw/

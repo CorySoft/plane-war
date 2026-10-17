@@ -4,7 +4,10 @@
 
 import { W, H, DIFFICULTY } from "./config.js";
 import { rand } from "./utils.js";
-import { spawnEnemy, enemies, nextEnemyUid } from "./enemy.js";
+import { spawnEnemy, enemies, nextEnemyUid, getCurrentBossPhase } from "./enemy.js";
+
+// 相位查询由 enemy.js 提供（原本两边各写了一份），这里再导出供 game.js 使用
+export { getCurrentBossPhase };
 
 export function getDifficultyLevel(score) {
   return Math.min(DIFFICULTY.maxLevel, 1 + Math.floor(score / DIFFICULTY.levelUpScore));
@@ -40,7 +43,7 @@ export function updateWaves(dt, level, diff, enemyLevel = 1) {
   }
   if (bossWarnPending) {
     bossWarnTimer += dt;
-    if (bossWarnTimer >= 2.0) {
+    if (bossWarnTimer >= 3.0) {   // 3s 预警（旧 2s 太短，玩家来不及走位）
       bossWarnPending = false;
       bossWave = expectedBossWave;
       return "boss";
@@ -149,11 +152,4 @@ export function spawnBoss(type, level = 1) {
   return e;
 }
 
-export function getCurrentBossPhase(boss) {
-  const pct = boss.hp / boss.maxHp;
-  let phase = boss.phases[0];
-  for (const p of boss.phases) {
-    if (pct <= p.hpPct) phase = p;
-  }
-  return phase;
-}
+

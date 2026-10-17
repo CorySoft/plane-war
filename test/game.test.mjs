@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { makeCtx } from "./_env.mjs";
+import { makeCtx, stubRandom } from "./_env.mjs";
 import { STATE } from "../js/config.js";
 import { getSettings } from "../js/meta.js";
 import { spawnBoss } from "../js/wave.js";
@@ -93,5 +93,76 @@ describe("game 集成冒烟", () => {
     for (let i = 0; i < 30 && typeof rafCb === "function"; i++) rafCb();
     assert.ok(boss.fireCd <= 5, "相位切换后应重置开火计时（当前 " + boss.fireCd + "，未重置会停留 ~999）");
     assert.equal(errors.length, 0, errors.join("\n"));
+  });
+
+  // ---------- 回归：爆炸闪光必须有上限 ----------
+  // 旧实现只对 fxRings 封顶（48），漏了 fxBlasts；连锁清屏时一帧塞进几十个，
+  // 每个都要逐帧 createRadialGradient，直接砸帧率。
+  it("爆炸闪光数量有上限（连锁清屏不失控）", () => {
+    // 爆炸触发、暴击、掉落都依赖 Math.random；固定成 0 让爆炸必定触发、必定不暴击，
+    // 用例才能稳定走到封顶分支（否则偶发不满 24 个、测试闪烁）
+    const restoreRandom = stubRandom([0]);
+    try {
+    getSettings().skipTutorial = true;
+    game().resetGame();
+    const p = game().getPlayer();
+    p.skills.explosion = 1;   // 开启爆炸弹，使死亡爆炸递归成链
+    p.skills.expChance = 6;
+    p.skills.expDmg = 6;
+    p.skills.expRange = 6;
+    p.power = 4;
+    // 在玩家前方堆 60 架小敌机（同屏上限），一发高伤爆炸弹把它们全部引爆
+    for (let i = 0; i < 60; i++) {
+      game().spawnEnemy(14, { hpScale: 1, speedScale: 0, spawnScale: 0, enemyFireScale: 1, fireCdScale: 99 }, 1, 220 + (i % 5) * 10, 300 + Math.floor(i / 5) * 12);
+    }
+    assert.ok(game().enemies.length > 0);
+    game().fireBullet(0, 9999, p, p.x, p.y - p.h / 2, 20, true);
+    // 闪光寿命只有 0.15s（约 9 帧），必须在循环里取峰值，
+    // 跑完 60 帧再读只会读到 0，测不出有没有封顶
+    let peakBlasts = 0, peakRings = 0;
+    for (let i = 0; i < 60 && typeof rafCb === "function"; i++) {
+      rafCb();
+      const fx = game().getFxCounts();
+      peakBlasts = Math.max(peakBlasts, fx.blasts);
+      peakRings = Math.max(peakRings, fx.rings);
+    }
+    assert.ok(peakBlasts <= 24, "爆炸闪光不得超过 24（当前 " + peakBlasts + "）");
+    assert.ok(peakRings <= 48, "爆炸波纹不得超过 48（当前 " + peakRings + "）");
+    assert.ok(game().enemies.length === 0, "60 架敌机应被连锁清空");
+    assert.equal(errors.length, 0, errors.join("\n"));
+    } finally { restoreRandom(); }
+  });
+
+  it("难度档位持久化：切换难度后写入 settings", () => {
+    getSettings().skipTutorial = true;
+    game().resetGame();
+    game().setDifficulty("hard");
+    assert.equal(getSettings().difficulty, "hard", "选中的难度应写入存档");
+    game().setDifficulty("normal");
+    assert.equal(getSettings().difficulty, "normal");
+  });
+
+  // ---------- 回归：死亡后不再被重复结算 ----------
+  // 旧实现里 hitPlayer 不判 lives<=0，死亡动画（2s）一结束还压在身上的敌机
+  // 立刻再打中一次，deathTimer 重置回 2s，进入「死了却永不结算」的死循环，
+  // lives 一路扣成负数。正常对局靠 2.2s 无敌帧掩盖（动画 2s < 无敌 2.2s），
+  // 无敌时间被压缩时必现。
+  it("死亡后 lives 不再下探，且恰好在一段死亡动画后进入结算", () => {
+    getSettings().skipTutorial = true;
+    game().resetGame();
+    const p = game().getPlayer();
+    p.invincibleTime = 0.001;   // 压掉无敌帧，复现旧 bug 的触发条件
+    p.shield = 0;
+    const DIFF = { hpScale: 1, speedScale: 0, spawnScale: 0, enemyFireScale: 1, fireCdScale: 99 };
+    for (let i = 0; i < 6; i++) game().spawnEnemy(14, DIFF, 1, 225 + i * 6, 552);
+    let minLives = Infinity;
+    for (let f = 1; f <= 400; f++) {
+      rafCb();
+      minLives = Math.min(minLives, game().getLives());
+      if (game().state() !== STATE.PLAYING) break;
+    }
+    assert.ok(minLives >= 0, "lives 不得变成负数（实测最低 " + minLives + "）");
+    assert.notEqual(game().state(), STATE.PLAYING, "必须在一段死亡动画后离开 PLAYING");
+    assert.ok(errors.length === 0, errors.join("\n"));
   });
 });

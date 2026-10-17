@@ -77,12 +77,26 @@
   }
   .loader-bar {
     height: 100%; width: 0%;
-    background: #5ee6ff;
+    background: linear-gradient(90deg, #5ee6ff 0%, #8ff2ff 50%, #5ee6ff 100%);
+    background-size: 200% 100%;
     border-radius: 6px;
     transition: width .25s ease;
     box-shadow: 0 0 12px rgba(94,230,255,.8);
+    animation: loaderShimmer 1.6s linear infinite;
   }
-  .loader-text { margin-top: 12px; color: rgba(255,255,255,.6); font-size: 14px; text-shadow: 0 0 6px rgba(0,0,0,.6); }
+  @keyframes loaderShimmer {
+    0% { background-position: 0% 0; }
+    100% { background-position: -200% 0; }
+  }
+  .loader-text { margin-top: 12px; color: rgba(255,255,255,.7); font-size: 14px; text-shadow: 0 0 6px rgba(0,0,0,.6); }
+  .loader-spin {
+    width: 28px; height: 28px; margin: 18px auto 0;
+    border: 3px solid rgba(94,230,255,.2);
+    border-top-color: #5ee6ff;
+    border-radius: 50%;
+    animation: loaderSpin 1s linear infinite;
+  }
+  @keyframes loaderSpin { to { transform: rotate(360deg); } }
   /* ---------- 反馈面板 ---------- */
   .fb-mask {
     position: fixed; inset: 0; z-index: 300;
@@ -126,12 +140,13 @@
 </style>
 </head>
 <body>
-<!-- 加载进度条：资源(模块)加载完成前替代黑屏 -->
+<!-- 加载进度条：资源(模块)加载完成前替代黑屏。慢网络下持续转圈，不报失败 -->
 <div id="loader">
   <div class="loader-card">
     <div class="loader-title">飞机大战</div>
     <div class="loader-track"><div class="loader-bar" id="loaderBar"></div></div>
     <div class="loader-text" id="loaderText">加载中… 0%</div>
+    <div class="loader-spin"></div>
   </div>
 </div>
 <div id="wrap">
@@ -199,53 +214,52 @@
     window.__doneLoading();
   });
 
-  // 2) 进度条缓慢前进到 90%（模拟资源下载），__doneLoading 到 100%
+  // 2) 进度条缓慢前进到 90%（模拟资源下载），__doneLoading 到 100%。
+  //    慢网络下会一直停在 90% 转圈——这是期望行为：宁可让用户等，也不要因为
+  //    「超时」就提示加载失败。模块真正加载完会触发 __doneLoading 直接跳到 100%。
   (function () {
     var bar = document.getElementById('loaderBar');
     var txt = document.getElementById('loaderText');
+    var slowSince = 0;
     window.__loaderIv = setInterval(function () {
       if (window.__loaderDone) return;
       if (window.__loaderProgress < 90) {
+        // 前期快速推进到 90%；停在 90% 后不再增长，等模块就绪
         window.__loaderProgress += 3 + Math.random() * 8;
         if (window.__loaderProgress > 90) window.__loaderProgress = 90;
       }
       if (bar) bar.style.width = Math.round(window.__loaderProgress) + '%';
-      if (txt) txt.textContent = '加载中… ' + Math.round(window.__loaderProgress) + '%';
+      if (txt) {
+        // 卡在 90% 超过 6 秒就改成"仍在加载"提示，但不报失败
+        if (window.__loaderProgress >= 90) {
+          if (slowSince === 0) slowSince = Date.now();
+          if (Date.now() - slowSince > 6000) {
+            txt.textContent = '正在加载资源，请稍候…';
+          } else {
+            txt.textContent = '加载中… ' + Math.round(window.__loaderProgress) + '%';
+          }
+        } else {
+          txt.textContent = '加载中… ' + Math.round(window.__loaderProgress) + '%';
+        }
+      }
     }, 250);
   })();
 
-  // 3) 兜底：超过 8 秒还没跳到 100% → 强制隐藏 loading
-  setTimeout(function () {
-    if (!window.__loaderDone) {
-      console.warn('[plane_war] 加载超时，强制结束 loading');
-      window.__doneLoading();
-    }
-  }, 8000);
-
-  // 4) 如果 12 秒后 game 仍未标记启动成功，说明 ESM 模块整体加载失败（如 file://），显示 fallback
-  setTimeout(function () {
-    if (!window.__gameReady && !window.__loaderDone) {
-      var fb = document.getElementById('fallback');
-      if (fb) fb.style.display = 'flex';
-    }
-  }, 12000);
+  // 3) 不再有"超时强制失败"：网络慢时进度条停在 90% 持续转圈，直到模块就绪。
+  //    唯一会触发 fallback 的是真正的 JS 异常（上面的 error / unhandledrejection）。
 </script>
-<script type="module" src="js/game.v__VERSION__.js"></script>
-<!-- 非 ESM 兜底脚本：ESM 在 file:// 下整块失效，用普通脚本检测 game 是否启动成功 -->
-<script>
-  // 15 秒后若 __gameReady 未被模块标记 → 说明 ESM 整体加载失败（file:// 或不支持 ESM 的浏览器）
-  setTimeout(function () {
-    if (!window.__gameReady) {
-      var fb = document.getElementById('fallback');
-      if (fb) fb.style.display = 'flex';
-    }
-  }, 15000);
-
-  // 兜底：10 秒后 loading 仍未消失 → 强制移除，让 fallback 可见
-  setTimeout(function () {
-    var el = document.getElementById('loader');
-    if (el && el.parentNode) el.parentNode.removeChild(el);
-  }, 10000);
+<!--
+  入口模块：优先加载部署生成的版本化副本（文件名带版本号 = 换路径 = 必然缓存未命中，
+  这是破除 Byethost 按路径缓存旧模块的手段）。
+  失败则回退到源模块 js/game.js——否则本地直接 `python3 -m http.server` 打开
+  一定是 404 + 满屏"加载失败"，而版本化副本只在部署时才生成。
+  用动态 import 而非 <script src>：404 只表现为 Promise reject（已被 catch），
+  不会冒泡成 window error 去误触发上面的错误兜底。
+-->
+<script type="module">
+  import("./js/game.v__VERSION__.js").catch(function () {
+    return import("./js/game.js");
+  });
 </script>
 </body>
 </html>

@@ -103,17 +103,62 @@ describe("modules", () => {
     }
   });
 
-  it("方糖 token 只存在于服务端，不下发到浏览器", () => {
-    // token 一旦出现在前端就会被任意访问者拿去刷微信消息
-    const serverSrc = fs.readFileSync(path.resolve(JS_DIR, "../feedback.php"), "utf8");
-    const m = serverSrc.match(/SCT[A-Za-z0-9]{20,}/);
-    assert.ok(m, "feedback.php 应保存方糖 token");
-    const token = m[0];
-    for (const f of FILES) {
-      assert.ok(!readModule(f).includes(token), `token 泄露到前端模块 ${f}`);
+  it("推送凭据不进仓库、不下发到浏览器", () => {
+    const root = path.resolve(JS_DIR, "..");
+    const serverSrc = fs.readFileSync(path.resolve(root, "feedback.php"), "utf8");
+
+    // 1) feedback.php 本体不得再硬编码 token：它随仓库流转，一旦外泄
+    //    任何拿到的人都能用 token 往你微信推任意内容
+    assert.ok(
+      !/SCT[A-Za-z0-9]{20,}/.test(serverSrc),
+      "feedback.php 不得硬编码方糖 token（应外置到 feedback.secret.php）"
+    );
+
+    // 2) 缺失凭据时必须失败关闭（停用推送而不是 500）
+    assert.ok(
+      /if\s*\(!defined\('SCT_TOKEN'\)\)\s*\{\s*define\('SCT_TOKEN',\s*''\)/.test(serverSrc),
+      "未配置 SCT_TOKEN 时应默认为空串（失败关闭）"
+    );
+
+    // 3) 真正的 token 放在 gitignore 掉的 feedback.secret.php 里
+    const ignore = fs.readFileSync(path.resolve(root, ".gitignore"), "utf8");
+    assert.ok(ignore.includes("feedback.secret.php"), ".gitignore 必须忽略 feedback.secret.php");
+
+    // 4) 前端任何地方都不许出现 token
+    const secretPath = path.resolve(root, "feedback.secret.php");
+    if (fs.existsSync(secretPath)) {
+      const m = fs.readFileSync(secretPath, "utf8").match(/SCT[A-Za-z0-9]{20,}/);
+      if (m) {
+        for (const f of FILES) {
+          assert.ok(!readModule(f).includes(m[0]), `token 泄露到前端模块 ${f}`);
+        }
+        const html = fs.readFileSync(path.resolve(root, "index.html"), "utf8");
+        assert.ok(!html.includes(m[0]), "token 泄露到 index.html");
+      }
     }
-    const html = fs.readFileSync(path.resolve(JS_DIR, "../index.html"), "utf8");
-    assert.ok(!html.includes(token), "token 泄露到 index.html");
+  });
+
+  it("feedback.php 只接受同源请求并做频率限制", () => {
+    const serverSrc = fs.readFileSync(path.resolve(JS_DIR, "../feedback.php"), "utf8");
+    // 旧版是 Access-Control-Allow-Origin: *，等于把接口开放成公共微信推送机
+    assert.ok(
+      !/header\('Access-Control-Allow-Origin:\s*\*'\)/.test(serverSrc),
+      "不得再无条件发送通配 CORS 头（应只对同源回 Access-Control-Allow-Origin）"
+    );
+    assert.ok(/Access-Control-Allow-Origin/.test(serverSrc), "同源时仍需回 CORS 头");
+    assert.ok(/RATE_MAX_REQ/.test(serverSrc), "应具备单 IP 频率限制");
+    assert.ok(/REMOTE_ADDR/.test(serverSrc), "频率限制需按来源 IP 计数");
+  });
+
+  it("feedback.php 对客户端输入做单行化（防日志/推送注入）", () => {
+    const serverSrc = fs.readFileSync(path.resolve(JS_DIR, "../feedback.php"), "utf8");
+    // 内容若含换行就能在按行分隔的日志里伪造多条记录、在 Markdown 推送里伪造标题
+    assert.ok(/function fw_one_line/.test(serverSrc), "应提供单行化清洗函数");
+    assert.ok(/fw_one_line\(\$payload\['content'\]/.test(serverSrc), "content 必须过清洗");
+    assert.ok(
+      /\$ver\s*=\s*fw_one_line\([^)]*\['ver'\]/.test(serverSrc),
+      "ver 必须过清洗（否则可伪造推送标题）"
+    );
   });
 
   it("feedback.php 推送失败不影响反馈落盘", () => {

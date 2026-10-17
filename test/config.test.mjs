@@ -6,6 +6,7 @@ import {
   DAILY_QUESTS, META, POWERUP_DEFS, POWERUP_WEIGHTS_EARLY, POWERUP_WEIGHTS_LATE,
   DIFFICULTY_PRESETS, todayKey, ENEMY_TYPES,
   ENEMY_LEVEL, enemyLevelScale, refireGateDistance, skillMax, BULLET,
+  calcFireRate, calcRangePx,
 } from "../js/config.js";
 
 afterEach(() => {
@@ -110,14 +111,46 @@ describe("config", () => {
   });
 
   // ---------- 射击闸门：射速技能必须真正生效 ----------
-  it("refireGateDistance 与射击间隔联动且不低于下限", () => {
+  it("refireGateDistance 与射击间隔联动且保留最小间距", () => {
     const slow = refireGateDistance(0.5);
     const fast = refireGateDistance(0.25);
     assert.ok(fast < slow, "射速越快，波间距应越小");
     assert.ok(slow <= BULLET.refireDist, "不得超过原闸门距离");
     // 超快射速也要保留最小间距，避免子弹叠成一条线
-    assert.ok(refireGateDistance(0.01) >= 36);
-    assert.ok(refireGateDistance(0.001) >= 36);
+    assert.ok(refireGateDistance(0.01) >= 20);
+    assert.ok(refireGateDistance(0.001) >= 20);
+  });
+
+  it("急速射击不再被距离闸门吃掉大半射速", () => {
+    // 旧下限 36px：子弹 180px/s 时一波要 200ms，而急速的间隔只有 55ms，
+    // 8 秒爆发的实际波频被砍到 1/3.6。下限降到 20px 后差距收敛到 ~1/2。
+    const rapidInterval = 0.055;
+    const gate = refireGateDistance(rapidInterval);
+    const travelSec = gate / (BULLET.baseSpeed * 60);
+    assert.ok(travelSec <= 0.12, "急速状态下波间隔应 ≤120ms（旧实现为 200ms）");
+  });
+
+  it("射击间隔公式只有一份（player 与 UI 共用 calcFireRate）", () => {
+    const p = { power: 1, powerTime: 0, fireRateMul: 1, skills: {}, buffs: {} };
+    // 面板旧公式 (0.16 - power*0.012) 给出 148ms，真值是 560ms
+    const real = calcFireRate(p);
+    assert.ok(Math.abs(real - 0.56) < 1e-9, "默认射速应为 0.56s，实测 " + real);
+    p.skills.rate = 6;
+    p.power = 4;
+    const real2 = calcFireRate(p);
+    assert.ok(Math.abs(real2 - 0.44 * 0.52) < 1e-9, "power4+射速6 时应为 0.2288s，实测 " + real2);
+    p.buffs.rapid = 8;
+    assert.ok(Math.abs(calcFireRate(p) - 0.055) < 1e-9, "急速时应为 0.055s");
+  });
+
+  it("射程由 calcRangePx 唯一决定（HUD 与 fireBullet 不再各写一份）", () => {
+    const p = { skills: {}, level: 1 };
+    assert.equal(calcRangePx(p), BULLET.baseRange);
+    p.skills.range = 10;
+    assert.equal(calcRangePx(p), BULLET.baseRange + 10 * BULLET.rangePerLevel);
+    // 硬上限 = 屏高 + rangeCapMargin
+    p.skills.range = 99;
+    assert.equal(calcRangePx(p), 720 + BULLET.rangeCapMargin);
   });
 
   it("skillMax 返回 SKILLS 的真实上限", () => {

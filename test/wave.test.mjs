@@ -48,19 +48,19 @@ describe("wave", () => {
 
   it("Boss 波按间隔触发一次", () => {
     assert.equal(updateWaves(0, 4, 0), null);
-    // 等级达标后先进 2 秒预警，再正式触发 Boss
+    // 等级达标后先进 3 秒预警（旧 2s 太短），再正式触发 Boss
     assert.equal(updateWaves(0, 5, 0), "bossWarn");
-    assert.equal(updateWaves(2, 5, 0), "boss");
+    assert.equal(updateWaves(3, 5, 0), "boss");
     assert.equal(updateWaves(0, 5, 0), null);
     assert.equal(updateWaves(0, 10, 0), "bossWarn");
-    assert.equal(updateWaves(2, 10, 0), "boss");
+    assert.equal(updateWaves(3, 10, 0), "boss");
   });
 
   it("resetWaves 后可再次召唤 Boss", () => {
     updateWaves(0, 5, 0);
     resetWaves();
     assert.equal(updateWaves(0, 5, 0), "bossWarn");
-    assert.equal(updateWaves(2, 5, 0), "boss");
+    assert.equal(updateWaves(3, 5, 0), "boss");
   });
 
   it("spawnBoss 血量随等级成长", () => {

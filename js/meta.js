@@ -2,7 +2,7 @@
  * meta.js — 元进度系统（星尘货币 / 飞机解锁 / 天赋树）
  * =========================================================== */
 
-import { META, ACHIEVEMENTS, DAILY_QUESTS, SKILLS, SHOP_ITEMS, getShopItemCost, todayKey } from "./config.js";
+import { META, ACHIEVEMENTS, DAILY_QUESTS, SKILLS, SHOP_ITEMS, DIFFICULTY_PRESETS, getShopItemCost, todayKey } from "./config.js";
 
 const STORAGE_KEY = "planeWarMeta";
 
@@ -23,7 +23,7 @@ function defaultMeta() {
     shopLevels: {},         // 系统商城：各道具已购买等级 { id: level }
     achievements: [],       // 已达成成就 id（一次性）
     quests: null,           // { date, progress:{kills,score,runs,boss,powerups}, claimed:[] }
-    settings: { sfxMuted: false, musicMuted: false, skipTutorial: false },
+    settings: { sfxMuted: false, musicMuted: false, skipTutorial: false, difficulty: "normal" },
   };
 }
 
@@ -93,13 +93,28 @@ function sanitizeMeta(raw) {
     sfxMuted: !!s.sfxMuted,
     musicMuted: !!s.musicMuted,
     skipTutorial: !!s.skipTutorial,
+    // 难度档位白名单：非法值（损坏存档/手改）会展开成 undefined 的难度预设
+    difficulty: DIFFICULTY_PRESETS[s.difficulty] ? s.difficulty : "normal",
   };
   return next;
 }
 
 export function getSettings() {
-  if (!metaData.settings) metaData.settings = { sfxMuted: false, musicMuted: false, skipTutorial: false };
+  if (!metaData.settings) {
+    metaData.settings = { sfxMuted: false, musicMuted: false, skipTutorial: false, difficulty: "normal" };
+  }
+  if (!metaData.settings.difficulty) metaData.settings.difficulty = "normal";
   return metaData.settings;
+}
+
+/** 记录选中的难度档位（跨会话保留：此前只存在内存里，刷新就退回 normal） */
+export function setDifficulty(key) {
+  if (!DIFFICULTY_PRESETS[key]) return false;
+  const s = getSettings();
+  if (s.difficulty === key) return true;
+  s.difficulty = key;
+  saveMeta();
+  return true;
 }
 
 export function setSetting(key, value) {
@@ -120,6 +135,12 @@ export function toggleSetting(key) {
 
 export function resetMeta() {
   metaData = defaultMeta();
+  // 先取消待执行的落盘，否则 300ms 后 setTimeout 触发时又会把默认值写回
+  if (saveTimer !== null) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  saveDirty = false;
   try {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(STORAGE_KEY + ".bak");
@@ -142,12 +163,56 @@ export function loadMeta() {
   return metaData;
 }
 
-export function saveMeta() {
+// ---------- 落盘节流 ----------
+// 击杀/拾取/成就等高频事件每秒能触发十几次，若每次都同步 JSON.stringify + 写
+// localStorage，会直接卡主线程（实测满技能 60 秒 = 455 次写入 / 276KB）。
+// 这里把写入合并：saveMeta 只打脏标记，真正落盘由 flushMeta 在 debounce 到期或
+// 页面隐藏时执行；关键节点（结算、购买、解锁）显式调用 flushMeta 立刻落盘。
+const SAVE_DEBOUNCE_MS = 800;
+let saveTimer = null;
+let saveDirty = false;
+
+function writeNow() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(metaData));
   } catch (e) {
     // 配额满/隐私模式：调用方无法感知，至少留下可诊断的日志
     console.error("[meta] 存档写入失败:", e && (e.name || e.message));
+  }
+}
+
+/** 标记存档已改动，最多 800ms 后落盘（合批，避免每次击杀都同步写） */
+export function saveMeta() {
+  saveDirty = true;
+  if (saveTimer !== null) return;
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    if (!saveDirty) return;
+    saveDirty = false;
+    writeNow();
+  }, SAVE_DEBOUNCE_MS);
+}
+
+/** 立刻落盘（结算 / 购买 / 解锁 / 页面隐藏等必须不丢数据的场合） */
+export function flushMeta() {
+  if (saveTimer !== null) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  if (!saveDirty) return;
+  saveDirty = false;
+  writeNow();
+}
+
+// 页面被切后台/关闭/刷新时强制落盘，避免攒着的改动随标签页一起消失
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+  const flush = () => flushMeta();
+  window.addEventListener("pagehide", flush);
+  window.addEventListener("beforeunload", flush);
+  if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) flushMeta();
+    });
   }
 }
 
@@ -160,7 +225,7 @@ export function earnStardust(score) {
   // 每日任务：本局次数与得分
   questEvent("runs", 1);
   questEvent("score", score);
-  saveMeta();
+  flushMeta();   // 一局结算：必须立刻落盘，否则切后台丢失整局收益
   return amount;
 }
 
@@ -177,7 +242,7 @@ export function spendStardust(amount) {
   if (amount <= 0) return true;
   if (metaData.stardust < amount) return false;
   metaData.stardust -= amount;
-  saveMeta();
+  flushMeta();   // 花星尘是低频但必须立刻生效的操作
   return true;
 }
 
@@ -195,7 +260,6 @@ export function discoverSkill(id) {
   return false;
 }
 export function getDiscoveredSkills() { return metaData.discoveredSkills; }
-export function getDiscoveredSkillCount() { return metaData.discoveredSkills.length; }
 
 // ---------- 道具图鉴 ----------
 export function discoverPowerup(id) {
@@ -207,7 +271,6 @@ export function discoverPowerup(id) {
   return false;
 }
 export function getDiscoveredPowerups() { return metaData.discoveredPowerups; }
-export function getDiscoveredPowerupCount() { return metaData.discoveredPowerups.length; }
 
 // ---------- 飞机解锁 ----------
 export function isAircraftUnlocked(id) {
@@ -219,11 +282,10 @@ export function unlockAircraft(id) {
   if (!cfg || metaData.stardust < cfg.cost || isAircraftUnlocked(id)) return false;
   metaData.stardust -= cfg.cost;
   metaData.unlockedAircraft.push(id);
-  saveMeta();
+  flushMeta();
   return true;
 }
 
-export function getUnlockedAircraftIds() { return metaData.unlockedAircraft; }
 
 // ---------- 选中飞机 ----------
 export function getSelectedAircraft() {
@@ -259,7 +321,7 @@ export function purchaseTalent(id) {
   if (cfg.requires && !isTalentPurchased(cfg.requires)) return false;
   metaData.stardust -= cfg.cost;
   metaData.purchasedTalents.push(id);
-  saveMeta();
+  flushMeta();
   return true;
 }
 
@@ -361,6 +423,7 @@ export function claimQuest(id) {
   if ((q.progress[def.type] || 0) < def.target) return 0;
   q.claimed.push(id);
   bonusStardust(def.reward);
+  flushMeta();
   return def.reward;
 }
 
@@ -400,7 +463,6 @@ export function getAchievementView() {
 }
 
 // ---------- 系统商城 ----------
-export function getShopLevels() { return metaData.shopLevels || {}; }
 export function getShopLevel(id) { return metaData.shopLevels?.[id] || 0; }
 
 export function purchaseShopItem(id) {
@@ -413,7 +475,7 @@ export function purchaseShopItem(id) {
   metaData.stardust -= cost;
   if (!metaData.shopLevels) metaData.shopLevels = {};
   metaData.shopLevels[id] = lv + 1;
-  saveMeta();
+  flushMeta();
   return true;
 }
 

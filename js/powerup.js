@@ -2,7 +2,7 @@
  * powerup.js — 道具系统
  * =========================================================== */
 
-import { W, H, POWERUP_DEFS, POWERUP_WEIGHTS_EARLY, POWERUP_WEIGHTS_LATE, SKILLS, POWERUP_DROP, TAU } from "./config.js";
+import { W, H, POWERUP_DEFS, POWERUP_WEIGHTS_EARLY, POWERUP_WEIGHTS_LATE, SKILLS, POWERUP_DROP, TAU, DIFFICULTY } from "./config.js";
 import { rand, weightedPick, setf, clamp, roundRect } from "./utils.js";
 import { spawnParticles } from "./particles.js";
 import { applySkill } from "./skill.js";
@@ -33,6 +33,8 @@ export let gachaAnim = null;  // { phase: 'rolling'|'reveal', t: number, maxT: n
  * @param {number} [dropBonus] 掉落率加成（爆率技能/+buff/天赋叠加，概率加算）
  */
 export function spawnPowerup(x, y, level = 1, dropBonus = 0, isBoss = false) {
+  // 同屏道具上限：连锁清屏时一帧掉几十个会糊屏 + 砸帧率（每个都有 shadowBlur）
+  if (powerups.length >= DIFFICULTY.powerupCap) return;
   if (Math.random() < POWERUP_DROP.base + dropBonus) {
     let type;
     if (isBoss) {
@@ -161,23 +163,33 @@ function pickAnySkill(playerSkills) {
 }
 
 export function drawPowerups(ctx) {
+  // shadowBlur 是 Canvas 上最贵的操作之一，道具一多就关掉（与 drawBullets 同款策略）：
+  // 六边形底板与图标不依赖辉光，照画不误。
+  const useShadow = powerups.length <= 8;
   for (const p of powerups) {
     const def = POWERUP_DEFS[p.type];
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.rotate(Math.sin(p.t * 3) * 0.2);
-    ctx.shadowBlur = 14;
-    ctx.shadowColor = def.color;
+    if (useShadow) {
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = def.color;
+    }
     
     // 技能类道具特效（金色光柱+粒子）
     if (def.unique) {
-      // 金色光柱
+      // 金色光柱：渐变对象每帧重建，道具堆积时开销可观，
+      // 非发光模式（道具多）下改用纯色近似
       const pillarH = 80 + Math.sin(p.t * 4) * 8;
-      const grad = ctx.createLinearGradient(0, -pillarH, 0, 0);
-      grad.addColorStop(0, "rgba(255,215,0,0)");
-      grad.addColorStop(0.5, "rgba(255,215,0,0.25)");
-      grad.addColorStop(1, "rgba(255,215,0,0.6)");
-      ctx.fillStyle = grad;
+      if (useShadow) {
+        const grad = ctx.createLinearGradient(0, -pillarH, 0, 0);
+        grad.addColorStop(0, "rgba(255,215,0,0)");
+        grad.addColorStop(0.5, "rgba(255,215,0,0.25)");
+        grad.addColorStop(1, "rgba(255,215,0,0.6)");
+        ctx.fillStyle = grad;
+      } else {
+        ctx.fillStyle = "rgba(255,215,0,.34)";
+      }
       ctx.beginPath();
       ctx.moveTo(-8, 0);
       ctx.lineTo(-4, -pillarH);
@@ -186,16 +198,17 @@ export function drawPowerups(ctx) {
       ctx.closePath();
       ctx.fill();
       
-      // 旋转粒子环
-      const particleCount = 8;
-      for (let i = 0; i < particleCount; i++) {
+      // 旋转粒子环：8 个小圆合成一条 path 一次 fill，替代 8 次独立绘制
+      ctx.fillStyle = "#ffd700";
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
         const a = p.t * 3 + i * Math.PI * 2 / 8;
         const r = 22 + Math.sin(p.t * 2 + i) * 3;
-        ctx.fillStyle = "#ffd700";
-        ctx.beginPath();
-        ctx.arc(Math.cos(a) * r, Math.sin(a) * r, 2, 0, Math.PI * 2);
-        ctx.fill();
+        const cx = Math.cos(a) * r, cy = Math.sin(a) * r;
+        ctx.moveTo(cx + 2, cy);
+        ctx.arc(cx, cy, 2, 0, Math.PI * 2);
       }
+      ctx.fill();
     }
     
     // 六边形底板

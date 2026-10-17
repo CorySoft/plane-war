@@ -2,7 +2,10 @@
  * ui.js — 菜单 / 结束 / 升级选择 / 暂停 / 伤害飘字
  * =========================================================== */
 
-import { W, H, TAU, SKILLS, POWERUP_DEFS, SHOP_ITEMS, getShopItemCost, ACHIEVEMENTS, META, skillLevelColor } from "./config.js";
+import {
+  W, H, TAU, SKILLS, POWERUP_DEFS, SHOP_ITEMS, getShopItemCost, ACHIEVEMENTS, META,
+  skillLevelColor, calcFireRate, calcRangePx, calcCritChance,
+} from "./config.js";
 import { clamp, roundRect, setf } from "./utils.js";
 import { glowText, softPanel, lineBtn, bar, hexToRgba, C, pulse, veil } from "./theme.js";
 import { APP_VERSION } from "./version.js";
@@ -85,13 +88,40 @@ export function updateStars(dt) {
   }
 }
 
+// 星野按「颜色 × 透明度档位」分桶批量绘制。
+// 旧实现是 90 颗逐颗：每颗都要拼一次 `rgba(...)` 模板字符串（每帧 90 次字符串分配
+// 与 fillStyle 解析）+ 一次 beginPath/arc/fill，菜单/暂停/结算态也照样全量跑。
+// 分桶后每帧只有「桶数」次 fill，视觉上与逐颗绘制无差别。
+const STAR_TINTS = ["210,228,255", "190,225,255", "255,236,190"];
+const STAR_ALPHA_STEPS = 6;
+
 export function drawStars(ctx, frame) {
+  // 桶：tint 索引 × alpha 档位 → 星体数组（复用，避免每帧重建）
+  if (!drawStars._buckets) {
+    drawStars._buckets = [];
+    for (let i = 0; i < STAR_TINTS.length * STAR_ALPHA_STEPS; i++) drawStars._buckets.push([]);
+  }
+  const buckets = drawStars._buckets;
+  for (const b of buckets) b.length = 0;
+
   for (const s of stars) {
     const a = 0.45 + 0.4 * Math.sin(frame * 0.04 + s.tw);
-    const rgb = s.r > 1.6 ? "255,236,190" : (s.r > 1.2 ? "190,225,255" : "210,228,255");
-    ctx.fillStyle = `rgba(${rgb},${a})`;
+    const tint = s.r > 1.6 ? 2 : (s.r > 1.2 ? 1 : 0);
+    // 透明度量化：0.05~0.85 → 0..5
+    const step = Math.min(STAR_ALPHA_STEPS - 1, Math.max(0, Math.round((a - 0.05) / 0.8 * (STAR_ALPHA_STEPS - 1))));
+    buckets[tint * STAR_ALPHA_STEPS + step].push(s);
+  }
+
+  for (let i = 0; i < buckets.length; i++) {
+    const list = buckets[i];
+    if (list.length === 0) continue;
+    const beat = 0.05 + 0.8 * ((i % STAR_ALPHA_STEPS) / (STAR_ALPHA_STEPS - 1));
+    ctx.fillStyle = "rgba(" + STAR_TINTS[(i / STAR_ALPHA_STEPS) | 0] + "," + beat.toFixed(2) + ")";
     ctx.beginPath();
-    ctx.arc(s.x, s.y, s.r, 0, TAU);
+    for (const s of list) {
+      ctx.moveTo(s.x + s.r, s.y);
+      ctx.arc(s.x, s.y, s.r, 0, TAU);
+    }
     ctx.fill();
   }
 }
@@ -152,6 +182,15 @@ export const getHangarConfirm = () => hangarConfirm;
 export function getHangarConfirmYesButton() { return btnHangarConfirmYesRect; }
 export function getHangarConfirmNoButton() { return btnHangarConfirmNoRect; }
 
+// 天赋购买确认框（与机库同款，避免误触花掉大额星尘）
+let talentConfirm = null;   // { id, name, cost, desc }
+let btnTalentConfirmYesRect = null;
+let btnTalentConfirmNoRect = null;
+export const setTalentConfirm = v => { talentConfirm = v; };
+export const getTalentConfirm = () => talentConfirm;
+export function getTalentConfirmYesButton() { return btnTalentConfirmYesRect; }
+export function getTalentConfirmNoButton() { return btnTalentConfirmNoRect; }
+
 // 技能图鉴滚动（卡片网格超过可视区时可滚动，返回按钮固定在视口之下）
 let codexScroll = 0;        // 当前滚动偏移(像素)
 let codexMaxScroll = 0;     // 最大滚动量（内容高 - 视口高，>0 时才显示滚动条）
@@ -179,6 +218,7 @@ export const setMenuPage = p => {
   menuPage = p;
   // 切页时清理弹窗（机库购买确认 / 清除缓存确认 / 详情卡片），防止残留跨页
   setHangarConfirm(null);
+  setTalentConfirm(null);
   setShowClearCache(false);
   setDetailCard(null);
   if (p !== "codex" && p !== "powerupCodex") codexScroll = 0;
@@ -340,8 +380,7 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = [], pla
   const mw = ctx.measureText ? (ctx.measureText(starStr).width || starStr.length * 15) : starStr.length * 15;
   const sw = mw + 30;
   softPanel(ctx, W / 2 - sw / 2, H * 0.215 - 10, sw, 30, 15, {
-    top: "rgba(200,150,255,.34)", mid: "rgba(64,40,128,.42)",
-    bottom: "rgba(28,16,66,.62)", border: "rgba(208,166,255,.7)", glow: 10,
+    mid: "rgba(64,40,128,.42)", border: "rgba(208,166,255,.7)", glow: 10,
   });
   glowText(ctx, {
     text: starStr, x: W / 2, y: H * 0.215 + 5, size: 15, weight: "bold",
@@ -573,7 +612,7 @@ function drawSkillCodex(ctx, discovered, player) {
     const visTop = Math.max(y, codexViewport.y);
     const visBot = Math.min(y + cardH, codexViewport.y + codexViewport.h);
     if (visBot > visTop) {
-      codexCardRects.push({ x: { x, y: visTop, w: cardW, h: visBot - visTop }, skill: s, got });
+      codexCardRects.push({ rect: { x, y: visTop, w: cardW, h: visBot - visTop }, skill: s, got });
     }
   }
   ctx.restore();
@@ -765,7 +804,7 @@ function drawPowerupCodex(ctx, discovered) {
     const visTop = Math.max(y, codexViewport.y);
     const visBot = Math.min(y + cardH, codexViewport.y + codexViewport.h);
     if (visBot > visTop) {
-      powerupCardRects.push({ x: { x, y: visTop, w: cardW, h: visBot - visTop }, key: k, def, got });
+      powerupCardRects.push({ rect: { x, y: visTop, w: cardW, h: visBot - visTop }, key: k, def, got });
     }
   }
   ctx.restore();
@@ -1026,8 +1065,8 @@ export function drawGameOver(ctx, score, best, isNewBest = false) {
   // 成绩玻璃面板
   const py = H * 0.40, ph = 112, pw = Math.min(304, W - 56), px = W / 2 - pw / 2;
   softPanel(ctx, px, py, pw, ph, 16, {
-    top: "rgba(255,120,120,.16)", mid: "rgba(24,16,36,.5)",
-    bottom: "rgba(8,6,16,.9)", border: isNewBest ? "rgba(255,209,102,.65)" : "rgba(255,255,255,.18)",
+    mid: "rgba(24,16,36,.5)",
+    border: isNewBest ? "rgba(255,209,102,.65)" : "rgba(255,255,255,.18)",
     glow: isNewBest ? 16 : 4,
   });
 
@@ -1192,13 +1231,9 @@ export function drawPauseButton(ctx) {
   btnPauseRect = { x: bx, y: by, w: bw, h: bh };
 }
 
-/** 详情卡片：点击图鉴卡片后弹出 */
-let detailCloseRect = null;
-export function getDetailCloseRect() { return detailCloseRect; }
-
+/** 详情卡片：点击图鉴卡片后弹出（关闭走"点击任意位置"，无需命中矩形） */
 export function drawDetailCard(ctx) {
   if (!detailCard) return;
-  detailCloseRect = null;
   const { type, data } = detailCard;
 
   // 半透明遮罩
@@ -1269,9 +1304,6 @@ export function drawDetailCard(ctx) {
   ctx.fillStyle = "rgba(255,255,255,.6)";
   setf(ctx, "bold 13px 'sans-serif'");
   ctx.fillText("点击任意位置关闭", cx + cw - 12, cy + 6);
-
-  // 整个卡片可关闭
-  detailCloseRect = { x: cx, y: cy, w: cw, h: ch };
 }
 
 export function drawPause(ctx, player) {
@@ -1291,29 +1323,32 @@ export function drawPause(ctx, player) {
     const lineH = 22;
     // 属性区域玻璃底板（衬托在战局画面上）
     softPanel(ctx, 16, H * 0.20, W - 32, H * 0.51, 18, {
-      top: "rgba(255,209,102,.05)", mid: "rgba(14,18,36,.48)",
-      bottom: "rgba(5,7,18,.85)", border: "rgba(255,209,102,.2)", glow: 2,
+      mid: "rgba(14,18,36,.48)", border: "rgba(255,209,102,.2)", glow: 2,
     });
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     setf(ctx, "bold 14px 'sans-serif'");
 
-    // 计算实际属性
-    const frMul = player.fireRateMul || 1;
-    const baseFireRate = (0.16 - player.power * 0.012) * (1 - 0.08 * (player.skills.rate || 0)) * frMul;
-    const rapidFireRate = baseFireRate * 0.5;
-    const dps = Math.round((1 + (player.skills.dmg || 0)) / baseFireRate * 10) / 10;
+    // 实际属性：全部走 config.js 的共享公式函数。
+    // 旧实现在这里另抄了一份射速公式 (0.16 - power*0.012)，
+    // 与 player.js 的真值 (0.56 - (power-1)*0.04) 差 3.8 倍，面板显示 148ms 实为 560ms。
+    const baseFireRate = calcFireRate(player);
+    const rangeM = Math.round(calcRangePx(player) / 25);
     const moveSpd = Math.round(player.speed * (1 + 0.12 * (player.skills.move || 0)) * 10) / 10;
-    const rangePx = Math.min(250 + (player.skills.range || 0) * 50 + ((player.level || 1) - 1) * 2.5, H + 80);
-    const rangeM = Math.round(rangePx / 25);
+    const critPct = Math.round(calcCritChance(player) * 100);
+    // 单发主弹伤害：与 player.js getShootPattern 中主弹的算法保持一致
+    const shotDmg = Math.round((1 + (player.skills.dmg || 0) + (player.talentDmg || 0)) * (player.baseDmgMul || 1));
+    const dps = Math.round(shotDmg / baseFireRate * 10) / 10;
 
     const stats = [
-      ["♥ 生命", player._maxLivesUpdate ? (player.baseHp + (player.skills.maxhp || 0)) : player.baseHp, C.pink],
-      ["⚔ 攻击", 1 + (player.skills.dmg || 0), C.gold],
+      ["♥ 生命", player.baseHp + (player.skills.maxhp || 0), C.pink],
+      ["⚔ 攻击", shotDmg, C.gold],
       ["🔥 射速", (baseFireRate * 1000).toFixed(0) + "ms", C.gold],
       ["🚀 移速", moveSpd, C.cyanSoft],
       ["📏 射程", rangeM + "m", C.cyanSoft],
-      ["🎯 暴击", Math.round(((player.skills.crit || 0) * 12 + (player.talentCrit || 0) * 100)) + "%", C.pinkSoft],
+      ["🎯 暴击", critPct + "%", C.pinkSoft],
+      // 多通道/散射/连射会再放大实际输出，这里只算主弹道，作为一个可横向比对的基准
+      ["💥 DPS", dps, C.gold],
     ];
 
     let sy = py;
@@ -1378,16 +1413,24 @@ export function drawPause(ctx, player) {
   btnPauseQuitRect = { x: bx2, y: by2, w: bw2, h: bh2 };
 }
 
-export function drawToast(ctx, toast) {
+/**
+ * Toast 提示。
+ * @param {number} [yFrac] 纵向位置（屏高比例）。
+ *   默认 0.38；结算/复活界面必须下移，否则横幅会正好压在
+ *   "游 戏 结 束"（H*0.30，50px 字）与成绩面板（H*0.40）上——
+ *   而成就几乎必然在结算瞬间达成，等于每局都能看到这次重叠。
+ */
+export function drawToast(ctx, toast, yFrac = 0.38) {
   if (!toast || toast.t <= 0) return;
   const a = clamp(toast.t / 1.2, 0, 1);
   const size = 30;
+  const cy = H * yFrac;
   ctx.save();
   ctx.globalAlpha = a;
   setf(ctx, "bold " + size + "px 'sans-serif'");
   const mw = ctx.measureText ? (ctx.measureText(toast.text).width || toast.text.length * size) : toast.text.length * size;
   const w = mw + 56, h = 54;
-  const x = W / 2 - w / 2, y = H * 0.38 - h / 2;
+  const x = W / 2 - w / 2, y = cy - h / 2;
   roundRect(ctx, x, y, w, h, h / 2);
   ctx.fillStyle = hexToRgba(toast.color, 0.22);
   ctx.fill();
@@ -1398,7 +1441,7 @@ export function drawToast(ctx, toast) {
   ctx.stroke();
   ctx.shadowBlur = 0;
   glowText(ctx, {
-    text: toast.text, x: W / 2, y: H * 0.38, size, weight: "bold",
+    text: toast.text, x: W / 2, y: cy, size, weight: "bold",
     color: toast.color, blur: 14, align: "center", baseline: "middle", fontFamily: "'sans-serif'",
   });
   ctx.restore();
@@ -1556,7 +1599,7 @@ function drawAchieve(ctx) {
     ctx.fillStyle = "rgba(255,255,255,.5)";
     setf(ctx, "11px 'sans-serif'");
     ctx.fillText(v.def.desc, x + cardW / 2, y + cardH * 0.72);
-    achieveCardRects.push({ x: { x, y, w: cardW, h: cardH }, def: v.def, achieved: v.achieved });
+    achieveCardRects.push({ rect: { x, y, w: cardW, h: cardH }, def: v.def, achieved: v.achieved });
   }
 
   // 返回按钮
@@ -1672,4 +1715,68 @@ export function drawHangarConfirm(ctx) {
   setf(ctx, "bold 16px 'sans-serif'");
   ctx.fillText("取消", bx2 + bw / 2, by + bh / 2 + 1);
   btnHangarConfirmNoRect = { x: bx2, y: by, w: bw, h: bh };
+}
+
+/** 天赋购买确认框：与机库同款布局，多一行天赋描述 */
+export function drawTalentConfirm(ctx) {
+  if (!talentConfirm) return;
+  btnTalentConfirmYesRect = null;
+  btnTalentConfirmNoRect = null;
+
+  ctx.fillStyle = "rgba(5,7,15,.82)";
+  ctx.fillRect(0, 0, W, H);
+
+  const cw = 300, ch = 240;
+  const cx = W / 2 - cw / 2, cy = H * 0.26;
+  ctx.fillStyle = "rgba(24,32,52,.98)";
+  ctx.strokeStyle = C.lilac;     // 天赋主题色：紫
+  ctx.lineWidth = 2.5;
+  roundRect(ctx, cx, cy, cw, ch, 14);
+  ctx.fill(); ctx.stroke();
+
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = C.lilac;
+  setf(ctx, "bold 22px 'sans-serif'");
+  ctx.fillText("确认解锁天赋", W / 2, cy + 34);
+
+  ctx.fillStyle = C.white;
+  setf(ctx, "bold 17px 'sans-serif'");
+  ctx.fillText("天赋：" + (talentConfirm.name || ""), W / 2, cy + 70);
+
+  ctx.fillStyle = "rgba(255,255,255,.7)";
+  setf(ctx, "13px 'sans-serif'");
+  // 描述按 24 字宽折行，避免超出卡片
+  const desc = talentConfirm.desc || "";
+  for (let i = 0; i < desc.length; i += 24) {
+    ctx.fillText(desc.slice(i, i + 24), W / 2, cy + 96 + Math.floor(i / 24) * 18);
+  }
+
+  ctx.fillStyle = C.lilacSoft;
+  setf(ctx, "15px 'sans-serif'");
+  ctx.fillText("花费 " + talentConfirm.cost + " 星尘", W / 2, cy + 150);
+  ctx.fillStyle = "rgba(255,255,255,.6)";
+  ctx.fillText("当前星尘 ✦ " + getStardust(), W / 2, cy + 172);
+
+  const bw = 108, bh = 44, by = cy + ch - 56;
+  const bx1 = W / 2 - 132;
+  ctx.fillStyle = "rgba(255,107,107,.15)";
+  ctx.strokeStyle = C.redSoft;
+  ctx.lineWidth = 2;
+  roundRect(ctx, bx1, by, bw, bh, 11);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = C.redSoft;
+  setf(ctx, "bold 16px 'sans-serif'");
+  ctx.fillText("确认", bx1 + bw / 2, by + bh / 2 + 1);
+  btnTalentConfirmYesRect = { x: bx1, y: by, w: bw, h: bh };
+
+  const bx2 = W / 2 + 24;
+  ctx.fillStyle = hexToRgba(C.cyan, 0.12);
+  ctx.strokeStyle = C.cyan;
+  ctx.lineWidth = 2;
+  roundRect(ctx, bx2, by, bw, bh, 11);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = C.cyan;
+  setf(ctx, "bold 16px 'sans-serif'");
+  ctx.fillText("取消", bx2 + bw / 2, by + bh / 2 + 1);
+  btnTalentConfirmNoRect = { x: bx2, y: by, w: bw, h: bh };
 }

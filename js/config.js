@@ -95,6 +95,9 @@ export const BULLET = {
   explosionMaxChainDepth: 2,
   explosionParticlesPerHit: 8,
   fxRingsCap: 48,
+  // 爆炸闪光数量上限：每个闪光每帧都要新建一次径向渐变，
+  // 旧实现只对 fxRings 封顶、漏了这个，连锁清屏时一帧几十个渐变直接砸帧率
+  fxBlastsCap: 24,
   // 天基武器（子弹出膛后加速）
   orbitalAccel: 0.035,          // 每帧加速度基数
   orbitalAccelPerLevel: 0.015,  // 每级额外加速度
@@ -131,7 +134,38 @@ export function enemyLevelScale(elvl) {
  */
 export function refireGateDistance(fireRate) {
   const px = BULLET.baseSpeed * 60 * Math.max(0.02, fireRate);
-  return Math.min(BULLET.refireDist, Math.max(36, px));
+  // 下限 36 → 20：旧下限会把「急速射击」(间隔 55ms) 的波频硬压到 200ms 一波，
+  // 8 秒爆发直接少掉 2/3。同屏子弹数量的最终闸门是 BULLET.screenCap，这里不必再卡一道。
+  return Math.min(BULLET.refireDist, Math.max(20, px));
+}
+
+/**
+ * 当前玩家射击间隔(秒) —— 射击节奏的唯一真源。
+ * player.js 的开火逻辑、ui.js 的暂停面板/HUD 展示都读它。
+ * 旧实现在 ui.js 里另抄了一份 (0.16 - power*0.012)，与真值差 3.8 倍。
+ * 基础间隔 0.56 是两度放慢的结果（0.16 → 0.28 → 0.56），起步约 2 发/秒，前期偏吃力。
+ */
+export function calcFireRate(player) {
+  const frMul = player.fireRateMul || 1;
+  if (player.buffs.rapid > 0) return 0.055 * frMul;
+  if (player.buffs.madHunt > 0) return 0.045 * frMul;
+  const power = Math.max(1, player.power || 1);
+  return (0.56 - (power - 1) * 0.04) * (1 - 0.08 * (player.skills.rate || 0)) * frMul;
+}
+
+/** 子弹射程(像素)：fireBullet、HUD、暂停面板共用，避免三处各写一份常量而漂移 */
+export function calcRangePx(player) {
+  const rangeLvl = player.skills.range || 0;
+  const levelBonus = ((player.level || 1) - 1) * BULLET.levelRangePerLevel;
+  return Math.min(
+    BULLET.baseRange + rangeLvl * BULLET.rangePerLevel + levelBonus,
+    H + BULLET.rangeCapMargin
+  );
+}
+
+/** 当前暴击率(0~1)：HUD/暂停面板共用，避免把 0.12 抄成 12 再乘 100 */
+export function calcCritChance(player) {
+  return BULLET.critChance * (player.skills.crit || 0) + (player.talentCrit || 0);
 }
 
 // ---------- 敌机 ----------
@@ -262,6 +296,7 @@ export const DIFFICULTY = {
   swarmInterval: 30,        // 虫群波间隔(秒)
   swarmWarnTime: 3,         // 虫群波提前预警时间(秒)
   swarmMinLevel: 2,        // 虫群波最低难度等级
+  powerupCap: 30,           // 同屏道具上限：连锁清屏一帧掉几十个会糊屏幕 + 砸帧率
 };
 
 // ---------- 难度档位 ----------

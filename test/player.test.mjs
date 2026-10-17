@@ -216,4 +216,59 @@ describe("player", () => {
     assert.ok(live[0].respawn > 0);
     assert.equal(getOrbitBullets(p).length, live.length - 1);
   });
+
+  // ---------- 回归：waveCap 裁剪不再饿死副武器 ----------
+  it("侧翼炮在满散射+高火力下仍出弹（旧实现被主弹道占满 16 发挤到 0）", () => {
+    const p = dummyPlayer({ power: 4, skills: { scatter: 6, volley: 6, dual: 4 } });
+    const shots = getShootPattern(p);
+    assert.ok(shots.length <= BULLET.waveCap, "仍受单波上限约束");
+    // 侧翼炮的弹道是 ±0.05（近水平），散射/连射都不会产生这个角度；
+    // 只要副武器活着，就一定存在恰好成对的 ±0.05 两发
+    const side = shots.filter(s => Math.abs(Math.abs(s.angle) - 0.05) < 1e-9);
+    assert.ok(side.length >= 2, "侧翼炮应至少出 1 对（当前 0 发 = 技能完全失效）");
+    assert.equal(side.length % 2, 0, "侧翼炮必须成对出现");
+  });
+
+  it("左右护法在满散射+高火力下仍出弹", () => {
+    const p = dummyPlayer({ power: 4, skills: { scatter: 6, volley: 6, sideBullets: 5 } });
+    const shots = getShootPattern(p);
+    // 左右护法是 ±90° 水平弹
+    const side = shots.filter(s => Math.abs(Math.abs(s.angle) - Math.PI / 2) < 1e-9);
+    assert.ok(side.length >= 2, "左右护法应至少出 1 对");
+    assert.equal(side.length % 2, 0, "左右护法必须成对出现");
+  });
+
+  it("副武器名额与主弹道名额此消彼长但不越界", () => {
+    for (const power of [1, 2, 3, 4]) {
+      const p = dummyPlayer({ power, skills: { scatter: 6, volley: 6, dual: 4, sideBullets: 5 } });
+      p.buffs.rapid = 8;
+      const shots = getShootPattern(p);
+      assert.ok(shots.length <= BULLET.waveCap, `power=${power} 超上限: ${shots.length}`);
+      assert.ok(shots.length > 0, `power=${power} 应有子弹`);
+    }
+  });
+
+  // ---------- 回归：散射不再固定右偏 ----------
+  it("散射在火力≥2 时不再整体右偏（相邻两轮符号互补）", () => {
+    const p = dummyPlayer({ power: 4, skills: { scatter: 4 } });
+    // 旧实现固定 +0.06/-0.12/+0.18/-0.24，被 perCh 裁剪后只剩最近的一发，
+    // 4 个通道齐刷刷右偏。现在按射击次数翻转整组符号，相邻两轮应左右互补。
+    const sums = [];
+    for (let i = 0; i < 20; i++) {
+      const shots = getShootPattern(p);
+      // 只统计散射弹（dmg 为半价），主弹 angle 属于通道本身、抵消后为 0
+      const scatterOnly = shots.filter(s => s.dmg !== undefined);
+      sums.push(scatterOnly.reduce((acc, s) => acc + s.angle, 0));
+    }
+    // 20 轮累计偏移应接近 0（允许少量随机偏差）
+    const total = sums.reduce((a, b) => a + b, 0);
+    assert.ok(Math.abs(total) < 1e-6, "散射长期偏移应为 0，实测 " + total.toFixed(6));
+  });
+
+  it("散射弹不与主弹同角重合", () => {
+    const p = dummyPlayer({ power: 1, skills: { scatter: 6 } });
+    const shots = getShootPattern(p);
+    const zeros = shots.filter(s => Math.abs(s.angle) < 1e-9).length;
+    assert.equal(zeros, 1, "只有主弹位于 0 度");
+  });
 });

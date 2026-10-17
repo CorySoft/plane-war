@@ -5,13 +5,13 @@ import { resetStorage } from "./_env.mjs";
 import { META, ACHIEVEMENTS, DAILY_QUESTS, SKILLS, todayKey } from "../js/config.js";
 import {
   loadMeta, saveMeta, resetMeta, earnStardust, bonusStardust, spendStardust,
-  getStardust, getBest, discoverSkill, getDiscoveredSkillCount,
+  getStardust, getBest, discoverSkill, getDiscoveredSkills,
   unlockAircraft, isAircraftUnlocked, setSelectedAircraft, getSelectedAircraft,
   getSelectedAircraftConfig, purchaseTalent, isTalentPurchased, getTalentEffects,
   addKill, addBossKill, addPowerupCollected, getStats,
   ensureQuests, questEvent, claimQuest, getQuestView,
   checkAchievements, getAchievementView,
-  getSettings, setSetting, toggleSetting,
+  getSettings, setSetting, toggleSetting, flushMeta,
 } from "../js/meta.js";
 
 describe("meta", () => {
@@ -61,7 +61,7 @@ describe("meta", () => {
   it("技能图鉴幂等", () => {
     assert.equal(discoverSkill("dmg"), true);
     assert.equal(discoverSkill("dmg"), false);
-    assert.equal(getDiscoveredSkillCount(), 1);
+    assert.equal(getDiscoveredSkills().length, 1);
   });
 
   it("每日任务跨天重置并可领取", () => {
@@ -133,7 +133,9 @@ describe("meta", () => {
   it("缺失 settings 恢复默认", () => {
     localStorage.setItem("planeWarMeta", JSON.stringify({ stardust: 5 }));
     const data = loadMeta();
-    assert.deepEqual(data.settings, { sfxMuted: false, musicMuted: false, skipTutorial: false });
+    assert.deepEqual(data.settings, {
+      sfxMuted: false, musicMuted: false, skipTutorial: false, difficulty: "normal",
+    });
   });
 
   it("非法飞机 id 被清洗回 falcon（防 speed=undefined→坐标 NaN）", () => {
@@ -185,5 +187,49 @@ describe("meta", () => {
     const data = loadMeta();
     assert.equal(data.stardust, 0);
     assert.equal(localStorage.getItem("planeWarMeta.bak"), broken, "损坏原始数据必须备份");
+  });
+});
+
+// ---------- 落盘节流：高频事件不再每次击杀都同步写 localStorage ----------
+describe("meta 落盘节流", () => {
+  beforeEach(() => {
+    resetStorage();
+    resetMeta();
+  });
+
+  it("saveMeta 只打脏标记，不立刻写盘", () => {
+    localStorage.setItem("planeWarMeta", '{"stardust":1}');
+    loadMeta();
+    let writes = 0;
+    const orig = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = (...a) => { writes++; return orig(...a); };
+    try {
+      bonusStardust(1);
+      assert.equal(writes, 0, "saveMeta 应当只打脏标记");
+      flushMeta();
+      assert.equal(writes, 1, "flushMeta 应当真正落盘");
+      assert.equal(JSON.parse(localStorage.getItem("planeWarMeta")).stardust, 2);
+    } finally {
+      localStorage.setItem = orig;
+    }
+  });
+
+  it("页面隐藏时强制落盘（visibilitychange / pagehide）", () => {
+    localStorage.setItem("planeWarMeta", '{"stardust":1}');
+    loadMeta();
+    bonusStardust(1);
+    document.hidden = true;
+    document.dispatchEvent(new Event("visibilitychange"));
+    assert.equal(JSON.parse(localStorage.getItem("planeWarMeta")).stardust, 2);
+  });
+
+  it("resetMeta 取消待写队列，不会把默认档写回", () => {
+    localStorage.setItem("planeWarMeta", '{"stardust":500}');
+    loadMeta();
+    // 攒一笔待写
+    bonusStardust(1);
+    // 清档：不应有任何后续写入把默认值落回
+    resetMeta();
+    assert.equal(localStorage.getItem("planeWarMeta"), null);
   });
 });

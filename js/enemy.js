@@ -37,23 +37,26 @@ export function removeEnemyEx(idx) {
   freeEnemy(e);
 }
 
-/** 根据难度等级获取可用敌机类型池 */
-function getPool(level) {
-  let pool = ["small"];
-  if (level >= 2) pool.push("small", "mid");
-  if (level >= 3) pool.push("mid", "mid");
-  if (level >= 4) pool.push("laser");
-  if (level >= 5) pool.push("big", "shield");
-  if (level >= 6) pool.push("split");
-  if (level >= 7) pool.push("big");
-  if (level >= 8) pool.push("shield", "laser");
-  return pool;
+/**
+ * 根据难度等级获取可用敌机类型池。
+ * 注意：局部变量名不能叫 pool——模块级已经有敌机对象池 const pool = []，
+ * 同名遮蔽会让「往对象池归还敌机」的误写变成往类型数组里塞对象。
+ */
+function getEnemyTypePool(level) {
+  const types = ["small"];
+  if (level >= 2) types.push("small", "mid");
+  if (level >= 3) types.push("mid", "mid");
+  if (level >= 4) types.push("laser");
+  if (level >= 5) types.push("big", "shield");
+  if (level >= 6) types.push("split");
+  if (level >= 7) types.push("big");
+  if (level >= 8) types.push("shield", "laser");
+  return types;
 }
 
 export function spawnEnemy(level, diff, enemyLevel = 1, atX, atY) {
   if (enemies.length >= 60) return; // 防爆量：同屏敌机上限
-  const pool_map = getPool(level);
-  const type = pick(pool_map);
+  const type = pick(getEnemyTypePool(level));
   const cfg = ENEMY_TYPES[type];
   // 敌方等级缩放
   const elvl = Math.max(1, enemyLevel);
@@ -134,8 +137,13 @@ export function updateEnemies(dt, level, playerX, playerY, playerH) {
   }
 }
 
-/** 取敌方Boss当前的相位配置（按剩余血量百分比） */
-function bossPhaseOf(e) {
+/**
+ * 取敌方 Boss 当前的相位配置（按剩余血量百分比）。
+ * 相位遍历逻辑原本在 enemy.js 与 wave.js 各有一份（bossPhaseOf / getCurrentBossPhase），
+ * 现在统一由这里提供，wave.js 直接再导出，避免两份实现日后各自漂移。
+ */
+export function getCurrentBossPhase(e) {
+  if (!e || !e.phases || e.phases.length === 0) return null;
   const pct = e.hp / e.maxHp;
   let ph = e.phases[0];
   for (const p of e.phases) {
@@ -159,7 +167,7 @@ export function getEnemyShooters(playerX, playerY, dt, fireCdScale = 1) {
     if (e.y <= 10 || e.y >= H * 0.7) continue;
     // Boss：按相位配置的开火间隔射击；无枪相位（如母舰空军召唤）跳过
     if (e.isBoss) {
-      const ph = bossPhaseOf(e);
+      const ph = getCurrentBossPhase(e);
       if (!ph || (ph.fireInterval ?? 0) >= 50) continue;
       e.fireCd -= dt;
       if (e.fireCd <= 0) {
@@ -186,6 +194,18 @@ export function getEnemyShooters(playerX, playerY, dt, fireCdScale = 1) {
   return shooters;
 }
 
+// 敌机类型 → 贴图 id 缓存（键为 "类型|bossType"，值恒定）
+const spriteIdCache = new Map();
+function enemySpriteId(e) {
+  const key = e.type === "boss" ? "b" + e.bossType : e.type;
+  let id = spriteIdCache.get(key);
+  if (id === undefined) {
+    id = e.type === "boss" ? "boss_" + e.bossType : "enemy_" + e.type;
+    spriteIdCache.set(key, id);
+  }
+  return id;
+}
+
 export function drawEnemies(ctx, frame) {
   for (const e of enemies) {
     if (!e) continue;
@@ -205,8 +225,10 @@ export function drawEnemies(ctx, frame) {
       }
     }
 
-    // 身体：优先贴图（Boss 用 boss_<类型>，普通机用 enemy_<类型>）
-    const spriteId = e.type === "boss" ? `boss_${e.bossType}` : `enemy_${e.type}`;
+    // 身体：优先贴图（Boss 用 boss_<类型>，普通机用 enemy_<类型>）。
+    // 贴图 id 按类型缓存：旧实现每帧每架敌机都拼一次模板字符串，
+    // 同屏 60 架就是 60 次字符串分配。
+    const spriteId = enemySpriteId(e);
     const box = r * 2.35;   // 贴图带 4% 透明留白，略放大补偿
     const skinned = drawSprite(ctx, spriteId, 0, 0, box, box);
     if (skinned) {

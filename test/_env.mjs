@@ -26,6 +26,35 @@ if (!globalThis.window.removeEventListener) globalThis.window.removeEventListene
 if (!globalThis.localStorage) globalThis.localStorage = localStorageMock;
 if (!globalThis.performance) globalThis.performance = { now: () => Date.now() };
 
+// 最小 document 桩：meta.js 注册 pagehide/visibilitychange 落盘监听、
+// assets.js 的白闪/量测会探测它。刻意让 createElement().getContext() 返回 null，
+// 用于覆盖「有 document 对象但没有可用 2D 画布」的环境（API 必须安全返回而不是抛错）。
+// game.test.mjs 会在此之后用更完整的 mock 覆盖，因此这里只补缺省。
+if (!globalThis.document) {
+  const listeners = new Map();
+  const makeEl = () => ({
+    style: {},
+    width: 0,
+    height: 0,
+    getContext: () => null,   // 无可用 2D 上下文
+    addEventListener() {},
+    removeEventListener() {},
+  });
+  globalThis.document = {
+    hidden: false,
+    createElement: () => makeEl(),
+    addEventListener(type, fn) {
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(fn);
+    },
+    removeEventListener() {},
+    dispatchEvent(ev) {
+      for (const fn of listeners.get(ev.type) || []) fn(ev);
+    },
+  };
+  globalThis.window.document = globalThis.document;
+}
+
 export function resetStorage() {
   store.clear();
 }

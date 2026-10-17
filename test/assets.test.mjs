@@ -88,11 +88,13 @@ describe("assets", () => {
     assert.equal(got.y, (720 - 2160) / 2);
   });
 
-  it("无 document 环境下白闪 API 安全返回 false", () => {
+  it("无可用 2D 画布时白闪 API 安全返回 false", () => {
     const ctx = makeCtx();
     preloadSkin();
     created.find(i => i.src.includes("enemy_small")).succeed();
-    assert.equal(getSpriteTint("enemy_small"), null, "Node 无 document → null");
+    // _env.mjs 的 document 桩刻意让 getContext() 返回 null：
+    // 覆盖「有 document 对象但没有可用 2D 上下文」的环境，API 必须安全降级而不是抛错
+    assert.equal(getSpriteTint("enemy_small"), null, "画布不可用 → null");
     assert.equal(drawSpriteFlash(ctx, "enemy_small", 0, 0, 40, 40, 1), false);
   });
 

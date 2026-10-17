@@ -24,18 +24,43 @@ set -a; source "$ENV_FILE"; set +a
 : "${FTP_USER:?FTP_USER 未设置}"
 : "${FTP_PASS:?FTP_PASS 未设置}"
 : "${FTP_REMOTE_DIR:=htdocs/wwwroot}"
+# FTP_SSL=1 启用显式 FTPS + 证书校验（宿主支持时应打开，默认关闭以兼容旧空间）
+: "${FTP_SSL:=0}"
 
 MODE="incremental"
+PRUNE=0
 for arg in "$@"; do
   case "$arg" in
     --force)  MODE="full" ;;
     --verify) MODE="verify" ;;
     --both)   MODE="both" ;;
+    --prune)  PRUNE=1 ;;   # 额外清理远程 js/ 下的历史版本副本
   esac
 done
 
-# lftp 设置（必须在同一 -e 中生效，SSL 校验关闭以适配 Byethost 证书）
-LF_SET="set ssl:verify-certificate no; set ftp:ssl-force off; set ftp:ssl-allow no;"
+# lftp 设置（必须在同一 -e 中生效）。
+# 默认关闭 SSL：Byethost 免费空间用自签证书，强开会把部署直接卡死。
+# 设 FTP_SSL=1 可切到「显式 FTPS + 校验证书」（宿主支持时推荐）。
+if [ "$FTP_SSL" = "1" ]; then
+  LF_SET="set ftp:ssl-force on; set ftp:ssl-allow yes; set ssl:verify-certificate yes;"
+else
+  LF_SET="set ssl:verify-certificate no; set ftp:ssl-force off; set ftp:ssl-allow no;"
+fi
+
+# 凭据传递：优先用 ~/.netrc（600），避免密码出现在 ps/argv 里被同机其他用户看到。
+# 生成：printf 'machine %s login %s password %s\n' "$FTP_HOST" "$FTP_USER" "$FTP_PASS" \
+#         > ~/.netrc && chmod 600 ~/.netrc
+if [ -r "$HOME/.netrc" ] && grep -q "machine ${FTP_HOST}" "$HOME/.netrc" 2>/dev/null; then
+  LFTP_AUTH=(-u "$FTP_USER")
+else
+  LFTP_AUTH=(-u "$FTP_USER","$FTP_PASS")
+fi
+
+# 所有 lftp 调用统一走这个包装，避免每处重复写 -u 与 -e
+lftp_run() {
+  local cmds="$1"
+  lftp "${LFTP_AUTH[@]}" "$FTP_HOST" -e "$LF_SET $cmds"
+}
 
 # ---------- 版本号管理（每次上传 +1，逢十进位；--verify 不改版本） ----------
 VERSION_FILE="VERSION"
@@ -86,8 +111,7 @@ upload() {
   # Byethost 返回 550「No such file or directory」导致 mirror 中断（set -e 直接终止整个部署）。
   # 注意：注释必须写在 lftp 命令之前——写在续行里会被当成 -e 的参数，导致
   # 「open: option requires an argument -- 'e'」整条命令失效。
-  lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" -e \
-    "$LF_SET mirror -R $flag --parallel=1 ${EXCLUDES[*]} ./ $FTP_REMOTE_DIR/; quit"
+  lftp_run "mirror -R $flag --parallel=1 ${EXCLUDES[*]} ./ $FTP_REMOTE_DIR/; quit"
 
   # 版本化 js：把每个模块复制为「文件名.v版本.js」并重写相对 import 指向版本化文件名。
   # 必须用「文件名」而非 ?v= 查询串来破除缓存——Byethost 按路径缓存且会忽略查询串，
@@ -103,8 +127,7 @@ upload() {
   echo ">> 上传版本化 js（v${NEW_VER}）→ $FTP_REMOTE_DIR/js/"
   # mirror -R 对绝对路径源目录不可靠，改用 put 逐文件覆盖
   for f in "$TMP_JS"/*.js; do
-    lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" -e \
-      "$LF_SET put \"$f\" -o $FTP_REMOTE_DIR/js/$(basename "$f"); quit"
+    lftp_run "put \"$f\" -o $FTP_REMOTE_DIR/js/$(basename "$f"); quit"
   done
   rm -rf "$TMP_JS"
 
@@ -112,8 +135,7 @@ upload() {
   TMP_HTML="$(mktemp /tmp/plane_war_index_XXXX.html)"
   sed "s/__VERSION__/${NEW_VER}/g" index.html > "$TMP_HTML"
   echo ">> 上传 index.html（版本 ${NEW_VER}）"
-  lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" -e \
-    "$LF_SET put $TMP_HTML -o $FTP_REMOTE_DIR/index.html; quit"
+  lftp_run "put $TMP_HTML -o $FTP_REMOTE_DIR/index.html; quit"
   rm -f "$TMP_HTML"
 
   # .htaccess 放在远端 htdocs/ 根（web 根目录，游戏在 wwwroot/ 子目录）：
@@ -121,8 +143,21 @@ upload() {
   HTDOCS_DIR="${FTP_REMOTE_DIR%/wwwroot}"
   [ "$HTDOCS_DIR" = "$FTP_REMOTE_DIR" ] && HTDOCS_DIR="$FTP_REMOTE_DIR/.."
   echo ">> 上传 .htaccess → $HTDOCS_DIR/.htaccess"
-  lftp -u "$FTP_USER","$FTP_PASS" "$FTP_HOST" -e \
-    "$LF_SET put .htaccess -o $HTDOCS_DIR/.htaccess; quit"
+  lftp_run "put .htaccess -o $HTDOCS_DIR/.htaccess; quit"
+
+  # 清理历史版本模块：每次部署都会在 js/ 里多留 20 个 <name>.v<旧版本>.js，
+  # 只增不删（当前 0.3.1 已累积约 600 个文件）。--prune 时删掉非当前版本的副本。
+  if [ "$PRUNE" = "1" ]; then
+    echo ">> 清理旧版本 js 副本（保留 v${NEW_VER}）"
+    # grep -v 无匹配时返回 1，在 set -euo pipefail 下会直接终止部署，故整体兜 || true
+    lftp_run "cls $FTP_REMOTE_DIR/js/ -1; quit" \
+      | grep -oE "^[A-Za-z0-9_]+\.v[0-9]+\.[0-9]+\.[0-9]+\.js$" \
+      | grep -v "\.v${NEW_VER}\.js$" \
+      | while read -r old; do
+          echo "   rm js/$old"
+          lftp_run "rm $FTP_REMOTE_DIR/js/$old; quit"
+        done || true
+  fi
   echo ">> 上传完成"
 }
 

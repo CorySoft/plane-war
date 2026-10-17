@@ -81,18 +81,20 @@ export function glowText(ctx, o) {
   ctx.restore();
 }
 
-/** 玻璃面板：纯色底（top 已废弃，统一用 mid 深度）+ 描边 + 顶部高光 + 可选外发光 */
+/**
+ * 玻璃面板：纯色底 + 描边 + 顶部高光 + 可选外发光。
+ * 早期版本用 top/mid/bottom 三段做垂直渐变，改成纯色后这三个键只剩名字、
+ * 没有作用（靠 `void top; void bottom;` 消除未使用告警），
+ * 但调用方还在传，看着像能调色。现在只保留真正生效的 mid，调用方同步清理。
+ */
 export function softPanel(ctx, x, y, w, h, r = 14, opts = {}) {
   const {
-    top = "rgba(84,150,255,.20)",
     mid = "rgba(16,26,52,.60)",
-    bottom = "rgba(4,8,20,.86)",
     border = "rgba(150,205,255,.28)",
     borderW = 1,
     glow = 0,
     highlight = true,
   } = opts;
-  void top; void bottom;
   const rr = Math.max(1, r);
   ctx.save();
   if (glow > 0) { ctx.shadowColor = border; ctx.shadowBlur = glow; }

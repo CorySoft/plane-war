@@ -2,7 +2,7 @@
  * player.js — 玩家逻辑 + 渲染
  * =========================================================== */
 
-import { W, H, PLAYER_BASE, BULLET, TAU, refireGateDistance, META } from "./config.js";
+import { W, H, PLAYER_BASE, BULLET, TAU, refireGateDistance, calcFireRate, META } from "./config.js";
 import { clamp, rand, setf } from "./utils.js";
 import { pressed, getStickDir } from "./input.js";
 import { drawSpriteNose } from "./assets.js";
@@ -112,18 +112,8 @@ export function updatePlayer(dt, player, refireDist = 0, maxTraveled = 0) {
   }
   player.x = clamp(player.x, 20, W - 20);
 
-  // 射击冷却（应用飞机/天赋射速倍率）
-  const frMul = player.fireRateMul || 1;
-  const rapid = player.buffs.rapid > 0;
-  const mad = player.buffs.madHunt > 0;
-  // 基础射击间隔：前期偏慢（玩家 DPS 低 → 前期更困难），随火力等级与射速技能提升而加快。
-  // 较初版 0.16 已两度放慢至 0.56（先 0.28、再减半），起步约 2 发/秒，前期明显吃力；
-  // 射速技能与火力等级仍提供后期加速。
-  const fireRate = rapid
-    ? 0.055 * frMul
-    : mad
-      ? 0.045 * frMul
-      : (0.56 - (player.power - 1) * 0.04) * (1 - 0.08 * (player.skills.rate || 0)) * frMul;
+  // 射击冷却（应用飞机/天赋射速倍率），公式统一走 calcFireRate
+  const fireRate = calcFireRate(player);
   if (player.fireCd > 0) player.fireCd -= dt;
   // 距离/销毁触发：上一发主弹飞行超过闸门距离或已销毁（无主弹在屏）即可再射。
   // 闸门距离与射击间隔联动（refireGateDistance）：射速越快波间距越小。
@@ -277,7 +267,7 @@ export function getShootPattern(player) {
   const lvl = player.power;
   const dmgLv = player.skills.dmg || 0;
   const baseDmg = Math.round((1 + dmgLv + (player.talentDmg || 0)) * (player.baseDmgMul || 1));
-  const dualLv = player.skills.dual || 0;
+  const dualLv = Math.min(player.skills.dual || 0, 4);   // 侧翼炮上限 4
   const rapid = player.buffs.rapid > 0;
   const scatterLv = player.skills.scatter || 0;   // 散射：每通道左右对称 ±k 展开
   const volleyLv = player.skills.volley || 0;     // 连射：每通道微扇收束于主弹道
@@ -318,41 +308,77 @@ export function getShootPattern(player) {
     for (const d of dirs) channels.push(d);
   }
 
-  // 每波总量上限：超限按通道对称裁剪（每通道居中保留 perCh 层），保证中轴对称美观
   const cap = BULLET.waveCap;
-  const perCh = Math.max(1, Math.floor(cap / channels.length));
   const rapidMul = rapid ? 2 : 1;   // 急速主弹伤害翻倍，维持爆发感
   const sdmg = Math.round(baseDmg * 0.5 * rapidMul);  // 散射弹降权
   const vdmg = Math.round(baseDmg * 0.6 * rapidMul);  // 连射弹降权
 
   function addBullet(b) { patterns.push(b); }
 
+  // ---- 副武器先预算名额 ----
+  // 旧实现先填满主弹道再补副炮，结果是散射/连射一上来就把 16 发吃光，
+  // 侧翼炮与左右护法在高火力下永远 0 发、技能完全失效。
+  // 这里改成先算出副武器要占的额度（成对计），剩余才是主弹道的配额。
+  const sideBulletsLv = player.skills.sideBullets || 0;
+  const sidePairs = [];
+  if (dualLv > 0 || sideBulletsLv > 0) {
+    const ox1 = player.w * 0.6;
+    const ox2 = player.w * 0.55;
+    const sideDmg = Math.max(baseDmg + 1, Math.round(baseDmg * (1 + 0.3 * sideBulletsLv)));
+    const sideSpd = BULLET.baseSpeed * 0.5;
+    // 侧翼炮与左右护法交错排队，两条技能线都不会被对方饿死
+    const n = Math.max(dualLv, sideBulletsLv);
+    for (let k = 1; k <= n; k++) {
+      if (k <= dualLv) {
+        sidePairs.push([
+          { angle: 0.05, dmg: baseDmg, x: player.x - ox1 * k, y: player.y + 8 },
+          { angle: -0.05, dmg: baseDmg, x: player.x + ox1 * k, y: player.y + 8 },
+        ]);
+      }
+      if (k <= sideBulletsLv) {
+        sidePairs.push([
+          { angle: -Math.PI / 2, dmg: sideDmg, x: player.x - ox2 * k, y: player.y + 4, spd: sideSpd },
+          { angle: Math.PI / 2, dmg: sideDmg, x: player.x + ox2 * k, y: player.y + 4, spd: sideSpd },
+        ]);
+      }
+    }
+  }
+  // 主弹道至少保留每个通道 1 发，避免副武器把主弹挤没
+  const reserve = Math.min(cap - channels.length, sidePairs.length * 2);
+  const mainCap = Math.max(channels.length, cap - Math.max(0, reserve));
+  const perCh = Math.max(1, Math.floor(mainCap / channels.length));
+
+  // 散射左右交替：每级只加 1 发（保持"升级多一颗"），但整组符号按射击次数翻转，
+  // 使奇数级天生偏向一侧的弹道在相邻两轮之间左右互补，长期不再右偏。
+  // 旧实现固定 +0.06/-0.12/+0.18…，被 perCh 裁剪后只剩最近的一发，整组齐刷刷右偏。
+  const scatterSign = player._scatterFlip ? -1 : 1;
+  player._scatterFlip = !player._scatterFlip;
+
   for (const d of channels) {
     const entries = [];
-    entries.push({ ang: d, dmg: baseDmg * rapidMul });
-    // 散射：每升 1 级只加 1 发，左右交替展开（奇数级偏右、偶数级偏左），
-    // 保证「升级一次多一颗」而非成对出现；随等级向两侧扇形铺开。
+    entries.push({ ang: d, dmg: baseDmg * rapidMul, off: 0 });
+    // 散射：每升 1 级只加 1 发，随等级向两侧扇形铺开
     for (let k = 1; k <= scatterLv; k++) {
       const sign = k % 2 === 1 ? 1 : -1;
-      entries.push({ ang: d + sign * k * BULLET.scatterSpread, dmg: sdmg });
+      entries.push({ ang: d + scatterSign * sign * k * BULLET.scatterSpread, dmg: sdmg, off: k * BULLET.scatterSpread });
     }
     // 连射：紧贴主弹道的等间距小扇，偏移量恒不为 0（避免与主弹完全重合形成隐形弹）。
     // 成对左右展开；奇数级多出的那一发左右交替，长期保持视觉对称。
     const volleyOffs = volleyOffsets(volleyLv, player);
     for (const t of volleyOffs) {
-      entries.push({ ang: d + t * BULLET.volleyAngleGap * (volleyLv + 0.5), dmg: vdmg });
+      const off = Math.abs(t) * BULLET.volleyAngleGap * (volleyLv + 0.5);
+      entries.push({ ang: d + t * BULLET.volleyAngleGap * (volleyLv + 0.5), dmg: vdmg, off });
     }
-    // 每通道先吃地位于中心的主弹/中央连射，再按对称成对（左右同偏移）补齐到 perCh 层。
-    // 成对校验：宁可少留一发也不破坏左右对称；偏移按 1e-6 微弧圆整配对，规避浮点尾差
-    const offOf = e => Math.round(Math.abs(e.ang - d) * 1e6) / 1e6;
-    entries.sort((a, b) => offOf(a) - offOf(b));
+    // 按「相对本通道的偏移量」排序后裁剪到 perCh 层：
+    // 先留中心主弹，再成对保留同偏移的左右两发（宁可少留也不破坏对称）。
+    // 偏移按 1e-6 微弧圆整配对，规避浮点尾差。
+    entries.sort((a, b) => a.off - b.off);
     const kept = [];
     for (let i = 0; i < entries.length && kept.length < perCh; i++) {
       const e = entries[i];
       if (kept.includes(e)) continue;                     // 已随对称对入列
-      const o = offOf(e);
-      if (o === 0) { kept.push(e); continue; }
-      const mate = entries.find(x => x !== e && offOf(x) === o && !kept.includes(x));
+      if (e.off === 0) { kept.push(e); continue; }
+      const mate = entries.find(x => x !== e && Math.abs(x.off - e.off) < 1e-6 && !kept.includes(x));
       if (kept.length + (mate ? 2 : 1) <= perCh) {
         kept.push(e);
         if (mate) kept.push(mate);
@@ -363,26 +389,11 @@ export function getShootPattern(player) {
     for (const e of kept) addBullet({ angle: e.ang, dmg: e.dmg });
   }
 
-  // 副炮：主通道占满 cap 前补齐（侧翼/左右护法，双双成对），不破坏主弹道对称
-  if (dualLv > 0) {
-    const ox = player.w * 0.6;
-    for (let k = 1; k <= dualLv && patterns.length + 2 <= cap; k++) {
-      addBullet({ angle: 0.05, dmg: baseDmg, x: player.x - ox * k, y: player.y + 8 });
-      addBullet({ angle: -0.05, dmg: baseDmg, x: player.x + ox * k, y: player.y + 8 });
-    }
-  }
-  const sideBulletsLv = player.skills.sideBullets || 0;
-  if (sideBulletsLv > 0) {
-    // 0.2 → 0.3：副炮飞行慢、出屏快，伤害系数过低时整条技能等于白拿。
-    // baseDmg 很小时 round 会把系数抹平，故再兜一层 baseDmg+1，保证副炮永远强于主弹。
-    const sideDmg = Math.max(baseDmg + 1, Math.round(baseDmg * (1 + 0.3 * sideBulletsLv)));
-    const ox = player.w * 0.55;
-    // 左右护法：从机身两侧向左右水平缓慢发射（左发向 -90°、右发向 +90°），成对对称
-    const sideSpd = BULLET.baseSpeed * 0.5;
-    for (let k = 1; k <= sideBulletsLv && patterns.length + 2 <= cap; k++) {
-      addBullet({ angle: -Math.PI / 2, dmg: sideDmg, x: player.x - ox * k, y: player.y + 4, spd: sideSpd });
-      addBullet({ angle: Math.PI / 2, dmg: sideDmg, x: player.x + ox * k, y: player.y + 4, spd: sideSpd });
-    }
+  // 副武器补齐（双双成对，永不拆单）
+  for (const pair of sidePairs) {
+    if (patterns.length + 2 > cap) break;
+    addBullet(pair[0]);
+    addBullet(pair[1]);
   }
   return patterns;
 }

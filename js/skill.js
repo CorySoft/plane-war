@@ -25,7 +25,6 @@ function upgradeSkill(skill, player, count = 1) {
   const gained = next - cur;
   if (skill.id === "maxhp") {
     player._heal = (player._heal || 0) + gained;
-    player._maxLivesUpdate = true;
   }
   if (skill.id === "shield") {
     player.shield = Math.min(player.maxShield, player.shield + gained);
@@ -46,28 +45,24 @@ export function generateSkillChoices(playerSkills) {
       if (s.requires) {
         if ((playerSkills[s.requires] || 0) <= 0) continue;
       }
-      pool.push([s, cur === 0 ? 15 : 5]);
+      pool.push(s);
     }
   }
   if (pool.length === 0) return [];
 
-  // 未拥有的技能优先（权重 15）入选，缺口由已拥有技能（权重 5）补足。
-  // 保持确定性：先取满新技能，不足 3 个再补已拥有的，避免随机导致测试与手感抖动。
-  const fresh = pool.filter(([s]) => (playerSkills[s.id] || 0) === 0);
-  const rest = pool.filter(([s]) => (playerSkills[s.id] || 0) > 0);
-  const freshShuffled = shuffle(fresh);
-  const restShuffled = shuffle(rest);
+  // 未拥有的技能优先入选，缺口由已拥有技能补足。
+  // 保持确定性：先取满新技能（不足则继续从已拥有里补），
+  // 避免随机导致测试与手感抖动。
+  const fresh = shuffle(pool.filter(s => (playerSkills[s.id] || 0) === 0));
+  const rest = shuffle(pool.filter(s => (playerSkills[s.id] || 0) > 0));
 
   const choices = [];
-  const used = new Set();
-  for (const [s] of freshShuffled) {
+  for (const s of fresh) {
     if (choices.length >= 3) break;
     choices.push(s);
-    used.add(s.id);
   }
-  for (const [s] of restShuffled) {
+  for (const s of rest) {
     if (choices.length >= 3) break;
-    if (used.has(s.id)) continue;
     choices.push(s);
   }
   return choices;

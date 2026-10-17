@@ -55,13 +55,46 @@ export function updateParticles(dt) {
   particles = next;
 }
 
+// 粒子按「颜色 × 透明度档位」分桶批量绘制。
+// 旧实现最多 400 颗逐颗绘制：每颗都要改一次 globalAlpha + beginPath/arc/fill，
+// 是后期最贵的一项。分桶后每帧 fill 次数 = 颜色数 × 档位数（个位数），
+// 透明度按档位量化，视觉上与逐颗淡出无差别。
+const PARTICLE_ALPHA_STEPS = 5;
+
 export function drawParticles(ctx) {
+  if (particles.length === 0) return;
+  if (!drawParticles._groups) drawParticles._groups = new Map();
+  const groups = drawParticles._groups;
+
+  for (const arr of groups.values()) {
+    for (const bucket of arr) bucket.length = 0;
+  }
+
   for (const p of particles) {
-    ctx.globalAlpha = clamp(p.life / p.maxLife, 0, 1);
-    ctx.fillStyle = p.color;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-    ctx.fill();
+    let arr = groups.get(p.color);
+    if (!arr) {
+      arr = [];
+      for (let i = 0; i < PARTICLE_ALPHA_STEPS; i++) arr.push([]);
+      groups.set(p.color, arr);
+    }
+    const a = clamp(p.life / p.maxLife, 0, 1);
+    const step = a >= 1 ? PARTICLE_ALPHA_STEPS - 1 : (a * PARTICLE_ALPHA_STEPS) | 0;
+    arr[step].push(p);
+  }
+
+  for (const [color, arr] of groups) {
+    for (let step = 0; step < arr.length; step++) {
+      const list = arr[step];
+      if (list.length === 0) continue;
+      ctx.globalAlpha = (step + 1) / PARTICLE_ALPHA_STEPS;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      for (const p of list) {
+        ctx.moveTo(p.x + p.r, p.y);
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      }
+      ctx.fill();
+    }
   }
   ctx.globalAlpha = 1;
 }

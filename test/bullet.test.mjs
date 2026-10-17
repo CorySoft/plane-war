@@ -6,7 +6,7 @@ import { BULLET, H } from "../js/config.js";
 import {
   bullets, fireBullet, spawnSplitBullet, spawnEnemyBullet, updateBullets,
   spawnHostileBullet, spawnLaserVolley, applyPierceOrRemove,
-  clearBullets, removeBullet, hasPlayerMainBullet, maxMainBulletTraveled,
+  clearBullets, removeBullet, maxMainBulletTraveled,
   markMainBulletsTriggered, spawnSplitBurst,
   canHitEnemy, markHitEnemy, headingToBulletAngle, countFriendlyBullets,
 } from "../js/bullet.js";
@@ -102,7 +102,7 @@ describe("bullet", () => {
     const b = fireBullet(0, 1, p, 240, 360);
     b.maxRange = 8;
     updateBullets(1);
-    assert.equal(hasPlayerMainBullet(), false);
+    assert.equal(countFriendlyBullets(), 0);
   });
 
   it("天基武器加速不超过上限", () => {
