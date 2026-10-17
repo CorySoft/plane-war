@@ -12,3 +12,7 @@ test-results/
 screenshot*.png
 # Agnes 生成的原图缓存（可重新生成，且体积大）
 tools/raw/
+
+# Python 字节码缓存（由源码重新生成，不进仓库）
+__pycache__/
+*.pyc
