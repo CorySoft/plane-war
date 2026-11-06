@@ -102,6 +102,23 @@ EXCLUDES=(
   --exclude-glob 'index.html'
   --exclude '^js/'            # js 由下方「文件名版本化」步骤单独上传，避免留下未版本化副本
   --exclude '^tools/'         # 皮肤生成脚本与 raw 缓存不上传
+  # ↓ 2026-11-06 补：以下都是仓库/部署脚手架，曾经被 mirror 传进 wwwroot/ 变成可公开下载
+  #   （/wwwroot/deploy.sh、/wwwroot/DEPLOY.md 当时实测 200，DEPLOY.md 里还写着 FTP 账号）。
+  #   mirror 没有 --delete，加排除只能阻止「再传」，远端已有的残留要手工删一次。
+  #   ⚠ 这里刻意只用 --exclude-glob、不写 ()/|：deploy.sh 是把 ${EXCLUDES[*]} 拼进
+  #   lftp 的命令行字符串的，lftp 解析时会把 '|' 当命令分隔符，带 | 的正则会被截断成
+  #   一条废规则并打断整个 mirror（实测报 "Unmatched ( or \("）。
+  --exclude '^\.githooks/'    # core.hooksPath 指向它，post-commit 只在本地 git 里跑，服务器不需要
+  --exclude-glob 'deploy.sh'
+  --exclude-glob 'DEPLOY.md'
+  --exclude-glob 'README.md'
+  --exclude-glob 'AGENTS.md'
+  --exclude-glob 'package.json'
+  --exclude-glob 'package-lock.json'
+  --exclude-glob 'test*.mjs'
+  --exclude-glob 'test*.cjs'
+  --exclude-glob '.gitignore'
+  --exclude-glob 'cover-test.png'
 )
 
 upload() {

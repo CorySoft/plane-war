@@ -7,8 +7,8 @@
 | 配置项 | 值 |
 |--------|-----|
 | FTP 地址 | `ftp.byethost8.com` |
-| FTP 账号 | `b8_42906515` |
-| FTP 密码 | 见 `.deploy.env`（本地文件，已 gitignore） |
+| FTP 账号 | 见 `.deploy.env` 的 `FTP_USER`（本地文件，已 gitignore；不在文档里写死） |
+| FTP 密码 | 见 `.deploy.env` 的 `FTP_PASS`（本地文件，已 gitignore） |
 | 远程目录 | `htdocs/wwwroot` （即 `ftp://ftp.byethost8.com/htdocs/wwwroot/`） |
 | 网站地址 | `http://corysoft.byethost8.com/` |
 | 空间后台 | `http://cpanel.byethost8.com/` |
@@ -18,22 +18,40 @@
 
 ### 服务器目录结构与加载原理（重要）
 
-本空间已存在一个 PHP 应用（微信 API 工具），结构如下：
+`htdocs/` 这个 web 根**同时承载两个项目**，根 `.htaccess` 是它们唯一的路由契约：
 
 ```
 htdocs/                  ← web 根
-├── .htaccess            ← 重写规则（见下）
+├── .htaccess            ← ⭐ 两个项目共用的路由契约（deploy.sh 每次提交自动上传本仓库 .htaccess）
 ├── public/
-│   └── index.php        ← PHP 应用入口：GET / 时 readfile(../wwwroot/index.html)
-├── src/ config.php …    ← PHP 应用代码
+│   └── index.php        ← wechat-publisher（PHP 应用）入口：/publish、/draft/*、/material/* 等
+├── src/ config.php …    ← wechat-publisher 应用代码
 └── wwwroot/             ← ⭐ 游戏部署目录（deploy.sh 上传到这）
     ├── index.html
     └── js/*.js
 ```
 
-访问流程：浏览器访问 `/` → Apache 执行 `.htaccess` → `public/index.php` 读取并输出 `wwwroot/index.html`（游戏首页）→ 游戏 JS 请求 `/js/*.js` → 由 `.htaccess` 中的 wwwroot 静态资源规则直接提供。
+访问流程（全部由根 `.htaccess` 决定，不经 PHP）：
 
-**⚠️ 若 `.htaccess` 缺失或退回旧版**（只有 `RewriteRule ^ public/index.php [QSA,L]`），所有静态资源（`/js/*.js`）都会被转发给 PHP 应用 → 返回 404 → 游戏进度条走完后提示"⚠ 加载失败"。`deploy.sh` 会自动把本地 `.htaccess` 上传到 `htdocs/.htaccess`，请勿删除。
+- 浏览器访问 `/` → 规则 1 直接输出 `wwwroot/index.html`
+- 游戏请求 `/js/game.js?v=x.y.z` → 规则 2 命中 `wwwroot/js/game.js` 直出
+- `POST /publish`、`/draft/list`、`/material/*` → 规则 5 转发给 `public/index.php`（微信 API）
+- `/public/index.php/publish` 这类带 pathinfo 的直连 → 规则 4 原样放行，由应用自己解析
+
+> `public/index.php` 里另有一段 `GET /` 时 `readfile(../wwwroot/index.html)` 的兜底，
+> 仅在 `.htaccess` 规则 1 未生效时才会走到，正常部署下不经过它。
+
+**⚠️ 两个方向的破坏都会立刻发生线上事故：**
+
+| 情形 | 后果 |
+|---|---|
+| `.htaccess` 退回"只有游戏路由"（无规则 5 兜底） | `/publish`、`/draft/*` 全部变 Apache 404 → **daily-ai-article 两条 GitHub 流水线每天失败**（2026-10-17 起连败 30 次即此因） |
+| `.htaccess` 退回"只有 `RewriteRule ^ public/index.php`" | 静态资源全被塞给 PHP → `/js/*.js` 404 → 游戏进度条走完后提示"⚠ 加载失败" |
+
+因此：**本仓库 `.htaccess` 是线上权威版本**（`deploy.sh:146` 每次提交都会上传它），
+`wechat-publisher/.htaccess` 是同一份内容的副本，改任意一份必须同步另一份并用
+`cmp plane_war/.htaccess wechat-publisher/.htaccess` 校验。文件头部注释已写明共存约定，
+请勿删除规则 5，也请勿把它改回纯游戏路由。
 
 ## 部署方式
 
@@ -86,16 +104,43 @@ htdocs/                  ← web 根
 
 ### 排除项（不会上传）
 
-- `.git/`、`node_modules/`、`test/`、`test-results/`、`test.mjs`、`test_http.cjs`
-- `.deploy.env`、`.gitignore`
-- `.htaccess`（不随 mirror 进入 `wwwroot/`，由 deploy.sh **单独上传**到 `htdocs/.htaccess`，用于静态资源路由）
-- `deploy.sh`（可选保留在远端）
+以 `deploy.sh` 的 `EXCLUDES` 数组为准，当前是：
+
+- 目录：`.git/`、`node_modules/`、`test/`、`test-results/`、`tools/`、`js/`（js 走下面
+  「文件名版本化」单独上传，避免留下未版本化副本）、`.githooks/`
+- 文件：`VERSION`、`.deploy.env`、`.gitignore`、`index.html`（单独生成后上传）、
+  `deploy.sh`、`DEPLOY.md`、`README.md`、`AGENTS.md`、`package.json`、`package-lock.json`、
+  `test*.mjs`、`test*.cjs`
+- `.htaccess`（不随 mirror 进入 `wwwroot/`，由 deploy.sh **单独上传**到 `htdocs/.htaccess`；
+  该文件是本站**双项目共用的路由契约**，同时决定游戏静态资源与 `wechat-publisher` 应用
+  谁能被访问，详见上文「服务器目录结构与加载原理」）
+
+> ⚠️ **上面这份清单是 2026-11-06 才对齐的**。此前文档写着"test.mjs/deploy.sh 已排除"，
+> 实际 `EXCLUDES` 里根本没有——`wwwroot/` 是 web 根，于是这些脚手架被当成游戏资源传上去，
+> 任何人都能直接下载（当时实测）：
+>
+> | 线上地址 | 结果 |
+> |---|---|
+> | `/wwwroot/deploy.sh` | 200，7266 B（整套部署逻辑 + `.deploy.env` 约定） |
+> | `/wwwroot/DEPLOY.md` | 200，6447 B（含 **FTP 账号**、空间后台、MySQL 主机名） |
+> | `/wwwroot/.githooks/post-commit` | 200，1103 B（自动部署入口） |
+> | `/wwwroot/package.json`、`/wwwroot/test.mjs` | 200 |
+>
+> 密码本身没有泄露（`.deploy.env` 一直有排除，脚本里也没有明文），但攻击面已经够写钓鱼流程了。
+>
+> **两个必须知道的机制细节：**
+>
+> 1. `mirror` **没有 `--delete`**，加排除只能阻止"再传"，**远端已有的残留不会自动消失**。
+>    所以上面那几个文件仍挂在服务器上，得手工删一次（本地都有副本 / 已不存在，删了不影响游戏）。
+> 2. 排除项里**不能用 `()` 或 `|`**：`deploy.sh` 是把 `${EXCLUDES[*]}` 直接拼进 lftp 的
+>    命令字符串，lftp 解析时把 `|` 当命令分隔符，正则会被截断成废规则并打断整个 mirror
+>    （报 `Unmatched ( or \(`）。要多文件匹配就用 `--exclude-glob 'test*.mjs'` 这种 glob 写法。
 
 ## 本地开发
 
 ```bash
 python3 -m http.server 8080 --bind 0.0.0.0   # 在项目根启动
-npm test                                      # 单元测试（当前 237+ 项）
+npm test                                      # 单元测试（当前 257 项 / 21 suites）
 node tools/dev/smoke.mjs                      # 真机冒烟（需 playwright）
 ```
 
@@ -133,4 +178,10 @@ RewriteRule ^wwwroot/(feedback\.log|\.push_throttle)$ - [F]
 3. [ ] 运行 `node tools/dev/smoke.mjs` 确认真机无 console error / 404
 4. [ ] 运行 `./deploy.sh`（增量）或 `--force`（重要改动）
 5. [ ] `./deploy.sh --verify` 确认远程文件大小与本地一致
-6. [ ] 首次上线后自查：`GET /wwwroot/feedback.log` 应返回 403、`GET /js/` 应返回 403
+6. [ ] 上线后自查共存路由：`php ../wechat-publisher/tools/http-check.php`（13 项断言，全绿才收工）。
+    > **不要用 `curl` 判 403**：ByetHost 的 openresty 门禁会在 Apache 之前应答，curl 不带
+    > `__test` cookie 时要么被掐断（`Empty reply from server`）、要么拿到 200 的门禁 JS 页，
+    > 状态码跟 `.htaccess` 写得对不对毫无关系。该脚本内置了门禁解密，才能看到 Apache 的真实响应。
+    > 同一层还带反扫描限流：探测太密会直接回 `429 Too Many Requests - Scanner activity detected`
+    > （50 字节纯文本，非 Apache 应答）。脚本把 429 单独判为**退出码 2 = 本轮不可信**，
+    > 隔几分钟重跑即可，别据此推断某条规则"状态码不稳定"。
