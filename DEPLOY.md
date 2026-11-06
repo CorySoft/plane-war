@@ -184,4 +184,5 @@ RewriteRule ^wwwroot/(feedback\.log|\.push_throttle)$ - [F]
     > 状态码跟 `.htaccess` 写得对不对毫无关系。该脚本内置了门禁解密，才能看到 Apache 的真实响应。
     > 同一层还带反扫描限流：探测太密会直接回 `429 Too Many Requests - Scanner activity detected`
     > （50 字节纯文本，非 Apache 应答）。脚本把 429 单独判为**退出码 2 = 本轮不可信**，
-    > 隔几分钟重跑即可，别据此推断某条规则"状态码不稳定"。
+    > 隔十分钟以上再重跑（实测约 30 次连续请求触发，9 分钟仍未解除），
+    > 别据此推断某条规则"状态码不稳定"。
