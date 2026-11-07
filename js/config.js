@@ -212,12 +212,12 @@ export const POWERUP_DROP = {
 // 经验包：前后期都常见；技能+1：后期稍高但保持稀有
 export const POWERUP_WEIGHTS_EARLY = [
   ["power", 16], ["rapid", 7], ["shield", 14], ["life", 30],
-  ["speed", 5], ["double", 5], ["freeze", 6], ["magnet", 12], ["madHunt", 3],
+  ["speed", 5], ["double", 5], ["freeze", 3], ["magnet", 12], ["madHunt", 3],
   ["xppack", 12], ["skillup", 4], ["drop", 7], ["critboost", 5], ["knockback", 6],
 ];
 export const POWERUP_WEIGHTS_LATE = [
   ["power", 20], ["rapid", 9], ["shield", 14], ["life", 16],
-  ["speed", 6], ["double", 6], ["freeze", 7], ["magnet", 11], ["madHunt", 4],
+  ["speed", 6], ["double", 6], ["freeze", 3], ["magnet", 11], ["madHunt", 4],
   ["xppack", 10], ["skillup", 6], ["drop", 6], ["critboost", 7], ["knockback", 6],
 ];
 
@@ -242,13 +242,13 @@ export function getShopItemCost(item, owned) {
 // ---------- 技能 ----------
 export const SKILLS = [
   { id: "dmg",       name: "火力强化",   desc: "伤害+1",         fullDesc: "每级子弹基础伤害 +1，满级 +10",               color: "#5ee6ff", max: 10 },
-  { id: "rate",      name: "射速提升",   desc: "间隔-8%",        fullDesc: "每级射击间隔缩短 8%，满级 -48%",              color: "#5ee6ff", max: 6 },
+  { id: "rate",      name: "射速提升",   desc: "间隔-8%",        fullDesc: "每级射击间隔缩短 8%，满级 -48%（满配后敌机血量封顶，继续堆射速边际收益递减）",              color: "#5ee6ff", max: 6 },
   { id: "range",     name: "射程延伸",   desc: "射程+2m",        fullDesc: "每级子弹射程 +2m，满级 +20m",                 color: "#5ee6ff", max: 10 },
   { id: "move",      name: "机动强化",   desc: "移速+12%",       fullDesc: "每级移动速度 +12%，满级 +72%",                color: "#5ee6ff", max: 6 },
   { id: "maxhp",     name: "生命强化",   desc: "最大生命+1",     fullDesc: "每级最大生命 +1 并立即回复 1 点",             color: "#7CFC00", max: 4 },
   { id: "shield",    name: "护盾强化",   desc: "获得1层护盾",    fullDesc: "获得 1 层护盾，可抵消 1 次伤害",              color: "#7CFC00", max: 4 },
-  { id: "crit",      name: "精准打击",   desc: "12%暴击",        fullDesc: "每级 12% 概率触发暴击，满级 72%",            color: "#ff8fa3", max: 6 },
-  { id: "critdmg",   name: "致命暴击",   desc: "暴击伤害+0.5",   fullDesc: "每级暴击伤害倍率 +0.5，满级 +3",             color: "#ff8fa3", max: 6 },
+  { id: "crit",      name: "精准打击",   desc: "12%暴击",        fullDesc: "每级 12% 概率触发暴击，满级 72%（满配下目标常被基础弹雨过杀，边际收益递减）",            color: "#ff8fa3", max: 6 },
+  { id: "critdmg",   name: "致命暴击",   desc: "暴击伤害+0.5",   fullDesc: "每级暴击伤害倍率 +0.5，满级 +3（满配后边际收益随过杀递减）",             color: "#ff8fa3", max: 6 },
   { id: "dual",      name: "侧翼炮",     desc: "+2发侧翼子弹",   fullDesc: "增加 2 发侧翼子弹，满级 8 发",                color: "#5ee6ff", max: 4 },
   { id: "sideBullets", name: "左右护法", desc: "左右缓慢发射", fullDesc: "从机身两侧缓慢向左、右水平发射副炮，每级 +20% 伤害，满级左右各 5 发", color: "#5ee6ff", max: 5 },
   { id: "explosion", name: "爆炸弹",     desc: "解锁爆炸弹",     fullDesc: "子弹命中时有概率产生范围爆炸，是爆炸系技能的基础",         color: "#ff8a55", max: 1 },

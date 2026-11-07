@@ -11,14 +11,10 @@ import { addPowerupCollected, discoverPowerup } from "./meta.js";
 import { drawSprite } from "./assets.js";
 // freeze 通过 player 标记由 game.js 消费；madHunt/xppack 直接操作 buff/标记，无需直接调用
 
-// 经验包：固定保底值 + 按当前升级需求的百分比。
-// 纯固定值在后期（升级需求上千）几乎等于没用，故改成与需求挂钩。
-const XP_PACK_BASE = 50;
-const XP_PACK_RATIO = 0.2;
-
-/** 经验包实际经验值：max(50, 当前升级需求的 20%) */
+// 经验包 = 恰好当前升级所需经验 → 直接 +1 级。
+// 旧「固定 50 点 / 需求 20%」在后期升级需求上千时只够 1~2 成，实测贡献仅 +0.19 级，已失效。
 export function xpPackAmount(xpNeed) {
-  return Math.max(XP_PACK_BASE, Math.round((xpNeed || 0) * XP_PACK_RATIO));
+  return Math.max(1, Math.round(xpNeed || 0));
 }
 
 export let powerups = [];
@@ -87,7 +83,7 @@ export function applyPowerup(p, player) {
   } else if (type === "shield") {
     player.shield = Math.min(player.maxShield, player.shield + 1);
   } else if (type === "madHunt") {
-    player.buffs.madHunt = 8;
+    player.buffs.madHunt = 5;
   } else if (type === "rapid") {
     player.buffs.rapid = 8;
   } else if (type === "speed") {
@@ -99,7 +95,7 @@ export function applyPowerup(p, player) {
   } else if (type === "double") {
     player.buffs.double = 8;
   } else if (type === "xppack") {
-    player._xpPack = true;   // 具体数值由 game.js 按当前 xpNeed 折算
+    player._xpPack = true;   // 由 game.js 按当前 xpNeed 直接补满一级
   } else if (type === "drop") {
     player.buffs.drop = 8;
   } else if (type === "critboost") {

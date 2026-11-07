@@ -99,12 +99,12 @@ describe("powerup", () => {
     assert.equal(p.shield, 1);
   });
 
-  it("经验包按升级需求折算，后期不会沦为废道具", () => {
-    assert.equal(xpPackAmount(60), 50, "早期保底 50");
-    assert.equal(xpPackAmount(200), 50, "max(50, 20%) 取大者");
-    assert.equal(xpPackAmount(1000), 200, "后期按 20% 折算，仍然有意义");
-    assert.equal(xpPackAmount(0), 50);
-    assert.equal(xpPackAmount(undefined), 50);
+  it("经验包 = 直接 +1 级（恰好补满当前升级需求）", () => {
+    assert.equal(xpPackAmount(60), 60, "恰好当前需求 → 直接升 1 级");
+    assert.equal(xpPackAmount(200), 200);
+    assert.equal(xpPackAmount(1000), 1000, "后期同样恰好升 1 级");
+    assert.equal(xpPackAmount(0), 1, "保底 1，避免空转");
+    assert.equal(xpPackAmount(undefined), 1);
   });
 
   it("技能+1 道具至少升一级", () => {

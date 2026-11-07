@@ -357,6 +357,8 @@ function update(dt, realDt = dt) {
       }
       for (let i = fxBlasts.length - 1; i >= 0; i--) {
         const b = fxBlasts[i];
+        // 连锁层延迟：视觉上与首帧爆炸错峰，避免「波纹未扩散、远处已全爆」
+        if (b.delay > 0) { b.delay -= dt; continue; }
         b.life -= dt;
         if (b.life <= 0) fxBlasts.splice(i, 1);
       }
@@ -405,6 +407,7 @@ function update(dt, realDt = dt) {
     // 爆炸瞬间填充闪更新
     for (let i = fxBlasts.length - 1; i >= 0; i--) {
       const b = fxBlasts[i];
+      if (b.delay > 0) { b.delay -= dt; continue; }
       b.life -= dt;
       if (b.life <= 0) fxBlasts.splice(i, 1);
     }
@@ -428,11 +431,11 @@ function update(dt, realDt = dt) {
       player._toast = null;
     }
     if (player._xpPack) {
-      // 经验包按当前升级需求折算，后期依然有价值（固定 50 点在后期形同虚设）
+      // 经验包 = 直接 +1 级：补满当前升级所需经验（旧 50 点/20% 实测仅贡献 +0.19 级）
       const amount = xpPackAmount(xpNeed);
       addXp(amount);
       player._xpPack = false;
-      toast = { text: "经验包 +" + amount, color: "#8ad4ff", t: 1.2 };
+      toast = { text: "经验包 +1 级", color: "#8ad4ff", t: 1.2 };
     }
 
     // 道具掉落
@@ -717,6 +720,10 @@ function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
         radius: b.explosionRadius,
         expDmgRatio: b.expDmgRatio,
       });
+    } else {
+      // 非爆炸弹击杀：清掉可能由他人 AOE 残留的标记，
+      // 避免敌机对象池复用时把上一轮的爆炸参数带给新敌机
+      e._deathExplosion = null;
     }
 
     const eidx = enemies.indexOf(e);
@@ -806,6 +813,16 @@ function orbitHitEnemy(e, ob, enemyIdx) {
  * @param {object} info   { dmg, radius } 由命中子弹记下的基础爆炸参数
  * @param {number} depth  当前连锁递归深度（0 = 首发爆炸）
  */
+/** 连锁伤害倍率：每深一层 ×0.7（视觉另按 0.5^depth 衰减） */
+export function chainDamageMultiplier(depth) {
+  return Math.pow(0.7, Math.max(0, depth | 0));
+}
+
+/** 爆炸填充闪的绘制半径：首帧即真实伤害半径，只做 alpha 淡出（伤害瞬时结算，视觉不应滞后） */
+export function blastDrawRadius(rMax) {
+  return rMax;
+}
+
 function doEnemyDeathExplosion(e, info, depth = 0) {
   // 实力缩放：敌机体型与最大血量共同决定爆炸倍率
   // 基准敌机(small, r=16, maxHp=1) → scale≈1；Boss → 显著放大
@@ -818,17 +835,23 @@ function doEnemyDeathExplosion(e, info, depth = 0) {
   const r = clamp(info.radius * (0.6 + 0.4 * scale), 50, BCFG.explosionMaxRadius);
   const expDmgRatio = info.expDmgRatio || BCFG.explosionBaseDmgRatio;
   const shopBonus = shopFxCache?.expDmgBonus || 0;
-  const aoeDmg = Math.max(1, Math.round(info.dmg * (expDmgRatio + shopBonus) * (0.5 + 0.5 * scale)));
+  // 连锁伤害逐层 ×0.7：深度上限之外再加衰减，避免高血量目标被连锁秒杀滚雪球
+  const aoeDmg = Math.max(1, Math.round(
+    info.dmg * (expDmgRatio + shopBonus) * (0.5 + 0.5 * scale) * chainDamageMultiplier(depth),
+  ));
 
   const isChain = depth > 0;                     // 是否为连锁爆炸
   const isDeepChain = depth >= BCFG.explosionMaxChainDepth;  // 超过连锁深度上限
   // 深度衰减：连锁越深粒子/波纹越少（第 2 层 50%，第 3 层 20%，第 4 层+ 不再生成粒子/波纹）
   const depthVisualFactor = Math.pow(0.5, depth);
 
-  // 爆炸瞬间填充闪：0→真实伤害半径在 0.15s 内膨胀完毕，让视觉与伤害同步。
+  // 爆炸瞬间填充闪：首帧即真实伤害半径，只做淡出；连锁层加 delay 与首帧错峰。
   // 封顶：连锁清屏会一帧塞进几十个，每个都要逐帧新建径向渐变。
   if (fxBlasts.length < BCFG.fxBlastsCap) {
-    fxBlasts.push({ x: e.x, y: e.y, rMax: r, life: 0.15, maxLife: 0.15, color: "#ff6633" });
+    fxBlasts.push({
+      x: e.x, y: e.y, rMax: r, life: 0.15, maxLife: 0.15, color: "#ff6633",
+      delay: depth > 0 ? 0.04 : 0,   // 连锁层视觉延迟 40ms（逻辑仍同帧结算）
+    });
   }
 
   // AOE 伤害周围敌机（连带可能引发连锁爆炸）
@@ -1333,13 +1356,13 @@ function drawExplosionRings(ctx) {
     const t = r.life / r.maxLife;
     const radius = r.r0 + (r.rMax - r.r0) * (1 - t);
     ctx.save();
-    ctx.globalAlpha = t * 0.85;
+    ctx.globalAlpha = t * 0.42;
     ctx.strokeStyle = r.color;
     ctx.lineWidth = 2.5 * t + 0.5;
     ctx.beginPath();
     ctx.arc(r.x, r.y, radius, 0, TAU);
     ctx.stroke();
-    ctx.globalAlpha = t * 0.15;
+    ctx.globalAlpha = t * 0.08;
     ctx.fillStyle = r.color;
     ctx.beginPath();
     ctx.arc(r.x, r.y, radius, 0, TAU);
@@ -1348,11 +1371,12 @@ function drawExplosionRings(ctx) {
   }
 }
 
-/** 绘制爆炸瞬间填充闪（快速膨胀到真实伤害半径，视觉与伤害同步） */
+/** 绘制爆炸瞬间填充闪：首帧即真实伤害半径，仅 alpha 淡出；连锁层按 delay 错峰 */
 function drawBlastFlashes(ctx) {
   for (const b of fxBlasts) {
+    if (b.delay > 0) continue;
     const t = b.life / b.maxLife;
-    const radius = b.rMax * (1 - t);
+    const radius = blastDrawRadius(b.rMax);
     ctx.save();
     const grad = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, radius);
     grad.addColorStop(0, `rgba(255,255,200,${0.6 * t})`);
@@ -2043,4 +2067,8 @@ window.__game = {
   getSkinProgress: skinProgress,
   // 特效池水位（调参/压测用）
   getFxCounts: () => ({ rings: fxRings.length, blasts: fxBlasts.length }),
+  // 爆炸闪明细（审计用：rMax=伤害半径、delay=连锁视觉延迟）
+  getFxBlasts: () => fxBlasts.map(b => ({
+    x: b.x, y: b.y, rMax: b.rMax, life: b.life, maxLife: b.maxLife, delay: b.delay,
+  })),
 };
