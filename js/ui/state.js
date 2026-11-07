@@ -3,6 +3,7 @@ export const uiState = {
   stars: [],
   btnStartRect: null,
   btnCampaignRect: null,
+  campaignSubRect: null,
   campaignLoading: false,
   btnRestartRect: null,
   btnGameOverMenuRect: null,

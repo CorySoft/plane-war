@@ -32,6 +32,7 @@ export const setMenuPage = p => {
 export const getMenuPage = () => uiState.menuPage;
 export function getStartButton() { return uiState.btnStartRect; }
 export function getCampaignButton() { return uiState.btnCampaignRect; }
+export function getCampaignSubtitleRect() { return uiState.campaignSubRect; }
 export function setCampaignLoading(loading) { uiState.campaignLoading = !!loading; }
 export function getDifficultyRects() { return uiState.difficultyRects; }
 export function getCodexButton() { return uiState.btnCodexRect; }
@@ -79,6 +80,7 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = [], pla
   uiState.btnShopBuyRects = [];
   uiState.btnClearCacheRect = null;
   uiState.btnCampaignRect = null;
+  uiState.campaignSubRect = null;
 
   if (uiState.menuPage === "codex") { drawSkillCodex(ctx, discovered, player); drawPageVeil(ctx); return; }
   if (uiState.menuPage === "achieve") { drawAchieve(ctx); drawPageVeil(ctx); return; }
@@ -217,11 +219,14 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = [], pla
   setf(ctx, "bold 10px 'sans-serif'");
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.fillText("新", campaignButton.x + campaignButton.w - 22, campaignButton.y + 12);
+  // 副标题：与按钮底至少 8px；必须用 top 基线（middle 基线会让文字顶部压进按钮底边）
+  const subY = campaignButton.y + campaignButton.h + 8;
   ctx.fillStyle = "rgba(255,255,255,.55)";
   setf(ctx, "10px 'sans-serif'");
-  ctx.fillText(`已通关 ${campaignProgress.completedStageIds.length}/6 · 点击继续`,
-    W / 2, campaignButton.y + campaignButton.h + 3);
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  ctx.fillText(`已通关 ${campaignProgress.completedStageIds.length}/6 · 点击继续`, W / 2, subY);
   uiState.btnCampaignRect = campaignButton;
+  uiState.campaignSubRect = { x: W / 2 - 80, y: subY, w: 160, h: 10 };
 
   // 导航瓦片：机库 / 天赋 / 图鉴 / 成就 / 设置 / 道具图鉴 / 商城
   const nav = [
@@ -233,13 +238,26 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = [], pla
     ["powerupCodex", "道具图鉴", C.redSoft],
     ["shop", "系统商城", C.lilacDark],
   ];
-  const nw = 148, nh = 40, ng = 12;
-  const nStartY = H * 0.64;
+  // 列表按项数自适应：行数随项数变化；纵向起点由「副标题底 + 8px」与底部安全区共同约束
+  const navRows = Math.ceil(nav.length / 2);
+  const nh = 40;
+  const nga = 12;   // 横向列间距
+  let ng = 12;      // 纵向行间距（空间不足时压缩，下限 4）
+  const nw = Math.min(148, Math.floor((W - 24 - nga) / 2));
+  const subBottom = uiState.campaignSubRect.y + uiState.campaignSubRect.h;
+  const navMinTop = subBottom + 8;
+  const navBottomSafe = H - 16;
+  let navTotalH = navRows * nh + (navRows - 1) * ng;
+  if (navMinTop + navTotalH > navBottomSafe && navRows > 1) {
+    ng = Math.max(4, Math.floor((navBottomSafe - navMinTop - navRows * nh) / (navRows - 1)));
+    navTotalH = navRows * nh + (navRows - 1) * ng;
+  }
+  const nStartY = Math.max(navMinTop, Math.min(H * 0.62, navBottomSafe - navTotalH));
   for (let i = 0; i < nav.length; i++) {
     const [id, label, color] = nav[i];
     const col = i % 2;
     const row = Math.floor(i / 2);
-    const nx = i === nav.length - 1 ? W / 2 - nw / 2 : W / 2 - nw - ng / 2 + col * (nw + ng);
+    const nx = i === nav.length - 1 ? W / 2 - nw / 2 : W / 2 - nw - nga / 2 + col * (nw + nga);
     const ny = nStartY + row * (nh + ng);
     // 导航瓦片：纯色底 + 彩色描边 + 左侧色条
     ctx.save();

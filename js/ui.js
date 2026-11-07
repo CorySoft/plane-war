@@ -6,7 +6,7 @@ export {
 export { hitTestButton, getTouchTargetRect } from "./ui/common.js";
 export {
   setMenuPage, getMenuPage, getPageVeilAlpha, drawMenu,
-  getStartButton, getCampaignButton, setCampaignLoading, getDifficultyRects, getCodexButton, getCodexBackButton,
+  getStartButton, getCampaignButton, getCampaignSubtitleRect, setCampaignLoading, getDifficultyRects, getCodexButton, getCodexBackButton,
   getPowerupCodexButton, getPowerupCodexBackButton, getAchieveButton,
   getAchieveBackButton, getQuestClaimButtons, getShopButton, getShopBackButton,
   getShopBuyButtons, getClearCacheButton, getAchieveCardRects, getHangarButton,

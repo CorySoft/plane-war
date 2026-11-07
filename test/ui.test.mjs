@@ -8,7 +8,7 @@ import {
   spawnDamageNumber, updateDamageNumbers, clearDamageNumbers,
   initStars, updateStars,
   drawMenu,
-  getStartButton, getDifficultyRects,
+  getStartButton, getDifficultyRects, getCampaignButton, getCampaignSubtitleRect,
   getHangarButton, getHangarBackButton, getHangarCards,
   getTalentButton, getTalentBackButton, getTalentCards,
   getSettingsButton, getSettingsBackButton, getSettingToggles,
@@ -96,6 +96,24 @@ describe("ui", () => {
     assert.ok(getAchieveButton());
     assert.ok(getSettingsButton());
     assert.equal(getHangarBackButton(), null);
+  });
+
+  it("战役按钮 / 副标题 / 导航分区互不重叠（多视口）", () => {
+    const cases = [[480, 720], [405, 720], [320, 720]];
+    for (const [w, h] of cases) {
+      setViewport(w, h);
+      setMenuPage("main");
+      drawMenu(makeCtx(), 0, "normal", DIFFICULTY_PRESETS, []);
+      const btn = getCampaignButton();
+      const sub = getCampaignSubtitleRect();
+      const nav = getHangarButton();
+      assert.ok(btn && sub && nav, `${w}x${h} 缺少布局 rect`);
+      assert.ok(sub.y >= btn.y + btn.h + 8, `${w}x${h} 副标题与战役按钮间距 < 8px`);
+      assert.ok(nav.y >= sub.y + sub.h + 8, `${w}x${h} 副标题与导航间距 < 8px`);
+      assert.ok(nav.y + nav.h <= h - 16, `${w}x${h} 导航压到底部安全区`);
+      assert.ok(nav.x >= 0 && nav.x + nav.w <= w, `${w}x${h} 导航横向溢出`);
+    }
+    setViewport(480, 720);
   });
 
   it("机库页绘制卡片与返回按钮", () => {
