@@ -25,6 +25,8 @@ const ROOT = path.resolve(__dirname, "..", "..");
 const PORT = Number(process.env.PORT || 18099);
 const VW = Number(process.env.W || 420);
 const VH = Number(process.env.H || 740);
+const CAMPAIGN = process.env.CAMPAIGN || "";
+const EXPECT_CAMPAIGN_FALLBACK = process.env.EXPECT_CAMPAIGN_FALLBACK === "1";
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -85,7 +87,8 @@ async function main() {
     }
   });
 
-  await page.goto(`http://127.0.0.1:${PORT}/index.html`, { waitUntil: "load" });
+  const campaignQuery = CAMPAIGN ? `?campaign=${encodeURIComponent(CAMPAIGN)}` : "";
+  await page.goto(`http://127.0.0.1:${PORT}/index.html${campaignQuery}`, { waitUntil: "load" });
   await page.waitForTimeout(2500);
 
   const boot = await page.evaluate(() => ({
@@ -93,6 +96,7 @@ async function main() {
     fallbackShown: document.getElementById("fallback")?.style.display || "none",
     loaderRemoved: !document.getElementById("loader"),
     skin: window.__game?.getSkinProgress?.() || null,
+    campaign: window.__game?.getCampaignStatus?.() || null,
   }));
 
   // 逻辑坐标 → CSS 坐标（canvas 被 CSS 缩放过）
@@ -121,6 +125,7 @@ async function main() {
     score: window.__game?.getScore?.(),
     enemies: window.__game?.enemies?.length ?? 0,
     bullets: window.__game?.bullets?.length ?? 0,
+    campaign: window.__game?.getCampaignStatus?.() || null,
   }));
 
   // 暂停面板
@@ -142,14 +147,22 @@ async function main() {
   console.log("启动:", JSON.stringify(boot));
   console.log("对局中:", JSON.stringify(mid));
   console.log("暂停状态值:", pausedState, "(4=PAUSED)");
-  console.log("console error:", consoleErrors.length ? consoleErrors.join("\n") : "(无)");
+  const expectedFallbackErrors = EXPECT_CAMPAIGN_FALLBACK
+    ? consoleErrors.filter(message => message.startsWith("[plane_war] 关卡加载失败"))
+    : [];
+  const unexpectedConsoleErrors = consoleErrors.filter(message => !expectedFallbackErrors.includes(message));
+  console.log("console error:", unexpectedConsoleErrors.length ? unexpectedConsoleErrors.join("\n") : "(无)");
+  if (expectedFallbackErrors.length) console.log("预期的 campaign fallback:", expectedFallbackErrors.join("\n"));
   console.log("pageerror:", pageErrors.length ? pageErrors.join("\n") : "(无)");
   console.log("失败请求/404:", failedRequests.length ? failedRequests.join("\n") : "(无)");
 
-  const bad = consoleErrors.length + pageErrors.length + failedRequests.length;
+  const bad = unexpectedConsoleErrors.length + pageErrors.length + failedRequests.length;
+  const campaignFailed = CAMPAIGN && (EXPECT_CAMPAIGN_FALLBACK
+    ? (!mid.campaign?.fallbackError || mid.campaign.active)
+    : (!mid.campaign?.active || mid.campaign.fallbackError));
   await browser.close();
   server.close();
-  if (bad > 0 || !boot.gameReady) {
+  if (bad > 0 || !boot.gameReady || campaignFailed) {
     console.log("\n[FAIL] 存在异常");
     process.exitCode = 1;
   } else {

@@ -11,7 +11,8 @@ import { spawnParticles, updateParticles, drawParticles, clearParticles } from "
 import { triggerShake, updateCamera, applyCamera, resetCamera, slowmo } from "./camera.js";
 import {
   bullets, fireBullet, spawnEnemyBullet, spawnSplitBurst, spawnLaserVolley,
-  spawnHostileBullet, applyPierceOrRemove, removeBullet,
+  spawnHostileBullets, setHostileBulletBudget,
+  applyPierceOrRemove, removeBullet,
   updateBullets, drawBullets, clearBullets, maxMainBulletTraveled, markMainBulletsTriggered,
   canHitEnemy, markHitEnemy, headingToBulletAngle, countFriendlyBullets
 } from "./bullet.js";
@@ -26,6 +27,10 @@ import {
   getSpawnRate, updateWaves, resetWaves,
   spawnBoss, getCurrentBossPhase, BOSS_TYPES, spawnSwarm
 } from "./wave.js";
+import { APP_VERSION } from "./version.js";
+import {
+  createCampaignRunner, getCampaignId, loadCampaignSafely,
+} from "./level/loader.js";
 import { drawHUD } from "./hud.js";
 import {
   drawMenu, drawGameOver, drawLevelUp, drawPause, drawPauseButton, drawToast, drawRevive,
@@ -61,6 +66,16 @@ import {
   unlockAircraft, setSelectedAircraft, purchaseTalent,
   resetMeta,
 } from "./meta.js";
+
+const requestedCampaign = getCampaignId(globalThis.location?.search || "");
+const campaignLoad = await loadCampaignSafely(requestedCampaign, { version: APP_VERSION });
+const campaignDefinition = campaignLoad.campaign;
+if (campaignLoad.error) {
+  console.error("[plane_war] 关卡加载失败，已回退到无限模式:", campaignLoad.error.message);
+  if (typeof window !== "undefined") {
+    window.__campaignFallbackError = campaignLoad.error.message;
+  }
+}
 
 // ---------- 画布初始化 ----------
 const canvas = document.getElementById("game");
@@ -127,6 +142,8 @@ let levelledThisFrame = false;   // 本帧是否已触发过升级（连锁击�
 let toast = null;
 let difficultyKey = "normal";
 let difficulty = DIFFICULTY_PRESETS.normal;
+let campaignRunner = null;
+let campaignComplete = false;
 let tutorialTimer = 0;     // 教程剩余显示时间
 let musicStarted = false;
 let reviveUsed = false;    // 本局是否已用过复活（每局限 1 次）
@@ -419,7 +436,8 @@ function update(dt, realDt = dt) {
     updateGachaAnim(dt);
 
     // 难度与敌方等级：统一读得分轴（单一真源，避免两条曲线脱钩）
-    const levels = levelFromScore(SCORE_AXIS, score);
+    const activeScoreAxis = campaignRunner?.stage.difficulty.scoreAxis ?? SCORE_AXIS;
+    const levels = levelFromScore(activeScoreAxis, score);
     if (levels.playerLevel > level) {
       level = levels.playerLevel;
       sfx.power();
@@ -429,37 +447,73 @@ function update(dt, realDt = dt) {
       sfx.power();
     }
 
-    // 波次事件（enemyLevel 传入：精英波此前漏传导致后期出 1 级白板敌机）
-    const waveEvent = updateWaves(dt, level, difficulty, enemyLevel);
-    if (waveEvent === "boss") {
-      const bossTypes = Object.keys(BOSS_TYPES);
-      const bossType = bossTypes[Math.floor(Math.random() * bossTypes.length)];
-      spawnBoss(bossType, level);
-      toast = { text: "Boss 来袭！", color: "#ff6b6b", t: 2.5 };
-      sfx.bossSpawn();
-      triggerShake(1.2);
-    } else if (waveEvent === "bossWarn") {
-      toast = { text: "⚠ Boss 即将来袭！", color: "#ff8fa3", t: 2.5 };
-      sfx.warn();
-    } else if (waveEvent === "swarmWarn") {
-      toast = { text: "⚠ 大波敌机正在赶来！", color: "#ff8fa3", t: 3 };
-      sfx.warn();
-    } else if (waveEvent === "swarm") {
-      spawnSwarm(level, difficulty, enemyLevel);
-      toast = { text: "虫群来袭！", color: "#ff6b6b", t: 2 };
-      sfx.bossSpawn();
-    }
+    if (campaignRunner) {
+      const progress = campaignRunner.update(dt, enemies.length);
+      setHostileBulletBudget(progress.densityBudget);
+      if (progress.timedOut) {
+        console.warn(`[plane_war] 关卡节拍超时，清理残留敌机后继续: ${progress.stage?.id}`);
+        clearEnemies();
+        clearBullets(true, false);
+      }
+      if (progress.beatChanged || progress.stageChanged) {
+        clearBullets(true, false);
+        const title = progress.stageChanged
+          ? progress.stage.title
+          : progress.beat.role;
+        toast = { text: title, color: "#66e0ff", t: 1.8 };
+      }
+      for (const event of progress.events) {
+        if (event.type === "boss") {
+          spawnBoss(event.bossType, level);
+          toast = { text: "Boss 来袭！", color: "#ff6b6b", t: 2.5 };
+          sfx.bossSpawn();
+          triggerShake(1.2);
+        } else {
+          spawnEnemy(level, difficulty, enemyLevel, event.x, event.y, {
+            type: event.enemyType,
+            patternRef: event.patternRef,
+          });
+        }
+      }
+      if (progress.complete) {
+        campaignComplete = true;
+        gameOver();
+        toast = { text: "战役完成！", color: "#ffd166", t: 3 };
+        return;
+      }
+    } else {
+      // 波次事件（enemyLevel 传入：精英波此前漏传导致后期出 1 级白板敌机）
+      const waveEvent = updateWaves(dt, level, difficulty, enemyLevel);
+      if (waveEvent === "boss") {
+        const bossTypes = Object.keys(BOSS_TYPES);
+        const bossType = bossTypes[Math.floor(Math.random() * bossTypes.length)];
+        spawnBoss(bossType, level);
+        toast = { text: "Boss 来袭！", color: "#ff6b6b", t: 2.5 };
+        sfx.bossSpawn();
+        triggerShake(1.2);
+      } else if (waveEvent === "bossWarn") {
+        toast = { text: "⚠ Boss 即将来袭！", color: "#ff8fa3", t: 2.5 };
+        sfx.warn();
+      } else if (waveEvent === "swarmWarn") {
+        toast = { text: "⚠ 大波敌机正在赶来！", color: "#ff8fa3", t: 3 };
+        sfx.warn();
+      } else if (waveEvent === "swarm") {
+        spawnSwarm(level, difficulty, enemyLevel);
+        toast = { text: "虫群来袭！", color: "#ff6b6b", t: 2 };
+        sfx.bossSpawn();
+      }
 
-    // 生成敌人
-    const spawnRate = getSpawnRate(level, difficulty.spawnScale);
-    if (Math.random() < spawnRate * dt) spawnEnemy(level, difficulty, enemyLevel);
+      // 生成敌人
+      const spawnRate = getSpawnRate(level, difficulty.spawnScale);
+      if (Math.random() < spawnRate * dt) spawnEnemy(level, difficulty, enemyLevel);
+    }
 
     // 敌机开火
     const shooters = getEnemyShooters(player.x, player.y, dt, difficulty.fireCdScale);
     for (const e of shooters) {
       if (e.type === "boss") {
         bossFire(e);
-      } else if (e.type === "laser" || e._laserShot) {
+      } else if (e.patternRef === "laser" || (!e.patternRef && (e.type === "laser" || e._laserShot))) {
         e._laserShot = false;
         spawnLaserVolley(e, player.x, player.y, difficulty.enemyFireScale);
       } else {
@@ -916,12 +970,18 @@ function bossFire(e) {
 
   switch (phase.pattern) {
     case "spread": {
+      const specs = [];
       for (let i = -2; i <= 2; i++) {
         const angle = i * 0.3;
-        spawnHostileBullet(e.x, e.y + e.r * 0.5, Math.sin(angle) * 3 * scale, 3.5 * scale, {
-          r: 6, color: "#ff4488", maxRange: 500, life: 5,
+        specs.push({
+          x: e.x,
+          y: e.y + e.r * 0.5,
+          vx: Math.sin(angle) * 3 * scale,
+          vy: 3.5 * scale,
+          opts: { r: 6, color: "#ff4488", maxRange: 500, life: 5 },
         });
       }
+      spawnHostileBullets(specs);
       break;
     }
     case "homing": {
@@ -929,12 +989,18 @@ function bossFire(e) {
       break;
     }
     case "burst": {
+      const specs = [];
       for (let i = 0; i < 8; i++) {
         const a = (i / 8) * TAU;
-        spawnHostileBullet(e.x, e.y, Math.cos(a) * 3 * scale, Math.sin(a) * 3 * scale, {
-          r: 5, color: "#aa44ff", maxRange: 400, life: 4,
+        specs.push({
+          x: e.x,
+          y: e.y,
+          vx: Math.cos(a) * 3 * scale,
+          vy: Math.sin(a) * 3 * scale,
+          opts: { r: 5, color: "#aa44ff", maxRange: 400, life: 4 },
         });
       }
+      spawnHostileBullets(specs);
       break;
     }
     case "laser": {
@@ -1159,6 +1225,9 @@ function resetGame() {
   resetCamera();
   duckMusic(false);   // 复位上一局暂停时压低的 BGM 增益
   resetWaves();
+  campaignRunner = campaignDefinition ? createCampaignRunner(campaignDefinition) : null;
+  campaignComplete = false;
+  setHostileBulletBudget(campaignRunner?.densityBudget ?? null);
   skillChoices = null;
   frame = 0;
   toast = null;
@@ -1170,6 +1239,9 @@ function resetGame() {
   setHangarConfirm(null);
   setShowClearCache(false);
   setDetailCard(null);
+  if (campaignRunner) {
+    toast = { text: campaignRunner.stage.title, color: "#66e0ff", t: 2 };
+  }
 
   const skipTutorial = !!getSettings().skipTutorial;
   if (skipTutorial) {
@@ -1431,7 +1503,7 @@ function draw() {
   }
 
   if (state === STATE.MENU) drawMenu(ctx, getBest(), difficultyKey, DIFFICULTY_PRESETS, getDiscoveredSkills(), player);
-  else if (state === STATE.OVER) drawGameOver(ctx, score, getBest(), isNewBest);
+  else if (state === STATE.OVER) drawGameOver(ctx, score, getBest(), isNewBest, campaignComplete);
   else if (state === STATE.REVIVE) drawRevive(ctx, getStardust(), META.reviveCost);
   else if (state === STATE.LEVELUP) drawLevelUp(ctx, skillChoices, player?.skills || {});
   else if (state === STATE.PAUSED) drawPause(ctx, player);
@@ -1824,6 +1896,13 @@ window.__game = {
   resetGame, freezeAll,
   state: () => state, getPlayer: () => player,
   getScore: () => score, getEnemyLevel: () => enemyLevel,
+  getCampaignStatus: () => ({
+    requested: requestedCampaign,
+    active: !!campaignRunner,
+    stageId: campaignRunner?.stage?.id ?? null,
+    beatId: campaignRunner?.beat?.id ?? null,
+    fallbackError: campaignLoad.error?.message ?? null,
+  }),
   getMaxLives: () => maxLives, getLives: () => lives,
   getMenuPage: getMenuPage, setMenuPage,
   get enemies() { return enemies; },

@@ -2,12 +2,15 @@
 
 - 日期：2026-11-07
 - 范围：关卡数据化、弹幕图案注册表、节拍内容与迁移路径
-- 约束：本提案不修改 `js/**`、不提交、不部署；数值门槛待与 `docs/revamp-numbers.md` 合并校准
+- 状态：**P-A 已随 v0.3.9 受控上线（灰度，默认关闭）**；P-B 待启动，P-C/P-D 为后续提案
+- P-A 交付：`?campaign=campaign-01` 灰度入口（不带参数时执行路径与 v0.3.8 逐位一致）、`assets/levels/` 三关、`js/level/` 零依赖校验与安全回退、敌弹独立密度闸门（active/rate 双上限 + 原子 volley 准入）；测试 317→326，deploy 版本化完整性 27→29。
+- 灰度说明：仅 URL 参数可进入战役，默认无限模式零变化；静态 JSON 走 `mirror` 普通上传，loader 以 `?v=APP_VERSION` 查询串破缓存（Byethost 忽略查询串的历史结论见 `deploy.sh` 注释，JSON 每次随版本变；若后续要 edit-in-place 改 JSON 内容，需评估文件名版本化。
+- P-B 待办：敌弹图案注册表、spiral/petal 跨齐射角度状态、rain/laserGrid 预告弹道；P-A 的密度闸门与 fallback 保留不回滚。
 - 依据：`docs/design-levels-editor.md`、`docs/design-current-state.md`、`docs/design-research.md`
 
 ## 决策摘要
 
-1. 以 `chapters → stages → beats → waves → spawns` 表达结构关卡；数据放 `assets/levels/`，运行时由 `js/level.js` 驱动。
+1. 以 `chapters → stages → beats → waves → spawns` 表达结构关卡；数据放 `assets/levels/`，运行时由 `js/level/` 驱动。
 2. 先新增章节模式，旧无限模式继续使用 `wave.js` 的现有路径；只有显式选择章节模式才进入新 runner。
 3. 把 `difficulty.scoreAxis` 定为数值方案与关卡方案的唯一等级接口：按分数阈值同时求 `playerLevel`、`enemyLevel`，禁止两处各写一条增长公式。
 4. 敌弹当前没有友弹 `BULLET.screenCap` 对等的上限。P-A 必须先加全局敌弹硬上限及关卡密度预算；后续每期内容和弹幕扩展都受此门禁约束。
@@ -43,20 +46,18 @@ rank = hi == lo ? 0 : clamp((enemyLevel - lo) / (hi - lo), 0, 1)
 
 **工作量：L。** 这是唯一涉及新 runner、主循环接线和安全密度闸门的一期。首批三个 stage 用于验证 schema 与节奏，不视作完整章节平衡稿。
 
-| 文件 / 区域 | 计划改动 |
+| 文件 / 区域 | P-A 实施状态 |
 |---|---|
-| `assets/levels/manifest.json`、`assets/levels/schema/*.schema.json` | 声明 `chapters → stages`、Schema 版本和 stage 引用；stage Schema 覆盖 `difficulty.scoreAxis`、`densityBudget`、`beats`、`advance`、`waves`、`spawns`、`formations`、`patternRef`。所有 stage 调用数值包的同一个 `levelFromScore(axis, runScore)`；首批 JSON 的 axis 要与数值提案的推荐曲线完全一致。 |
-| `assets/levels/chapter-1/stage-01.json` 至 `stage-03.json` | 首批三个短 stage：单一威胁教学、重复验证与组合、喘息/章节 Boss；只使用已存在的敌种与 Boss pattern 字符串，不在 P-A 偷渡新弹幕行为。 |
-| `js/level.js`（新增） | 加载 manifest/stage、做版本/引用/顺序边界检查，推进 `time`、`allCleared`、`hybrid` 三类 beat，派发已声明 spawn。非法已选 stage 要明确报错，不得静默退回成功形态。 |
-| `js/game.js` | 以显式游戏模式选择 runner；未选择新章节模式时保持原无限模式路径。 |
-| `js/wave.js` | 原 `updateWaves` 作为 endless fallback 保留；不要求新 runner 重写旧计时事件。 |
-| `js/config.js`、`js/bullet.js` | 新增可配置的 `hostileScreenCap`，在共同敌弹入口进行硬上限检查；新增敌弹计数/原子 volley admission，避免环形/三发激光只生成半组。 |
-| `test/levels-schema.test.mjs`、`test/level-runner.test.mjs`、`test/bullet-density.test.mjs` | 用 JSON Schema validator（测试期 devDependency，不打入运行时）校验所有关卡 JSON；运行时 loader 再检查版本、关键字段与引用。覆盖 `levelFromScore` 插值/钳制、beat 三态、无新模式时的旧路径，以及敌弹上限和超限 volley 不越界。 |
-| `tools/perf/bench.mjs`、部署测试 | 增加高密度敌弹基准场景；确认 `assets/levels/` 随静态目录发布，且 JSON 不进入 JS 文件名版本器。 |
+| `assets/levels/campaign-01.json`、`level-01.json` 至 `level-03.json` | 已实现首批 manifest 与三关 teach/test/twist/rest/boss 节拍；仅引用现有敌种、Boss 与 `aimed`/`laser` pattern。 |
+| `js/level/schema.js`、`js/level/loader.js` | 已实现无运行时依赖的结构校验、引用与预算检查、`APP_VERSION` 查询缓存、8 秒请求超时及 time/allCleared/hybrid runner。校验/加载失败会明确记录并回退到无限模式。 |
+| `js/game.js`、`js/enemy.js` | 已实现 `?campaign=campaign-01` 显式入口；无参数时走原 `updateWaves` 路径。关卡可指定敌种、坐标与受限 pattern；全战役结束复用结算界面并显示完成标题。 |
+| `js/config.js`、`js/bullet.js` | 已实现独立敌弹 active/rate cap、计数、token bucket 与原子 volley admission；Boss spread/burst 和激光 volley 不会被密度门禁截成半组。 |
+| `test/level-loader.test.mjs`、`test/bullet.test.mjs`、`test/enemy.test.mjs` | 已覆盖样例加载、版本 URL、无参数/非法输入、scoreAxis/敌种/预算校验、telegraph 与 runner 推进，以及敌弹预算边界和指定敌种。 |
+| `test/deploy-versioning.test.mjs`、`tools/dev/smoke.mjs` | 已确认新增模块进入 JS 递归版本化；smoke 支持 `CAMPAIGN=campaign-01` 验证浏览器关卡入口。静态 JSON 走普通静态上传路径，不进入 JS 文件名版本器。 |
 
 **密度预算：** 每个 stage/beat 声明 `densityBudget.maxHostileActive` 与 `maxHostileBulletsPerSec`，beat 覆盖值不得超过 stage 预算；stage 预算不得超过 `hostileScreenCap`。全局硬上限初始可与友弹 `BULLET.screenCap` 的 140 对齐作为安全基线，但它不是平衡目标，须由 bench 与实机帧耗确认。超预算 pattern 以整组为单位拒绝发射并记录 debug 计数，不生成部分扇形/半个圆；不积压过期 volley 等待补发。
 
-**验收与回滚：** 现有 300 项测试全过；新增 Schema、scoreAxis 阶梯边界、beat 推进、fallback 与 cap 用例通过；bench 报告敌弹峰值及更新耗时。新章节模式保持显式开关，可回滚 loader/内容接线并恢复旧无限模式。全局敌弹上限作为稳定性闸门保留，不随内容回滚移除。
+**验收与回滚：** 当前工作区已有测试、默认模式 smoke、`CAMPAIGN=campaign-01` smoke 与 madHunt 性能基线验证；仍需部署前复核静态 JSON 发布。新章节仅由显式查询参数启用，移除 loader/数据即可恢复旧无限模式；敌弹全局硬上限作为独立稳定性闸门保留。
 
 ### P-B：弹幕图案注册表
 
@@ -98,7 +99,7 @@ rank = hi == lo ? 0 : clamp((enemyLevel - lo) / (hi - lo), 0, 1)
 
 ## 迁移与编辑器档位
 
-- **旧无限模式：** 未选择章节时继续 `updateWaves` + 现有随机生成；不迁移、不删除现有波次行为。新章节只能经显式入口启用。章节文件缺失或非法时显示明确错误，不伪装成成功并自动切回旧模式。
+- **旧无限模式：** 未选择章节时继续 `updateWaves` + 现有随机生成；不迁移、不删除现有波次行为。新章节只能经显式入口启用。选中章节但文件缺失或非法时明确记录错误，并回退到无限模式。
 - **旧 Boss pattern：** 未提供 `patternRef` 时按原 `phase.pattern` 执行。明确写了 `patternRef` 但引用不存在时拒绝该 stage 并报错；避免 typo 被旧默认行为掩盖。
 - **灰度：** P-A 先在测试/开发入口验证；P-B 先只迁移章节 Boss 和一类常规敌机；P-C 才开放单章节模式。每批可通过隐藏入口/回滚数据撤下，不更改默认 endless 体验。
 - **编辑器建议：** 档位 1（JSON + Schema + 内容测试）随 P-A 实施；档位 2 只读节拍/密度预览放 P-C；档位 3（时间轴编辑、确定性回放）待 P-D 和设计数据稳定后再评估。现在做完整可视化编辑器会先固化尚未验证的 schema，投入与收益不成比例。

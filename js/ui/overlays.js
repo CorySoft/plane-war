@@ -13,7 +13,7 @@ export function getSkillCards() { return uiState.skillCards; }
 export function getReviveYesButton() { return uiState.btnReviveYesRect; }
 export function getReviveNoButton() { return uiState.btnReviveNoRect; }
 
-export function drawGameOver(ctx, score, best, isNewBest = false) {
+export function drawGameOver(ctx, score, best, isNewBest = false, campaignComplete = false) {
   const now = uiTime();
   // 聚焦暗角
   ctx.fillStyle = "rgba(14,6,12,.92)";
@@ -22,8 +22,10 @@ export function drawGameOver(ctx, score, best, isNewBest = false) {
   ctx.fillRect(0, H * 0.4, W, H * 0.6);
 
   glowText(ctx, {
-    text: "游 戏 结 束", x: W / 2, y: H * 0.30, size: 50, weight: "bold",
-    color: C.pinkDark, blur: 26 + 12 * pulse(now, 3.2),
+    text: campaignComplete ? "战 役 完 成" : "游 戏 结 束",
+    x: W / 2, y: H * 0.30, size: 50, weight: "bold",
+    color: campaignComplete ? C.gold : C.pinkDark,
+    blur: 26 + 12 * pulse(now, 3.2),
     align: "center", baseline: "top", fontFamily: "'sans-serif'",
   });
 
