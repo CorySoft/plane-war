@@ -16,6 +16,16 @@ function readModule(file) {
   return fs.readFileSync(path.join(JS_DIR, file), "utf8");
 }
 
+function listModules(dir = JS_DIR, prefix = "") {
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .flatMap(entry => {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) return listModules(path.join(dir, entry.name), relative);
+      return entry.isFile() && entry.name.endsWith(".js") ? [relative] : [];
+    });
+}
+
 /** 收集某模块对外暴露的名字（function / const|let|var / export {} / export * 展开） */
 function collectExports(file) {
   const src = readModule(file);
@@ -33,19 +43,27 @@ function collectExports(file) {
   return names;
 }
 
-const FILES = fs.readdirSync(JS_DIR).filter(f => f.endsWith(".js")).sort();
+const FILES = listModules();
 const EXPORT_MAP = new Map(FILES.map(f => [f, collectExports(f)]));
 
 /** 解析 import 语句（兼容部署脚本追加的 ?v= 版本查询串） */
 function collectImports(file) {
   const src = readModule(file);
   const out = [];
-  const re = /import\s*\{([^}]*)\}\s*from\s*["']\.\/([A-Za-z0-9_.\-]+\.js)(?:\?[^"']*)?["']/g;
+  const re = /\b(?:from\s*|import\s*\(\s*|import\s*)["'](\.{1,2}\/[^"']+\.js)(?:\?[^"']*)?["']/g;
   for (const m of src.matchAll(re)) {
-    const names = m[1].split(",")
+    const clauseStart = Math.max(
+      src.lastIndexOf("import ", m.index),
+      src.lastIndexOf("export ", m.index),
+      src.lastIndexOf(";", m.index),
+    );
+    const clause = src.slice(clauseStart, m.index);
+    const named = clause.match(/\b(?:import|export)\s*\{([^}]*)\}/s);
+    const names = (named?.[1] || "").split(",")
       .map(s => s.trim().split(/\s+as\s+/)[0].trim())
       .filter(Boolean);
-    out.push({ names, target: m[2] });
+    const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), m[1]));
+    out.push({ names, target });
   }
   return out;
 }
@@ -54,6 +72,9 @@ describe("modules", () => {
   it("js 目录下存在全部核心模块", () => {
     for (const need of ["game.js", "ui.js", "config.js", "player.js", "bullet.js", "enemy.js", "wave.js", "skill.js", "meta.js", "powerup.js", "version.js"]) {
       assert.ok(FILES.includes(need), `缺少模块 ${need}`);
+    }
+    for (const need of ["ui/common.js", "ui/state.js", "ui/menus.js", "ui/codex.js", "ui/dialogs.js", "ui/effects.js", "ui/overlays.js"]) {
+      assert.ok(FILES.includes(need), `递归扫描未纳入模块 ${need}`);
     }
   });
 
