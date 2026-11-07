@@ -54,9 +54,13 @@ function getEnemyTypePool(level) {
   return types;
 }
 
-export function spawnEnemy(level, diff, enemyLevel = 1, atX, atY) {
+export function spawnEnemy(level, diff, enemyLevel = 1, atX, atY, options = {}) {
   if (enemies.length >= 60) return; // 防爆量：同屏敌机上限
-  const type = pick(getEnemyTypePool(level));
+  const requestedType = options.type;
+  if (requestedType && !Object.hasOwn(ENEMY_TYPES, requestedType)) {
+    throw new TypeError(`Unknown enemy type: ${requestedType}`);
+  }
+  const type = requestedType || pick(getEnemyTypePool(level));
   const cfg = ENEMY_TYPES[type];
   // 敌方等级缩放
   const elvl = Math.max(1, enemyLevel);
@@ -90,6 +94,7 @@ export function spawnEnemy(level, diff, enemyLevel = 1, atX, atY) {
   e.laserTimer = type === "laser" ? rand(1, 2) : 0;
   e.enemyLevel = elvl;
   e.isBoss = false;
+  e.patternRef = options.patternRef || null;
   e._laserShot = false;
   e._deathExplosion = null;
   e.kx = 0; e.ky = 0; e.kbTimer = 0;

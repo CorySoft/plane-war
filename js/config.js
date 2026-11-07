@@ -65,6 +65,8 @@ export const BULLET = {
   // 因此单波上限由 24 下调到 16，避免后期一屏上百发失去队形感。
   waveCap: 16,
   screenCap: 140,       // 同屏友方子弹硬上限：超过则本轮不发射（性能与画面密度兜底）
+  hostileScreenCap: 140, // 同屏敌方子弹独立硬上限
+  hostileSpawnRateCap: 140, // 敌方全局每秒发射上限；关卡可进一步收紧
   baseRadius: 4,
   critRadius: 5.5,
   baseDmg: 1,

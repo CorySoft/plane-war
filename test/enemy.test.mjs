@@ -17,6 +17,13 @@ describe("enemy", () => {
     assert.ok(enemies.every(e => e.type === "small"));
   });
 
+  it("关卡可指定敌种与弹幕图案，并拒绝未知敌种", () => {
+    const enemy = spawnEnemy(1, diff, 1, 120, 40, { type: "laser", patternRef: "aimed" });
+    assert.equal(enemy.type, "laser");
+    assert.equal(enemy.patternRef, "aimed");
+    assert.throws(() => spawnEnemy(1, diff, 1, 120, 40, { type: "unknown" }), /Unknown enemy type/);
+  });
+
   it("敌方等级放大血量与奖励", () => {
     const e1 = spawnEnemy(3, diff, 1, 100, 40);
     const type = e1.type;

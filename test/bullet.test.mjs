@@ -5,7 +5,8 @@ import { stubRandom } from "./_env.mjs";
 import { BULLET, H } from "../js/config.js";
 import {
   bullets, fireBullet, spawnSplitBullet, spawnEnemyBullet, updateBullets,
-  spawnHostileBullet, spawnLaserVolley, applyPierceOrRemove,
+  spawnHostileBullet, spawnHostileBullets, spawnLaserVolley, setHostileBulletBudget,
+  countHostileBullets, getHostileBulletBudgetStats, applyPierceOrRemove,
   clearBullets, removeBullet, maxMainBulletTraveled,
   markMainBulletsTriggered, spawnSplitBurst,
   canHitEnemy, markHitEnemy, headingToBulletAngle, countFriendlyBullets,
@@ -21,7 +22,10 @@ function playerWith(skills = {}, extra = {}) {
 }
 
 describe("bullet", () => {
-  beforeEach(() => clearBullets());
+  beforeEach(() => {
+    setHostileBulletBudget(null);
+    clearBullets();
+  });
 
   it("开火生成友方子弹并回写字段", () => {
     const p = playerWith();
@@ -214,6 +218,40 @@ describe("bullet", () => {
     }
     assert.notEqual(shots[0].x, shots[1].x);
     assert.notEqual(shots[1].x, shots[2].x);
+  });
+
+  it("敌弹预算独立于友弹，且整组弹幕原子准入", () => {
+    const p = playerWith();
+    fireBullet(0, 1, p);
+    setHostileBulletBudget({ maxHostileActive: 2, maxHostileBulletsPerSec: 2 });
+    const spec = { x: 10, y: 10, vx: 0, vy: 1 };
+    assert.equal(spawnHostileBullets([spec, spec, spec]), null);
+    assert.equal(countHostileBullets(), 0, "超出屏幕上限的弹幕不能部分生成");
+    assert.equal(getHostileBulletBudgetStats().deniedVolleys, 1);
+
+    assert.equal(spawnHostileBullets([spec, spec]).length, 2);
+    assert.equal(countHostileBullets(), 2);
+    assert.equal(bullets.filter(b => b.friendly).length, 1, "友弹不消耗敌弹预算");
+  });
+
+  it("敌弹速率预算按时间补充，激光 volley 不会被截半", () => {
+    setHostileBulletBudget({ maxHostileActive: 2, maxHostileBulletsPerSec: 2 });
+    const enemy = { x: 100, y: 100, r: 16 };
+    assert.equal(spawnLaserVolley(enemy, 100, 300), null);
+    assert.equal(countHostileBullets(), 0);
+
+    setHostileBulletBudget({ maxHostileActive: 4, maxHostileBulletsPerSec: 3 });
+    clearBullets();
+    assert.equal(spawnHostileBullets([
+      { x: 1, y: 1, vx: 0, vy: 1 },
+      { x: 1, y: 1, vx: 0, vy: 1 },
+      { x: 1, y: 1, vx: 0, vy: 1 },
+    ]).length, 3);
+    assert.equal(spawnHostileBullet(1, 1, 0, 1), null);
+    updateBullets(1 / 3);
+    assert.ok(spawnHostileBullet(1, 1, 0, 1));
+    clearBullets(true, false);
+    assert.equal(spawnHostileBullet(1, 1, 0, 1), null, "清除残弹不应重置每秒速率预算");
   });
 
   it("applyPierceOrRemove 普通弹命中即移除", () => {

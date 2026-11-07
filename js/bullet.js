@@ -9,6 +9,12 @@ export let bullets = [];
 
 // ---------- 子弹对象池 ----------
 const pool = [];
+let hostileBudget = {
+  maxActive: BULLET.hostileScreenCap,
+  maxPerSecond: BULLET.hostileSpawnRateCap,
+  tokens: BULLET.hostileSpawnRateCap,
+  deniedVolleys: 0,
+};
 
 /** 从池中取一颗子弹对象（无则新建），字段由调用方赋初值 */
 function allocBullet() {
@@ -203,8 +209,41 @@ export function spawnSplitBurst(x, y, travelDir, count, dmg, color, parentR = 4,
   return n;
 }
 
+/** 设置当前关卡的敌弹密度预算；传 null 恢复全局上限 */
+export function setHostileBulletBudget(budget = null) {
+  const maxActive = budget?.maxHostileActive ?? BULLET.hostileScreenCap;
+  const maxPerSecond = budget?.maxHostileBulletsPerSec ?? BULLET.hostileSpawnRateCap;
+  if (!Number.isInteger(maxActive) || maxActive < 0 || maxActive > BULLET.hostileScreenCap) {
+    throw new RangeError(`Invalid hostile active-bullet budget: ${maxActive}`);
+  }
+  if (!Number.isFinite(maxPerSecond) || maxPerSecond < 0 || maxPerSecond > BULLET.hostileSpawnRateCap) {
+    throw new RangeError(`Invalid hostile bullet rate budget: ${maxPerSecond}`);
+  }
+  hostileBudget.maxActive = maxActive;
+  hostileBudget.maxPerSecond = maxPerSecond;
+  hostileBudget.tokens = Math.min(hostileBudget.tokens, maxPerSecond);
+}
+
+/** 当前同屏敌弹数量 */
+export function countHostileBullets() {
+  let count = 0;
+  for (const b of bullets) if (b && !b.friendly) count++;
+  return count;
+}
+
+/** 预算拒绝统计，供密度测试与调参观察 */
+export function getHostileBulletBudgetStats() {
+  return {
+    active: countHostileBullets(),
+    maxActive: hostileBudget.maxActive,
+    maxPerSecond: hostileBudget.maxPerSecond,
+    tokens: hostileBudget.tokens,
+    deniedVolleys: hostileBudget.deniedVolleys,
+  };
+}
+
 /** 从对象池取出一发敌方子弹 */
-export function spawnHostileBullet(x, y, vx, vy, opts = {}) {
+function createHostileBullet({ x, y, vx, vy, opts = {} }) {
   const b = allocBullet();
   b.x = x; b.y = y;
   b.vx = vx; b.vy = vy;
@@ -225,6 +264,26 @@ export function spawnHostileBullet(x, y, vx, vy, opts = {}) {
   b.dmg = opts.dmg || 0;
   pushBullet(b);
   return b;
+}
+
+/**
+ * 按整组原子准入敌弹，避免密度上限裁出半个扇形或环形弹幕。
+ * 预算不足时返回 null，不积压迟到的 volley。
+ */
+export function spawnHostileBullets(specs) {
+  if (!Array.isArray(specs) || specs.length === 0) return [];
+  if (countHostileBullets() + specs.length > hostileBudget.maxActive
+      || specs.length > hostileBudget.tokens) {
+    hostileBudget.deniedVolleys++;
+    return null;
+  }
+  hostileBudget.tokens -= specs.length;
+  return specs.map(createHostileBullet);
+}
+
+/** 创建一发敌方子弹 */
+export function spawnHostileBullet(x, y, vx, vy, opts = {}) {
+  return spawnHostileBullets([{ x, y, vx, vy, opts }])?.[0] ?? null;
 }
 
 /** 创建敌方子弹 */
@@ -248,14 +307,15 @@ export function spawnLaserVolley(e, playerX, playerY, fireScale = 1) {
   const sp = (8.5 + Math.random() * 1.2) * fireScale;
   const shots = [];
   for (let i = -1; i <= 1; i++) {
-    shots.push(spawnHostileBullet(
-      e.x + px * i * 11,
-      e.y + e.r * 0.5 + py * i * 11,
-      nx * sp, ny * sp,
-      { r: 3.5, color: "#ff4444", maxRange: 720, life: 2.4 },
-    ));
+    shots.push({
+      x: e.x + px * i * 11,
+      y: e.y + e.r * 0.5 + py * i * 11,
+      vx: nx * sp,
+      vy: ny * sp,
+      opts: { r: 3.5, color: "#ff4444", maxRange: 720, life: 2.4 },
+    });
   }
-  return shots;
+  return spawnHostileBullets(shots);
 }
 
 /**
@@ -274,6 +334,10 @@ export function applyPierceOrRemove(b) {
 }
 
 export function updateBullets(dt) {
+  hostileBudget.tokens = Math.min(
+    hostileBudget.maxPerSecond,
+    hostileBudget.tokens + hostileBudget.maxPerSecond * Math.max(0, dt),
+  );
   // 原地更新 + filter 重建，避免逐次 splice 的 O(n) 元素移动
   // （碰撞检测中按对象引用 indexOf，不依赖索引，此处重排安全）
   const next = [];
@@ -488,7 +552,11 @@ export function drawBullets(ctx) {
   ctx.restore();
 }
 
-export function clearBullets(keepFriendly = false) {
+export function clearBullets(keepFriendly = false, resetHostileBudget = true) {
+  if (resetHostileBudget) {
+    hostileBudget.tokens = hostileBudget.maxPerSecond;
+    hostileBudget.deniedVolleys = 0;
+  }
   if (keepFriendly) {
     // 释放敌方子弹回池，保留友方
     for (let i = bullets.length - 1; i >= 0; i--) {
