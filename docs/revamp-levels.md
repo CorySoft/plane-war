@@ -2,10 +2,10 @@
 
 - 日期：2026-11-07
 - 范围：关卡数据化、弹幕图案注册表、节拍内容与迁移路径
-- 状态：**P-A 已随 v0.3.9 受控上线（灰度，默认关闭）**；P-B 待启动，P-C/P-D 为后续提案
+- 状态：**P-A 已随 v0.3.9 受控上线（灰度，默认关闭）**；**P-B 已通过等价性复核，随本轮受控上线（v0.3.10）**；P-C/P-D 待排期
 - P-A 交付：`?campaign=campaign-01` 灰度入口（不带参数时执行路径与 v0.3.8 逐位一致）、`assets/levels/` 三关、`js/level/` 零依赖校验与安全回退、敌弹独立密度闸门（active/rate 双上限 + 原子 volley 准入）；测试 317→326，deploy 版本化完整性 27→29。
 - 灰度说明：仅 URL 参数可进入战役，默认无限模式零变化；静态 JSON 走 `mirror` 普通上传，loader 以 `?v=APP_VERSION` 查询串破缓存（`.htaccess` 对 `.json` 设了 no-cache 头，且版本号每次部署递增）。若后续要在同一版本内 edit-in-place 改 JSON 内容，需评估文件名版本化（Byethost 忽略查询串的历史结论见 `deploy.sh` 注释）。
-- P-B 待办：敌弹图案注册表、spiral/petal 跨齐射角度状态、rain/laserGrid 预告弹道；P-A 的密度闸门与 fallback 保留不回滚。
+- P-B 交付：八类图案注册表、旧 Boss pattern 兼容映射、`patternRef + params` 校验与密度预算检查；P-A 的密度闸门与 fallback 保留不回滚。
 - 依据：`docs/design-levels-editor.md`、`docs/design-current-state.md`、`docs/design-research.md`
 
 ## 决策摘要
@@ -61,22 +61,24 @@ rank = hi == lo ? 0 : clamp((enemyLevel - lo) / (hi - lo), 0, 1)
 
 ### P-B：弹幕图案注册表
 
-**工作量：M。** 以当前 Boss pattern 分支作兼容层，先把图案定义与造弹执行分离，再让关卡 `patternRef` 调用相同注册表。
+**工作量：M。** 注册表已实现并通过独立等价性复核；旧 Boss 字符串与 P-A 的 `aimed`/`laser` 引用均走兼容映射。P-B 随本轮受控上线（v0.3.10）。
 
-| 文件 / 区域 | 计划改动 |
+| 文件 / 区域 | P-B 实施状态 |
 |---|---|
-| `js/patterns.js`（新增） | 纯函数将图案参数、`rank` 和发射器位置转成有上限的敌弹 spec；不引入 BulletML/XML 解析或协程运行时。 |
-| `js/game.js`、`js/wave.js` | 把 `bossFire` 从直接 switch 渐进接到注册表；`phase.pattern` 未迁移时仍走现有 handler。新 stage 的 `patternRef` 明确绑定到注册表。 |
-| `js/enemy.js` | 允许由 stage spawn 给敌机实例附加可选 `patternRef`；未设置时保留按敌机类型的旧射击行为。 |
-| `js/bullet.js` | 注册表统一走敌弹原子 admission；每一种多弹图案先计算 planned count，再通过 stage rate/active budget。 |
-| `assets/levels/schema/*.schema.json`、`assets/levels/patterns/*.json` | 限定 8 种图案的字段与最大参数：fan、ring、spiral、petal、rain、stack/burst、laserGrid、aimed。参数缺失、越界或未知引用在测试/加载时显式失败。 |
-| `test/patterns.test.mjs`、`test/bullet-density.test.mjs`、`tools/perf/bench.mjs` | 每图案边界/数量/方向测试；所有输出经过 density gate；压力基准覆盖组合图案和 cap 拒绝路径。 |
+| `js/level/patterns.js`（新增） | 纯 builder 支持 fan、ring、spiral、petal、rain、stack、laserGrid、aimed。`speed: { base, rankGain }` 的 rank 由共用 `levelFromScore(scoreAxis, score)` 结果归一化；不引入 BulletML/XML 或协程运行时。兼容别名 `burst → ring`、`laser → laserGrid`。 |
+| `js/game.js`、`js/level/loader.js`、`js/enemy.js` | 显式声明的敌机 `patternRef + params` 经注册表构建 spec；未知 Boss pattern 仍走旧默认发射分支。Boss `spread/homing/burst/laser/spawn` 已映射到注册表或等价零弹输出。 |
+| `js/level/schema.js` | stage `patterns` 扩展至 8 类，spawn 支持严格校验的 `params`；单次 volley 弹数必须同时不超过 beat 的 active 与每秒速率预算。无 `patternRef` 时不改变旧敌机射击路径。 |
+| `js/bullet.js` | 未改动；注册表只生成完整 spec 数组，统一交给 P-A `spawnHostileBullets` 做原子准入。 |
+| `test/patterns.test.mjs` | 覆盖八类图案确定性输出、参数边界、rank 单调、beat 预算拒绝，以及所有旧 Boss pattern 的弹道等价性。另将 `test/deploy-versioning.test.mjs` 的版本化模块断言从 29 调整为 30，并断言新增模块可达；其余既有测试未修改。 |
+| P-A 首批 JSON | 保留现有 `aimed`/`laser` 字段和值；它们通过兼容别名/默认参数迁移到注册表，没有改变 3 关内容或难度节奏。 |
 
-**落地边界：** fan、ring、stack/burst、aimed 可先用现有 `spawnHostileBullet` 低成本表达；spiral/petal 需跨齐射保存角度状态；rain/laserGrid 先实现为有预告的短时弹道/弹幕列，不声称已有持续激光碰撞体。当前 `phase.pattern === "homing"` 实际是发射时瞄准玩家，不是弹丸持续追踪；注册表中应命名/映射为 `aimed`。真正的敌弹 homing 作为后续能力，需单独设计转向上限与碰撞公平性。
+**等价性结论：** Boss `spread` 保留原各发速度向量；`homing` 映射为发射瞬间瞄准的 `aimed`；`burst` 映射为 8 向 `ring`；`laser` 映射为三发平行 `laserGrid`；`spawn` 不发弹，继续由 Boss AI 生成护航机。`homing`/`laser` 的瞄准向量从敌机中心计算，子弹仍从原炮口坐标发射；与 v0.3.9 一致。四种旧开火 pattern 通过旧版本固定随机源黄金弹道表校验。**裁定：该「瞄准中心、出生炮口」是既有设计语义，不是 bug，不列入遗留修复清单；P-B 只做无行为变化的架构迁移。** `homing` 不是弹丸持续追踪；真正追踪需另行设计转向与公平性。
 
-**密度预算：** 各图案 Schema 设 `maxBulletsPerEmission`；图案编译阶段计算弹数与理论发射率，beat 静态预算必须合格；运行时仍走 P-A 全局硬上限和 stage admission。持续弹幕不能通过提高上限绕过 benchmark。
+**密度预算：** schema 根据 pattern 默认/显式 `count` 计算单次 emission size，必须同时满足 beat 的 `maxHostileActive` 与 `maxHostileBulletsPerSec`；运行时仍走 P-A 全局硬上限和原子 admission。每次 emission 都是短时子弹 spec，不表示持续激光碰撞体。
 
-**验收与回滚：** 保持原有四种 Boss 字符串行为测试；未迁移 pattern 继续调用旧 switch，显式但无效的 `patternRef` 则测试失败，不做静默 fallback。移除新注册引用可退回旧 Boss 行为，P-A density gate 保留。
+**缓存评估：** 静态 JSON 以 `?v=APP_VERSION` 请求并使用 `cache: "no-cache"`；`.htaccess` 已为 JSON 设置 no-cache，且生产曾验证版本参数请求成功。若未来需要同版本内 edit-in-place 更新 JSON，再评估文件名版本化。
+
+**验收状态：** `npm test` 332/332；默认模式、`campaign-01` 与非法 campaign fallback 的浏览器 smoke 均通过。`node --expose-gc tools/perf/bench.mjs` 的 madHunt 六项等价指标保持一致，分配量仍减少约 95.9%。部署前补查：超 beat 密度预算的 `patternRef` 在加载期被拒、运行时整组原子拒绝（0 半截泄漏）；`?campaign=campaign-01` 实测 level-01 五节拍逐 beat 推进至 level-02.teach-laser，0 console/pageerror。
 
 ### P-C：内容编排、章节接入与只读预览
 
