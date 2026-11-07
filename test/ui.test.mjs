@@ -9,6 +9,7 @@ import {
   initStars, updateStars,
   drawMenu,
   getStartButton, getDifficultyRects, getCampaignButton, getCampaignSubtitleRect,
+  getHelpButton, drawHelp, getHelpCloseButton, isHelpOpen, openHelp, closeHelp, getClearCacheButton,
   getHangarButton, getHangarBackButton, getHangarCards,
   getTalentButton, getTalentBackButton, getTalentCards,
   getSettingsButton, getSettingsBackButton, getSettingToggles,
@@ -24,6 +25,7 @@ import {
 } from "../js/ui.js";
 import { H, META, POWERUP_DEFS, DIFFICULTY_PRESETS, setViewport } from "../js/config.js";
 import { preloadSkin, _resetSkinForTest } from "../js/assets.js";
+import { uiState } from "../js/ui/state.js";
 
 describe("ui", () => {
   beforeEach(() => {
@@ -32,6 +34,10 @@ describe("ui", () => {
     loadMeta();
     clearDamageNumbers();
     setMenuPage("main");
+    uiState.helpOpen = false;
+    uiState.helpSeenPrompted = false;
+    uiState.btnHelpRect = null;
+    uiState.btnHelpCloseRect = null;
   });
 
   it("hitTestButton 矩形命中", () => {
@@ -115,6 +121,41 @@ describe("ui", () => {
       assert.ok(nav.x >= 0 && nav.x + nav.w <= w, `${w}x${h} 导航横向溢出`);
     }
     setViewport(480, 720);
+  });
+
+  it("帮助按钮存在、热区 ≥44 且与清除缓存不重叠；旧常驻提示已移除", () => {
+    const { ctx, texts } = makeSpyCtx();
+    setMenuPage("main");
+    drawMenu(ctx, 0, "normal", DIFFICULTY_PRESETS, []);
+    const help = getHelpButton();
+    const clear = getClearCacheButton();
+    assert.ok(help, "主菜单应注册帮助按钮");
+    assert.ok(clear, "清除缓存按钮应存在");
+    const hr = getTouchTargetRect(help);
+    const cr = getTouchTargetRect(clear);
+    assert.ok(hr.w >= 44 && hr.h >= 44, `帮助按钮热区 ${hr.w}x${hr.h} 不足 44`);
+    const ix = Math.max(hr.x, cr.x), iy = Math.max(hr.y, cr.y);
+    const ir = Math.min(hr.x + hr.w, cr.x + cr.w), ib = Math.min(hr.y + hr.h, cr.y + cr.h);
+    const overlap = Math.max(0, ir - ix) * Math.max(0, ib - iy);
+    assert.equal(overlap, 0, "帮助按钮与清除缓存热区不得重叠");
+    assert.ok(!texts.some(t => /方向键.*自动射击/.test(t.t)), "常驻操作提示应已移除");
+  });
+
+  it("帮助面板含完整要点，可关闭", () => {
+    const { ctx, texts } = makeSpyCtx();
+    openHelp();
+    assert.equal(isHelpOpen(), true);
+    drawHelp(ctx);
+    const joined = texts.map(t => t.t).join("|");
+    for (const key of ["移动", "自动射击", "升级", "Lv.n → Lv.n+1", "已满级 MAX", "战役模式", "暂停"]) {
+      assert.ok(joined.includes(key), `帮助面板缺少要点：${key}`);
+    }
+    const close = getHelpCloseButton();
+    assert.ok(close, "帮助面板应注册关闭按钮");
+    const cr = getTouchTargetRect(close);
+    assert.ok(cr.w >= 44 && cr.h >= 44, `关闭按钮热区 ${cr.w}x${cr.h} 不足 44`);
+    assert.equal(closeHelp(), true);
+    assert.equal(isHelpOpen(), false);
   });
 
   it("机库页绘制卡片与返回按钮", () => {

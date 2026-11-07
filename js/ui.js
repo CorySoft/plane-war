@@ -12,7 +12,7 @@ export {
   getShopBuyButtons, getClearCacheButton, getAchieveCardRects, getHangarButton,
   getHangarBackButton, getTalentButton, getTalentBackButton, getSettingsButton,
   getFeedbackButton, getSettingsBackButton, getHangarCards, getTalentCards,
-  getSettingToggles,
+  getSettingToggles, getHelpButton,
 } from "./ui/menus.js";
 export {
   getCodexScroll, getCodexMaxScroll, getCodexViewport, setCodexScroll,
@@ -23,6 +23,7 @@ export {
   getPauseResumeButton, getPauseQuitButton, getSkillCards,
   getReviveYesButton, getReviveNoButton, drawGameOver, drawLevelUp,
   drawPauseButton, drawPause, drawToast, drawRevive,
+  drawHelp, getHelpCloseButton, isHelpOpen, openHelp, closeHelp,
 } from "./ui/overlays.js";
 export {
   setDetailCard, getDetailCard, setShowClearCache, getShowClearCache,

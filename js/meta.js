@@ -25,7 +25,7 @@ function defaultMeta() {
     achievements: [],       // 已达成成就 id（一次性）
     campaignProgress: {},   // { campaignId: { completedStageIds, unlockedStageIds } }
     quests: null,           // { date, progress:{kills,score,runs,boss,powerups}, claimed:[] }
-    settings: { sfxMuted: false, musicMuted: false, skipTutorial: false, difficulty: "normal" },
+    settings: { sfxMuted: false, musicMuted: false, skipTutorial: false, difficulty: "normal", helpSeen: false },
   };
 }
 
@@ -113,6 +113,7 @@ function sanitizeMeta(raw) {
     sfxMuted: !!s.sfxMuted,
     musicMuted: !!s.musicMuted,
     skipTutorial: !!s.skipTutorial,
+    helpSeen: !!s.helpSeen,
     // 难度档位白名单：非法值（损坏存档/手改）会展开成 undefined 的难度预设
     difficulty: DIFFICULTY_PRESETS[s.difficulty] ? s.difficulty : "normal",
   };
@@ -121,7 +122,7 @@ function sanitizeMeta(raw) {
 
 export function getSettings() {
   if (!metaData.settings) {
-    metaData.settings = { sfxMuted: false, musicMuted: false, skipTutorial: false, difficulty: "normal" };
+    metaData.settings = { sfxMuted: false, musicMuted: false, skipTutorial: false, difficulty: "normal", helpSeen: false };
   }
   if (!metaData.settings.difficulty) metaData.settings.difficulty = "normal";
   return metaData.settings;

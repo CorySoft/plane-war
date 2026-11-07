@@ -48,7 +48,7 @@ import {
   getCodexButton, getCodexBackButton, getPowerupCodexButton, getPowerupCodexBackButton, getAchieveButton, getAchieveBackButton, getQuestClaimButtons,
   getShopButton, getShopBackButton, getShopBuyButtons,
   getReviveYesButton, getReviveNoButton, setMenuPage, getMenuPage,
-  getCampaignButton, setCampaignLoading,
+  getCampaignButton, setCampaignLoading, getHelpButton, drawHelp, getHelpCloseButton, isHelpOpen, openHelp, closeHelp,
   getHangarButton, getHangarBackButton, getHangarCards,
   getTalentButton, getTalentBackButton, getTalentCards,
   getSettingsButton, getSettingsBackButton, getSettingToggles,
@@ -1300,6 +1300,7 @@ function resetGame() {
   skillChoices = null;
   frame = 0;
   toast = null;
+  closeHelp();
   // 清理可能从菜单/暂停残留的状态与特效（防死亡慢动作/闪光/弹窗串局）
   deathTimer = 0;
   deathFlash = 0;
@@ -1580,7 +1581,10 @@ function draw() {
     }
   }
 
-  if (state === STATE.MENU) drawMenu(ctx, getBest(), difficultyKey, DIFFICULTY_PRESETS, getDiscoveredSkills(), player);
+  if (state === STATE.MENU) {
+    drawMenu(ctx, getBest(), difficultyKey, DIFFICULTY_PRESETS, getDiscoveredSkills(), player);
+    if (isHelpOpen()) drawHelp(ctx);
+  }
   else if (state === STATE.OVER) drawGameOver(ctx, score, getBest(), isNewBest, campaignComplete);
   else if (state === STATE.REVIVE) drawRevive(ctx, getStardust(), META.reviveCost);
   else if (state === STATE.LEVELUP) drawLevelUp(ctx, skillChoices, player?.skills || {});
@@ -1612,6 +1616,11 @@ window.addEventListener("keydown", e => {
   // 反馈面板打开时，键盘输入直达输入框，不触发游戏快捷键
   if (isFeedbackOpen()) {
     if (e.code === "Escape") { hideFeedback(); return; }
+    return;
+  }
+  // 帮助面板是菜单层模态：Esc/Space/Enter 关闭，其余按键不穿透
+  if (isHelpOpen()) {
+    if (e.code === "Escape" || e.code === "Space" || e.code === "Enter") { closeHelp(); sfx.click(); }
     return;
   }
   if (e.code === "Escape" || e.code === "KeyP") {
@@ -1711,6 +1720,11 @@ canvas.addEventListener("pointerdown", e => {
   // 简单模式 PLAYING 态：手指直接控制战机 X（input.js 已接管；此处不做重复处理）
 
   if (state === STATE.MENU) {
+    // 帮助面板优先级最高：点关闭按钮或任意处关闭，且不向下穿透
+    if (isHelpOpen()) {
+      if (hitTestButton(mx, my, getHelpCloseButton())) { closeHelp(); sfx.click(); return; }
+      closeHelp(); sfx.click(); return;
+    }
     // 弹窗优先：机库/天赋 购买确认框 / 清除缓存确认框，先于任何主菜单按钮与子页面
     if (getHangarConfirm()) {
       if (hitTestButton(mx, my, getHangarConfirmYesButton())) {
@@ -1891,6 +1905,12 @@ canvas.addEventListener("pointerdown", e => {
     if (getSettingsButton() && hitTestButton(mx, my, getSettingsButton())) { setMenuPage("settings"); sfx.click(); return; }
     // 反馈入口
     if (getFeedbackButton() && hitTestButton(mx, my, getFeedbackButton())) { showFeedback(); sfx.click(); return; }
+    // 帮助按钮（右上角）：打开操作说明
+    if (hitTestButton(mx, my, getHelpButton())) {
+      openHelp();
+      sfx.click();
+      return;
+    }
     // 清除缓存按钮（玩家可用：解决旧缓存导致的加载/存档异常）
     if (hitTestButton(mx, my, getClearCacheButton())) {
       setShowClearCache(true);

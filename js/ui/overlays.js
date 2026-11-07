@@ -3,6 +3,7 @@ import { clamp, roundRect, setf } from "../utils.js";
 import { glowText, softPanel, lineBtn, hexToRgba, C, pulse } from "../theme.js";
 import { uiState } from "./state.js";
 import { uiTime } from "./common.js";
+import { getSettings, setSetting } from "../meta.js";
 
 export function getPauseButton() { return uiState.btnPauseRect; }
 export function getRestartButton() { return uiState.btnRestartRect; }
@@ -385,4 +386,87 @@ export function drawRevive(ctx, stardust, cost) {
   ctx.fillStyle = "rgba(255,255,255,.4)";
   setf(ctx, "13px 'sans-serif'");
   ctx.fillText("星尘可在每局结算时获得，也可通过成就与每日任务获取", W / 2, H * 0.72);
+}
+
+/* ---------- 帮助面板（主菜单「?」） ---------- */
+
+// 常驻操作提示已移除，改为按需查看；内容只描述现有机制，不虚构。
+const HELP_ITEMS = [
+  ["移动", "方向键 / WASD / 触屏拖动"],
+  ["射击", "自动射击，专注走位与躲避"],
+  ["升级", "升级三选一：Lv.n → Lv.n+1"],
+  ["", "满级技能显示「已满级 MAX」"],
+  ["战役", "主菜单「战役模式」，通关解锁下一关"],
+  ["道具", "击毁敌机掉落，拾取生效；星尘用于商城/天赋/复活"],
+  ["暂停", "右上暂停键，或按 P / Esc"],
+];
+
+export function getHelpCloseButton() { return uiState.btnHelpCloseRect; }
+export function isHelpOpen() { return !!uiState.helpOpen; }
+export function openHelp() { uiState.helpOpen = true; }
+export function closeHelp() {
+  if (!uiState.helpOpen) return false;
+  uiState.helpOpen = false;
+  if (!getSettings().helpSeen) setSetting("helpSeen", true);
+  return true;
+}
+
+export function drawHelp(ctx) {
+  uiState.btnHelpCloseRect = null;
+  ctx.fillStyle = "rgba(4,6,14,.82)";
+  ctx.fillRect(0, 0, W, H);
+
+  const pw = Math.min(360, W - 32);
+  const ph = 348;
+  const px = W / 2 - pw / 2;
+  const py = (H - ph) / 2;
+  softPanel(ctx, px, py, pw, ph, 18, {
+    mid: "rgba(18,26,48,.96)", border: "rgba(94,230,255,.6)", glow: 18,
+  });
+
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  glowText(ctx, {
+    text: "操作帮助", x: W / 2, y: py + 18, size: 24, weight: "bold",
+    color: C.cyan, blur: 12, align: "center", baseline: "top", fontFamily: "'sans-serif'",
+  });
+
+  const left = px + 24;
+  const top = py + 62;
+  const rowH = 34;
+  for (let i = 0; i < HELP_ITEMS.length; i++) {
+    const [label, text] = HELP_ITEMS[i];
+    const y = top + i * rowH;
+    if (label) {
+      ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillStyle = C.gold;
+      setf(ctx, "bold 14px 'sans-serif'");
+      ctx.fillText(label, left, y + 7);
+    }
+    ctx.textAlign = "left"; ctx.textBaseline = "middle";
+    ctx.fillStyle = "rgba(255,255,255,.86)";
+    setf(ctx, "13px 'sans-serif'");
+    ctx.fillText(text, left + (label ? 46 : 46), y + 7);
+  }
+
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  ctx.fillStyle = "rgba(255,255,255,.5)";
+  setf(ctx, "12px 'sans-serif'");
+  ctx.fillText("点击任意处或按 Esc 关闭", W / 2, py + ph - 32);
+
+  // 右上关闭按钮（视觉 32，热区由 getTouchTargetRect 扩到 44）
+  const cw = 32;
+  const cx = px + pw - cw - 12;
+  const cy = py + 12;
+  ctx.save();
+  ctx.fillStyle = "rgba(255,255,255,.1)";
+  ctx.strokeStyle = "rgba(94,230,255,.75)";
+  ctx.lineWidth = 1.4;
+  roundRect(ctx, cx, cy, cw, cw, 8);
+  ctx.fill(); ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = C.cyan;
+  setf(ctx, "bold 18px 'sans-serif'");
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("×", cx + cw / 2, cy + cw / 2 + 1);
+  uiState.btnHelpCloseRect = { x: cx, y: cy, w: cw, h: cw };
 }

@@ -33,6 +33,7 @@ export const getMenuPage = () => uiState.menuPage;
 export function getStartButton() { return uiState.btnStartRect; }
 export function getCampaignButton() { return uiState.btnCampaignRect; }
 export function getCampaignSubtitleRect() { return uiState.campaignSubRect; }
+export function getHelpButton() { return uiState.btnHelpRect; }
 export function setCampaignLoading(loading) { uiState.campaignLoading = !!loading; }
 export function getDifficultyRects() { return uiState.difficultyRects; }
 export function getCodexButton() { return uiState.btnCodexRect; }
@@ -90,6 +91,12 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = [], pla
   if (uiState.menuPage === "powerupCodex") { drawPowerupCodex(ctx, getDiscoveredPowerups()); drawPageVeil(ctx); return; }
   if (uiState.menuPage === "shop") { drawShop(ctx); drawPageVeil(ctx); return; }
 
+  // 首次进入自动弹一次帮助：常驻提示移除后补偿首次引导（存档记 helpSeen）
+  if (!uiState.helpSeenPrompted) {
+    uiState.helpSeenPrompted = true;
+    if (!getSettings().helpSeen) uiState.helpOpen = true;
+  }
+
   // ---- 标题：纯色填充 + 辉光，底层放大制造光晕 ----
   const ty = H * 0.08;
   ctx.save();
@@ -120,9 +127,20 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = [], pla
   ctx.fillText("清除缓存", ccx + ccw / 2, ccy + cch / 2 + 1);
   uiState.btnClearCacheRect = { x: ccx, y: ccy, w: ccw, h: cch };
 
-  ctx.fillStyle = "rgba(255,255,255,.72)";
-  setf(ctx, "13px 'sans-serif'");
-  ctx.fillText("方向键 / A D 移动 · 自动射击 · 升级三选一", W / 2, H * 0.175);
+  // 帮助按钮（右上角，清除缓存下方）：原常驻操作提示已移除，改为按需查看
+  const hx = ccx, hy = 66, hw = 34, hh = 34;
+  ctx.save();
+  ctx.fillStyle = "rgba(20,34,58,.9)";
+  ctx.strokeStyle = C.cyan;
+  ctx.lineWidth = 1.6;
+  roundRect(ctx, hx, hy, hw, hh, 17);
+  ctx.fill(); ctx.stroke();
+  ctx.restore();
+  ctx.fillStyle = C.cyan;
+  setf(ctx, "bold 20px 'sans-serif'");
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("?", hx + hw / 2, hy + hh / 2 + 1);
+  uiState.btnHelpRect = { x: hx, y: hy, w: hw, h: hh };
 
   // 星尘徽章
   const starStr = "星尘 ✦ " + getStardust();

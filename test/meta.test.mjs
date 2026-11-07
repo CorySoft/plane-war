@@ -145,7 +145,7 @@ describe("meta", () => {
     localStorage.setItem("planeWarMeta", JSON.stringify({ stardust: 5 }));
     const data = loadMeta();
     assert.deepEqual(data.settings, {
-      sfxMuted: false, musicMuted: false, skipTutorial: false, difficulty: "normal",
+      sfxMuted: false, musicMuted: false, skipTutorial: false, helpSeen: false, difficulty: "normal",
     });
   });
 
