@@ -133,6 +133,29 @@ let reviveUsed = false;    // 本局是否已用过复活（每局限 1 次）
 // 深空背景固定渐变缓存（基色/地平线/暗角，只依赖 W/H），必须在 loop() 启动前声明，避免 TDZ
 let spaceBgCache = { key: "", base: null, hz: null, vg: null };
 
+/**
+ * madHunt 单波会生成的 pattern 数量。
+ * 必须与 player.js getShootPattern 的 madHunt 分支保持一致
+ * （baseDirs = 8 + scatter*2，每个方向 1 + volley 发）。
+ */
+export function expectedMadHuntPatterns(player) {
+  if (!player || !(player.buffs?.madHunt > 0)) return 0;
+  const scatterLv = player.skills?.scatter || 0;
+  const volleyLv = player.skills?.volley || 0;
+  return (8 + scatterLv * 2) * (1 + volleyLv);
+}
+
+/**
+ * 是否值得构建本轮 pattern。
+ * 仅 madHunt 分支能在生成前精确预判：满屏时直接跳过，避免生成整波对象后被 screenCap 整批丢弃。
+ * 常规分支的 pattern 数受 waveCap / perCh 裁剪，必须生成后再判，否则会误伤本可发射的波次。
+ */
+export function canBuildShootPattern(player, friendlyCount, cap) {
+  const madHuntCount = expectedMadHuntPatterns(player);
+  if (madHuntCount <= 0) return true;
+  return friendlyCount + madHuntCount <= cap;
+}
+
 // ---------- 初始化（失败也尽量让 loading 走掉，靠兜底显示菜单） ----------
 // loadMeta 独立 try：UI 绑定（如触摸按钮 DOM 缺失）抛错不能连带跳过读档，
 // 否则内存档保持默认值，之后每次 saveMeta 都会覆盖掉用户真实存档
@@ -282,8 +305,9 @@ function update(dt, realDt = dt) {
         if (!b.friendly || !b.homing) continue;
         let best = null, bd = Infinity;
         for (const e of enemies) {
-          const d = hypot(e.x - b.x, e.y - b.y);
-          if (d < bd) { bd = d; best = e; }
+          const dx = e.x - b.x, dy = e.y - b.y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < bd) { bd = d2; best = e; }
         }
         if (!best) continue;
         const cur = Math.atan2(b.vy, b.vx);
@@ -291,7 +315,7 @@ function update(dt, realDt = dt) {
         let da = target - cur;
         while (da > Math.PI) da -= TAU;
         while (da < -Math.PI) da += TAU;
-        const sp = Math.hypot(b.vx, b.vy);
+        const sp = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
         const na = cur + da * Math.min(1, 10 * dt);
         b.vx = Math.cos(na) * sp;
         b.vy = Math.sin(na) * sp;
@@ -333,10 +357,13 @@ function update(dt, realDt = dt) {
       // 先把当前所有尚未触发的主弹标记为「已触发」：每颗主弹只允许触发一次下一波射击，
       // 避免同一波多颗子弹依次越过 10m 时反复触发造成误连射。新发的子弹 traveled=0 仍可触发下一波。
       markMainBulletsTriggered();
-      const patterns = getShootPattern(player);
+      const friendlyCount = countFriendlyBullets();
       // 同屏密度兜底：射速拉满 + 长射程时屏上可能堆积上百发，
-      // 超过 screenCap 就跳过本轮，保证画面队形可读与帧率
-      if (countFriendlyBullets() + patterns.length <= BCFG.screenCap) {
+      // madHunt 单波数量可提前精确推导，满屏时直接跳过，不再生成 140 个对象后整批丢弃。
+      const patterns = canBuildShootPattern(player, friendlyCount, BCFG.screenCap)
+        ? getShootPattern(player)
+        : null;
+      if (patterns && friendlyCount + patterns.length <= BCFG.screenCap) {
         for (const p of patterns) {
           fireBullet(p.angle, p.dmg, player, p.x, p.y, p.spd, p.isExplosion, p.homing);
         }
