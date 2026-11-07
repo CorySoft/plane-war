@@ -49,7 +49,7 @@ import {
   getShopButton, getShopBackButton, getShopBuyButtons,
   getReviveYesButton, getReviveNoButton, setMenuPage, getMenuPage,
   getCampaignButton, setCampaignLoading, getHelpButton, drawHelp, getHelpCloseButton, isHelpOpen, openHelp, closeHelp,
-  getHangarButton, getHangarBackButton, getHangarCards,
+  getHangarButton, getHangarBackButton, getHangarCards, setHangarPreview,
   getTalentButton, getTalentBackButton, getTalentCards,
   getSettingsButton, getSettingsBackButton, getSettingToggles,
   getClearCacheButton, drawClearCacheConfirm, getClearYesButton, getClearNoButton, getShowClearCache, setShowClearCache,
@@ -1834,6 +1834,7 @@ canvas.addEventListener("pointerdown", e => {
       if (hitTestButton(mx, my, getHangarBackButton())) { setMenuPage("main"); sfx.click(); return; }
       for (const card of getHangarCards()) {
         if (!hitTestButton(mx, my, card)) continue;
+        setHangarPreview(card.id);
         if (card.unlocked) {
           setSelectedAircraft(card.id);
           toast = { text: "已选择战机", color: "#66e0ff", t: 1.4 };

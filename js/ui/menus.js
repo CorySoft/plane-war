@@ -6,6 +6,7 @@ import {
   getStardust, getQuestView, getAchievementView, getDiscoveredPowerups, getShopLevel,
   isAircraftUnlocked, getSelectedAircraft, isTalentPurchased, getSettings, getCampaignProgress,
 } from "../meta.js";
+import { drawSprite } from "../assets.js";
 import { uiState } from "./state.js";
 import { drawBackButton, pageTitle, titleRule, uiTime } from "./common.js";
 import { drawSkillCodex, drawPowerupCodex, resetCodexScroll } from "./codex.js";
@@ -56,6 +57,8 @@ export function getSettingsButton() { return uiState.btnSettingsRect; }
 export function getFeedbackButton() { return uiState.btnFeedbackRect; }
 export function getSettingsBackButton() { return uiState.btnSettingsBackRect; }
 export function getHangarCards() { return uiState.hangarCardRects; }
+export function getHangarPreviewRect() { return uiState.hangarPreviewRect; }
+export function setHangarPreview(id) { uiState.hangarPreviewId = id; }
 export function getTalentCards() { return uiState.talentCardRects; }
 export function getSettingToggles() { return uiState.settingToggleRects; }
 
@@ -399,6 +402,55 @@ function drawShop(ctx) {
   uiState.btnShopRect = null;
 }
 
+/** 机库大图预览：展示当前出战/最近点击机型的皮肤，未解锁时降亮度 */
+function drawHangarPreview(ctx) {
+  const ids = Object.keys(META.aircraft);
+  const selected = getSelectedAircraft();
+  const previewId = ids.includes(uiState.hangarPreviewId) ? uiState.hangarPreviewId : selected;
+  const cfg = META.aircraft[previewId];
+  const unlocked = isAircraftUnlocked(previewId);
+  const on = selected === previewId;
+
+  const px = 14, pw = W - 28;
+  const py = H * 0.675, ph = 150;
+  softPanel(ctx, px, py, pw, ph, 14, {
+    mid: "rgba(18,26,48,.92)",
+    border: unlocked ? "rgba(94,230,255,.55)" : "rgba(255,255,255,.16)",
+    glow: unlocked ? 10 : 2,
+  });
+
+  const imgW = Math.min(148, pw * 0.42), imgH = ph - 18;
+  const cx = px + 16 + imgW / 2, cy = py + ph / 2;
+  ctx.save();
+  if (!unlocked) ctx.globalAlpha = 0.38;
+  // void_ 的资产 id 是 player_void（清单里已去掉尾下划线），与 drawPlayer 同规则
+  drawSprite(ctx, "player_" + String(previewId).replace(/_$/, ""), cx, cy, imgW, imgH);
+  ctx.restore();
+
+  const tx = px + 16 + imgW + 16;
+  ctx.textAlign = "left"; ctx.textBaseline = "top";
+  ctx.fillStyle = unlocked ? C.white : "rgba(255,255,255,.72)";
+  setf(ctx, "bold 18px 'sans-serif'");
+  ctx.fillText(cfg.name, tx, py + 16);
+
+  ctx.fillStyle = on ? C.green : unlocked ? C.gold : C.lilacDark;
+  setf(ctx, "bold 12px 'sans-serif'");
+  ctx.fillText(on ? "出战中" : unlocked ? "已拥有 · 点击选择" : "未解锁 · 点击购买", tx, py + 42);
+
+  ctx.fillStyle = "rgba(255,255,255,.7)";
+  setf(ctx, "12px 'sans-serif'");
+  ctx.fillText(`速度 ${cfg.speed}`, tx, py + 64);
+  ctx.fillText(`伤害 ×${cfg.baseDmg}`, tx + 82, py + 64);
+  ctx.fillText(`射速 ×${cfg.fireRate}`, tx, py + 84);
+  ctx.fillText(`生命 ${cfg.startHp}`, tx + 82, py + 84);
+
+  ctx.fillStyle = unlocked ? "rgba(255,255,255,.55)" : C.gold;
+  setf(ctx, "12px 'sans-serif'");
+  ctx.fillText(unlocked ? cfg.desc : `${cfg.desc} · ${cfg.cost} 星尘解锁`, tx, py + 108);
+
+  uiState.hangarPreviewRect = { x: px, y: py, w: pw, h: ph };
+}
+
 function drawHangar(ctx) {
   pageTitle(ctx, "机  库", W / 2, H * 0.045, C.cyan, 32);
   titleRule(ctx, W / 2, H * 0.095, 66, C.cyan);
@@ -458,6 +510,7 @@ function drawHangar(ctx) {
     ctx.fillText(tag, x + cardW / 2, y + 92);
     uiState.hangarCardRects.push({ id, x, y, w: cardW, h: cardH, unlocked, cost: cfg.cost });
   }
+  drawHangarPreview(ctx);
   uiState.btnHangarBackRect = drawBackButton(ctx);
 }
 

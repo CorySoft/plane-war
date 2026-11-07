@@ -12,7 +12,7 @@ export {
   getShopBuyButtons, getClearCacheButton, getAchieveCardRects, getHangarButton,
   getHangarBackButton, getTalentButton, getTalentBackButton, getSettingsButton,
   getFeedbackButton, getSettingsBackButton, getHangarCards, getTalentCards,
-  getSettingToggles, getHelpButton,
+  getSettingToggles, getHelpButton, getHangarPreviewRect, setHangarPreview,
 } from "./ui/menus.js";
 export {
   getCodexScroll, getCodexMaxScroll, getCodexViewport, setCodexScroll,

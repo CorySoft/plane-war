@@ -26,6 +26,8 @@ export const uiState = {
   btnHelpCloseRect: null,
   helpOpen: false,
   helpSeenPrompted: false,
+  hangarPreviewId: null,
+  hangarPreviewRect: null,
   btnHangarRect: null,
   btnHangarBackRect: null,
   btnTalentRect: null,

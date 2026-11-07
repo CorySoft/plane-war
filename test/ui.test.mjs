@@ -10,7 +10,7 @@ import {
   drawMenu,
   getStartButton, getDifficultyRects, getCampaignButton, getCampaignSubtitleRect,
   getHelpButton, drawHelp, getHelpCloseButton, isHelpOpen, openHelp, closeHelp, getClearCacheButton,
-  getHangarButton, getHangarBackButton, getHangarCards,
+  getHangarButton, getHangarBackButton, getHangarCards, getHangarPreviewRect, setHangarPreview,
   getTalentButton, getTalentBackButton, getTalentCards,
   getSettingsButton, getSettingsBackButton, getSettingToggles,
   getCodexButton, getCodexBackButton,
@@ -169,6 +169,23 @@ describe("ui", () => {
     }
     assert.ok(getHangarBackButton());
     assert.equal(getHangarButton(), null);
+  });
+
+  it("机库大图预览：位于卡片下方、不压返回按钮，未解锁机型也可预览", () => {
+    const { ctx } = makeSpyCtx();
+    setMenuPage("hangar");
+    drawMenu(ctx, 0, "normal", DIFFICULTY_PRESETS, []);
+    const preview = getHangarPreviewRect();
+    const cards = getHangarCards();
+    const back = getHangarBackButton();
+    assert.ok(preview && preview.w > 0 && preview.h > 0, "应注册预览区");
+    const cardBottom = Math.max(...cards.map(c => c.y + c.h));
+    assert.ok(preview.y >= cardBottom, `预览顶 ${preview.y} 与卡片底 ${cardBottom} 重叠`);
+    assert.ok(preview.y + preview.h <= back.y, `预览底 ${preview.y + preview.h} 压到返回按钮 ${back.y}`);
+    // 未解锁机型（新档只有 falcon）切换预览也不抛错
+    setHangarPreview("phantom");
+    assert.doesNotThrow(() => drawMenu(ctx, 0, "normal", DIFFICULTY_PRESETS, []));
+    assert.ok(getHangarPreviewRect(), "未解锁机型也应能预览外观");
   });
 
   it("天赋页绘制卡片含锁定态", () => {
