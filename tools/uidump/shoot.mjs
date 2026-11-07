@@ -52,6 +52,16 @@ async function runViewport(browser, width, height) {
       return skin && skin.ok === skin.total;
     }, null, { timeout: 15000 });
     await page.waitForTimeout(600);
+    // 首局主菜单会自动弹帮助面板，它会整层压住菜单截图（实测菜单系截图全被覆盖）。
+    // 截图前确定性关闭并断言，否则拍出来的「菜单」其实是帮助面板。
+    const helpClosed = await page.evaluate(async () => {
+      const meta = await import("/js/meta.js");
+      const ui = await import("/js/ui.js");
+      meta.setSetting("helpSeen", true);
+      if (ui.isHelpOpen()) ui.closeHelp();
+      return !ui.isHelpOpen();
+    });
+    if (!helpClosed) throw new Error("help panel is still open after closeHelp()");
     await page.evaluate(async () => {
       window.__uidumpUi = await import("/js/ui.js");
       window.__uidumpConfig = await import("/js/config.js");
@@ -61,6 +71,9 @@ async function runViewport(browser, width, height) {
 
   async function shot(name, delay = 180) {
     await page.waitForTimeout(delay);
+    if (await page.evaluate(() => window.__uidumpUi?.isHelpOpen?.())) {
+      throw new Error(`截图 ${name} 时帮助面板仍处于打开状态`);
+    }
     await page.screenshot({ path: path.join(dir, `${name}.png`) });
     console.log(`${label}/${name}.png`);
   }

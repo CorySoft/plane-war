@@ -154,7 +154,7 @@ htdocs/                  ← web 根
 
 ```bash
 python3 -m http.server 8080 --bind 0.0.0.0   # 在项目根启动
-npm test                                      # 单元测试（当前 291 项 / 24 suites）
+npm test                                      # 单元测试（项数以实际输出为准，勿写死）
 node tools/dev/smoke.mjs                      # 真机冒烟（需 playwright）
 ```
 

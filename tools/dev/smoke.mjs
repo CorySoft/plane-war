@@ -103,6 +103,18 @@ async function main() {
   await page.goto(`http://127.0.0.1:${PORT}/index.html${campaignQuery}`, { waitUntil: "load" });
   await page.waitForTimeout(2500);
 
+  // 首局进入主菜单会自动弹出帮助面板（v0.4.7 起的首次引导）。它是菜单模态，
+  // 点击会被它吞掉且不向下穿透：不先关掉，「点击开始」实际只是「关闭帮助」，
+  // 冒烟会停在主菜单却仍报 OK（v0.4.7~v0.5.1 一直如此）。这里确定性关闭并校验。
+  const helpClosed = await page.evaluate(async () => {
+    const meta = await import("/js/meta.js");
+    const ui = await import("/js/ui.js");
+    meta.setSetting("helpSeen", true);
+    if (ui.isHelpOpen()) ui.closeHelp();
+    return !ui.isHelpOpen();
+  });
+  if (!helpClosed) throw new Error("help panel is still open after closeHelp()");
+
   const boot = await page.evaluate(() => ({
     gameReady: !!window.__gameReady,
     fallbackShown: document.getElementById("fallback")?.style.display || "none",
@@ -131,6 +143,8 @@ async function main() {
   }
   await page.waitForTimeout(400);
   await click(geo.lw / 2, geo.lh * 0.70);
+  // 必须真的进入对局（state 1）；否则后面的对局数据与暂停检查都是假证据
+  await page.waitForFunction(() => window.__game?.state?.() === 1, null, { timeout: 15000 });
   await page.waitForTimeout(300);
 
   let campaignProgression = null;
@@ -156,13 +170,24 @@ async function main() {
   await page.evaluate(() => window.__game?.setScore?.(120000));
   await page.waitForTimeout(3000);
 
-  const mid = await page.evaluate(() => ({
-    state: window.__game?.state?.(),
-    score: window.__game?.getScore?.(),
-    enemies: window.__game?.enemies?.length ?? 0,
-    bullets: window.__game?.bullets?.length ?? 0,
-    campaign: window.__game?.getCampaignStatus?.() || null,
-  }));
+  const mid = await page.evaluate(async () => {
+    // 取 1.5s 内的峰值占位：单帧可能恰好没有敌机/子弹，采样峰值才能证明对局在跑
+    const deadline = performance.now() + 1500;
+    let best = { enemies: 0, bullets: 0 };
+    while (performance.now() < deadline) {
+      const g = window.__game;
+      const cur = { enemies: g?.enemies?.length ?? 0, bullets: g?.bullets?.length ?? 0 };
+      if (cur.enemies + cur.bullets > best.enemies + best.bullets) best = cur;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    return {
+      state: window.__game?.state?.(),
+      score: window.__game?.getScore?.(),
+      enemies: best.enemies,
+      bullets: best.bullets,
+      campaign: window.__game?.getCampaignStatus?.() || null,
+    };
+  });
 
   // 暂停面板
   await page.keyboard.press("KeyP");
@@ -194,6 +219,9 @@ async function main() {
   console.log("失败请求/404:", failedRequests.length ? failedRequests.join("\n") : "(无)");
 
   const bad = unexpectedConsoleErrors.length + pageErrors.length + failedRequests.length;
+  // 门禁必须覆盖「真的在玩」：修复前 state 恒为 0（MENU）也照样报 OK
+  const notPlaying = mid.state !== 1;
+  const emptyField = (mid.enemies + mid.bullets) === 0;
   const campaignFailed = CAMPAIGN && (EXPECT_CAMPAIGN_FALLBACK
     ? (!mid.campaign?.fallbackError || mid.campaign.active)
     : (!mid.campaign?.active || mid.campaign.fallbackError));
@@ -205,7 +233,9 @@ async function main() {
       || !campaignProgression.progress?.unlockedStageIds?.includes("level-02"));
   await browser.close();
   server.close();
-  if (bad > 0 || !boot.gameReady || campaignFailed || menuCampaignFailed || progressionFailed) {
+  if (bad > 0 || !boot.gameReady || notPlaying || emptyField || campaignFailed || menuCampaignFailed || progressionFailed) {
+    if (notPlaying) console.log("  -> 未进入对局（state 应为 1，实际 " + mid.state + "）");
+    if (emptyField) console.log("  -> 对局数据为空（敌机与子弹峰值均为 0）");
     console.log("\n[FAIL] 存在异常");
     process.exitCode = 1;
   } else {
