@@ -385,8 +385,8 @@ export const COMBO = {
   bonus: 500,         // 每次击杀的连击加分
 };
 export const XP_BASE = 60;          // 1 级升 2 级所需经验
-// 升级需求增长系数：原 1.4 时 20 级需近万点经验，后期几乎升不动
-export const XP_GROWTH = 1.32;
+// 升级需求增长系数：1.4 → 1.32 → 1.28；1.28 下 20 级需求 6,533（原 11,723），仍在 balance 护栏内
+export const XP_GROWTH = 1.28;
 export const PLAYER = {
   hitRadius: 20,      // 敌方子弹判定玩家半径（略宽于贴图便于弹幕贴身擦过）
 };
@@ -399,9 +399,9 @@ export const META = {
   reviveCost: 40,           // 死亡后立即复活所需星尘（对局内 1 次）
   aircraft: {
     falcon:  { name: "战隼", desc: "均衡型", speed: 6.2, baseDmg: 1, fireRate: 1, startHp: 3, cost: 0 },
-    blaze:   { name: "烈焰", desc: "高射速", speed: 5.8, baseDmg: 0.8, fireRate: 1.3, startHp: 2, cost: 500 },
-    ironwall:{ name: "铁壁", desc: "高血量", speed: 4.5, baseDmg: 1.2, fireRate: 0.8, startHp: 5, cost: 500 },
-    phantom: { name: "幻影", desc: "高机动", speed: 8.0, baseDmg: 0.9, fireRate: 1.1, startHp: 2, cost: 800 },
+    blaze:   { name: "烈焰", desc: "高射速", speed: 5.8, baseDmg: 0.7, fireRate: 0.8, startHp: 2, cost: 500 },
+    ironwall:{ name: "铁壁", desc: "高血量", speed: 4.5, baseDmg: 1.35, fireRate: 1.2, startHp: 5, cost: 500 },
+    phantom: { name: "幻影", desc: "高机动", speed: 8.0, baseDmg: 0.9, fireRate: 1.0, startHp: 2, cost: 800 },
     thor:    { name: "雷神", desc: "爆炸弹", speed: 5.5, baseDmg: 0.7, fireRate: 1.0, startHp: 3, cost: 1000, startSkills: { explosion: 1 } },
     void_:   { name: "虚空", desc: "穿透弹", speed: 5.8, baseDmg: 1.0, fireRate: 1.0, startHp: 3, cost: 1200, startSkills: { penetrate: 1 } },
   },
