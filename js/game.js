@@ -22,7 +22,7 @@ import {
 } from "./enemy.js";
 import { spawnPowerup, updatePowerups, drawPowerups, clearPowerups, updateGachaAnim, drawGachaAnim, getGachaAnim, clearGachaAnim, setGachaAnim, xpPackAmount } from "./powerup.js";
 import { generateSkillChoices, applySkill, getMaxLives } from "./skill.js";
-import { createPlayer, updatePlayer, getShootPattern, drawPlayer, getOrbitBullets, removeOrbitBullet } from "./player.js";
+import { createPlayer, updatePlayer, getShootPattern, drawPlayer, getOrbitBullets, removeOrbitBullet, tryLifesteal } from "./player.js";
 import {
   getSpawnRate, updateWaves, resetWaves,
   spawnBoss, getCurrentBossPhase, BOSS_TYPES, spawnSwarm
@@ -1071,14 +1071,11 @@ function addScore(n) {
   showAchievementToast(checkAchievements({ runScore: score, runLevel: pLevel, runCombo: combo }));
 }
 
-// 能量吸取：每级 15% 概率在击杀时回复 1 生命（不超过最大生命）
+// 能量吸取：等级概率（6%/级）+ 5 秒触发冷却，防止连杀时瞬间回满
 function lifestealOnKill() {
-  const lv = player.skills.lifesteal || 0;
-  if (lv <= 0) return;
-  if (Math.random() < lv * 0.15) {
-    lives = Math.min(maxLives, lives + 1);
-    spawnDamageNumber(player.x, player.y - 30, "+♥", "#ff6b9d", false);
-  }
+  if (!tryLifesteal(player)) return;
+  lives = Math.min(maxLives, lives + 1);
+  spawnDamageNumber(player.x, player.y - 30, "+♥", "#ff6b9d", false);
 }
 
 // 当前附带掉落率加成（爆率技能 + 幸运爆率 buff + 天赋，概率加算）

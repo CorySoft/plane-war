@@ -2,7 +2,7 @@
  * player.js — 玩家逻辑 + 渲染
  * =========================================================== */
 
-import { W, H, PLAYER_BASE, BULLET, TAU, refireGateDistance, calcFireRate, META } from "./config.js";
+import { W, H, PLAYER_BASE, BULLET, TAU, refireGateDistance, calcFireRate, META, LIFESTEAL, lifestealChance } from "./config.js";
 import { clamp, rand, setf } from "./utils.js";
 import { pressed, getStickDir } from "./input.js";
 import { drawSpriteNose } from "./assets.js";
@@ -93,6 +93,7 @@ export function createPlayer(aircraftCfg, talentEffects, shopEffects) {
     _freeze: false,
     _heal: 0,
     _toast: null,
+    lifestealCd: 0,   // 能量吸取触发冷却（秒），由 updatePlayer 递减
   };
 }
 
@@ -129,6 +130,9 @@ export function updatePlayer(dt, player, refireDist = 0, maxTraveled = 0) {
   // 无敌帧
   if (player.invincible > 0) player.invincible -= dt;
 
+  // 能量吸取触发冷却
+  if (player.lifestealCd > 0) player.lifestealCd -= dt;
+
   // 武器等级计时
   if (player.powerTime > 0) {
     player.powerTime -= dt;
@@ -153,6 +157,19 @@ export function updatePlayer(dt, player, refireDist = 0, maxTraveled = 0) {
   updateOrbit(player, dt);
 
   return shouldFire;
+}
+
+/**
+ * 能量吸取判定：等级概率 + 触发冷却（冷却写入 player，由 updatePlayer 递减）。
+ * 返回 true 表示本次击杀应回复 1 生命。
+ */
+export function tryLifesteal(player, rng = Math.random) {
+  const lv = player?.skills?.lifesteal || 0;
+  if (lv <= 0) return false;
+  if ((player.lifestealCd || 0) > 0) return false;
+  if (rng() >= lifestealChance(lv)) return false;
+  player.lifestealCd = LIFESTEAL.cooldown;
+  return true;
 }
 
 // ---------- 护体弹（特殊子弹围绕己方旋转） ----------

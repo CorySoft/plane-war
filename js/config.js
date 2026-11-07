@@ -261,7 +261,7 @@ export const SKILLS = [
   { id: "splitDist", name: "分裂距离",   desc: "碎片射程+60",    fullDesc: "分裂碎片飞行距离每级 +60，满级碎片飞得更远",    color: "#ff8a55", max: 5, requires: "split" },
   { id: "penetrate", name: "穿透弹",     desc: "穿透+1敌",       fullDesc: "子弹可穿透额外 +1 个敌人，满级穿透 6 个",      color: "#5ee6ff", max: 6 },
   { id: "guard",     name: "护体弹",     desc: "环绕子弹击退",   fullDesc: "环绕子弹自动击退敌机，每级上限 +1（1级2颗、满级6颗），间隔随等级缩短", color: "#7CFC00", max: 5 },
-  { id: "lifesteal", name: "能量吸取",   desc: "15%击杀回血",    fullDesc: "每级 15% 概率击毁敌机回复 1 生命",            color: "#7CFC00", max: 4 },
+  { id: "lifesteal", name: "能量吸取",   desc: "6%击杀回血",    fullDesc: "每级 6% 概率击毁敌机回复 1 生命（触发后 5 秒冷却）", color: "#7CFC00", max: 4 },
   { id: "xpboost",   name: "经验增幅",   desc: "经验+15%",       fullDesc: "每级获得经验 +15%，满级 +90%",                color: "#c8a6ff", max: 6 },
   { id: "magnet",    name: "磁力核心",   desc: "永久吸道具",     fullDesc: "永久自动吸引附近道具",                        color: "#c8a6ff", max: 1 },
   { id: "score",     name: "幸运金币",   desc: "得分+10%",       fullDesc: "每级得分 +10%，满级 +60%",                    color: "#c8a6ff", max: 6 },
@@ -270,6 +270,20 @@ export const SKILLS = [
   { id: "bulletSpeed", name: "子弹加速", desc: "弹速+15%",      fullDesc: "每级子弹飞行速度 +15%，满级 +90%",            color: "#5ee6ff", max: 6 },
   { id: "orbital",   name: "天基武器",   desc: "加速递增",       fullDesc: "子弹射出后不断加速，威力递增",                color: "#5ee6ff", max: 5 },
 ];
+
+// 能量吸取：每级 6% 击杀回血，成功触发后 5 秒冷却。
+// 旧值 15%/级（满级 60%）在满配清屏下实测 2.3 HP/s，是承伤上限（hitPlayer 后 2.2s 无敌帧 → 0.45 HP/s）的 5 倍，
+// 会直接抵消走位要求；新参数把稳态上限压到 1/5=0.2 HP/s（约承伤 44%）。
+export const LIFESTEAL = {
+  perLevel: 0.06,
+  cooldown: 5,
+};
+
+/** 能量吸取触发概率（按等级钳制，供游戏逻辑与测试共用） */
+export function lifestealChance(lv) {
+  const level = Math.max(0, Math.floor(Number(lv) || 0));
+  return Math.min(skillMax("lifesteal"), level) * LIFESTEAL.perLevel;
+}
 
 /** 取技能满级上限（供难度档位/道具授予按真实上限钳制，避免写死数字后与 SKILLS 脱节） */
 export function skillMax(id) {
