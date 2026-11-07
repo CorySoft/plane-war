@@ -109,6 +109,7 @@ export const ENEMY_LEVEL = {
   scorePerLevel: 6000,    // 每6000分敌方升1级（原 8000 太慢，中期几乎感觉不到成长）
   hpPerLevel: 0.10,       // 每级HP +10%
   fireCdPerLevel: -0.03,  // 每级开火间隔 -3%（越快）
+  fireCdMinMul: 0.25,     // 开火间隔缩放下限：防止高等级乘数变负导致敌机出生即开火
   rewardPerLevel: 0.10,   // 每级得分/经验 +10%
   maxLevel: 99,           // 敌方等级硬上限（不再卡在 30 级停涨）
   softCapLevel: 30,       // 超过此等级后成长减半，避免后期数值爆炸
@@ -298,6 +299,44 @@ export const DIFFICULTY = {
   swarmMinLevel: 2,        // 虫群波最低难度等级
   powerupCap: 30,           // 同屏道具上限：连锁清屏一帧掉几十个会糊屏幕 + 砸帧率
 };
+
+// ---------- 统一得分轴（玩家难度 / 敌方等级的单一真源） ----------
+// 两条曲线写在同一张表里，避免「玩家 58,500 分封顶 14、敌方涨到 99」的脱钩。
+// ENEMY_LEVEL.maxLevel 仍保留为理论上限（enemyLevelScale 内部使用），
+// 运行时敌方等级由本表实际封顶 18，且与玩家等级差值不超过 4。
+export const SCORE_AXIS = [
+  { at: 0,      playerLevel: 1,  enemyLevel: 1 },
+  { at: 8000,   playerLevel: 3,  enemyLevel: 3 },
+  { at: 20000,  playerLevel: 6,  enemyLevel: 6 },
+  { at: 35000,  playerLevel: 10, enemyLevel: 11 },
+  { at: 58500,  playerLevel: 14, enemyLevel: 14 },
+  { at: 100000, playerLevel: 14, enemyLevel: 16 },
+  { at: 180000, playerLevel: 14, enemyLevel: 18 },
+];
+
+/**
+ * 按累计得分从统一得分轴派生玩家难度等级与敌方等级。
+ * 分段线性 + 向下取整，保证两条曲线单调不减；越界取首/末段。
+ * 与关卡 schema 的 difficulty.scoreAxis 同结构，后续 level.js 直接复用。
+ */
+export function levelFromScore(axis, score) {
+  const list = Array.isArray(axis) && axis.length ? axis : SCORE_AXIS;
+  const s = Math.max(0, Number(score) || 0);
+  const first = list[0];
+  if (s <= first.at) return { playerLevel: first.playerLevel, enemyLevel: first.enemyLevel };
+  for (let i = 1; i < list.length; i++) {
+    const a = list[i - 1], b = list[i];
+    if (s < b.at) {
+      const t = (s - a.at) / (b.at - a.at);
+      return {
+        playerLevel: Math.floor(a.playerLevel + (b.playerLevel - a.playerLevel) * t),
+        enemyLevel: Math.floor(a.enemyLevel + (b.enemyLevel - a.enemyLevel) * t),
+      };
+    }
+  }
+  const last = list[list.length - 1];
+  return { playerLevel: last.playerLevel, enemyLevel: last.enemyLevel };
+}
 
 // ---------- 难度档位 ----------
 export const DIFFICULTY_PRESETS = {

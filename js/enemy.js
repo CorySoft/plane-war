@@ -78,7 +78,10 @@ export function spawnEnemy(level, diff, enemyLevel = 1, atX, atY) {
   e.y = atY ?? -cfg.r - 10;
   e.vy = cfg.speed * (diff?.speedScale ?? 1) * rand(0.8, 1.25) * (1 + level * DIFFICULTY.speedScalePerLevel);
   e.vx = rand(-0.4, 0.4);
-  e.fireCd = rand(cfg.fireCd[0], cfg.fireCd[1]) * (diff?.fireCdScale ?? 1) * (1 + scale * ENEMY_LEVEL.fireCdPerLevel);
+  // 开火间隔缩放：每级 -3%，但必须钳正——scale>33.3 时原乘数会变负，
+  // 新生成敌机的首射冷却 ≤0 会出生即开火（超后期数值失控）。
+  const fireMul = Math.max(ENEMY_LEVEL.fireCdMinMul, 1 + scale * ENEMY_LEVEL.fireCdPerLevel);
+  e.fireCd = rand(cfg.fireCd[0], cfg.fireCd[1]) * (diff?.fireCdScale ?? 1) * fireMul;
   e.t = rand(0, TAU);
   e.hitFlash = 0;
   e.frozen = 0;

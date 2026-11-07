@@ -2,7 +2,7 @@
  * game.js — 主游戏循环 + 状态机 + 碰撞检测
  * =========================================================== */
 
-import { W, H, STATE, BULLET as BCFG, TAU, DIFFICULTY_PRESETS, ENEMY_LEVEL, POWERUP_DROP, META, COMBO, XP_BASE, XP_GROWTH, PLAYER, computeViewport, setViewport, skillMax } from "./config.js";
+import { W, H, STATE, BULLET as BCFG, TAU, DIFFICULTY_PRESETS, POWERUP_DROP, META, COMBO, XP_BASE, XP_GROWTH, PLAYER, SCORE_AXIS, levelFromScore, computeViewport, setViewport, skillMax } from "./config.js";
 import { clamp, rand, hypot, setf } from "./utils.js";
 import { glowText } from "./theme.js";
 import { sfx, startMusic, stopMusic, initAudio, setSfxMuted, setMusicMuted, setMusicIntensity, duckMusic } from "./audio.js";
@@ -23,7 +23,7 @@ import { spawnPowerup, updatePowerups, drawPowerups, clearPowerups, updateGachaA
 import { generateSkillChoices, applySkill, getMaxLives } from "./skill.js";
 import { createPlayer, updatePlayer, getShootPattern, drawPlayer, getOrbitBullets, removeOrbitBullet } from "./player.js";
 import {
-  getDifficultyLevel, getSpawnRate, updateWaves, resetWaves,
+  getSpawnRate, updateWaves, resetWaves,
   spawnBoss, getCurrentBossPhase, BOSS_TYPES, spawnSwarm
 } from "./wave.js";
 import { drawHUD } from "./hud.js";
@@ -418,17 +418,14 @@ function update(dt, realDt = dt) {
     // 抽奖动画更新
     updateGachaAnim(dt);
 
-    // 难度
-    const newLevel = getDifficultyLevel(score);
-    if (newLevel > level) {
-      level = newLevel;
+    // 难度与敌方等级：统一读得分轴（单一真源，避免两条曲线脱钩）
+    const levels = levelFromScore(SCORE_AXIS, score);
+    if (levels.playerLevel > level) {
+      level = levels.playerLevel;
       sfx.power();
     }
-
-    // 敌方等级（每8000分升1级，上限30）
-    const newEnemyLevel = Math.min(ENEMY_LEVEL.maxLevel, 1 + Math.floor(score / ENEMY_LEVEL.scorePerLevel));
-    if (newEnemyLevel > enemyLevel) {
-      enemyLevel = newEnemyLevel;
+    if (levels.enemyLevel > enemyLevel) {
+      enemyLevel = levels.enemyLevel;
       sfx.power();
     }
 

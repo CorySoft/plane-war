@@ -90,7 +90,7 @@ export function fireBullet(angle, dmg, player, x, y, spd = BULLET.baseSpeed, isE
   const critBuff = (player.buffs?.critboost || 0) > 0;
   const critChance = BULLET.critChance * critLvl + (player.talentCrit || 0);
   const isCrit = critBuff || (critChance > 0 && Math.random() < critChance);
-  // 暴击倍率：基础 2.5 + 致命暴击技能每级 +0.5 + 致命 buff 额外 +0.5
+  // 暴击倍率：基础 1.5 + 致命暴击技能每级 +0.5 + 致命 buff 额外 +0.5
   const critMulti = BULLET.critMulti
     + 0.5 * (player.skills.critdmg || 0)
     + (critBuff ? 0.5 : 0);
