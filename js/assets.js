@@ -5,7 +5,7 @@
  * 1. 绝不阻塞启动——Image 异步加载，加载完成前各绘制点回退到原程序化绘制，
  *    加载失败也只是永久回退，不抛错、不重试、不影响游戏循环。
  * 2. Node（测试环境）无 Image 构造器，顶层守卫直接进入「全部回退」态。
- * 3. 目录带风格 id（neon/realistic/…）：换风格=换目录=换路径，天然破除
+ * 3. 目录带风格 id（当前仅 neon）：换风格=换目录=换路径，天然破除
  *    Byethost 按路径缓存的旧图问题。
  * =========================================================== */
 
@@ -68,23 +68,80 @@ const MANIFEST = {
 
 const BASE = `assets/skin/${SKIN_STYLE}/`;
 
+// 首屏核心集（14 张，931KB）：玩家战机 + 敌机 + 背景，占总量 46%。
+// Boss 组（3 张，590KB）最早 L=5 才出现，延后 2s 加载；
+// 道具/技能图标（27 张，509KB）仅图鉴/升级弹窗使用，放到空闲批次。
+const CORE_IDS = new Set([
+  "player_falcon", "player_blaze", "player_ironwall", "player_phantom", "player_thor", "player_void",
+  "enemy_small", "enemy_mid", "enemy_big", "enemy_laser", "enemy_shield", "enemy_split",
+  "bg_space", "bg_menu",
+]);
+const BOSS_IDS = new Set(["boss_mothership", "boss_fortress", "boss_phantom"]);
+
 // id → { img, state }；state: "loading" | "ok" | "fail"
 const entries = new Map();
 let started = false;
+let restScheduled = false;
+let bossTimer = null;
+let restTimer = null;
 
-/** 触发全部贴图加载（幂等，可重复调用） */
+function loadOne(id, file) {
+  if (entries.has(id)) return;
+  const img = new Image();
+  const rec = { img, state: "loading" };
+  entries.set(id, rec);
+  img.onload = () => { rec.state = "ok"; };
+  // 失败即回退：置 fail 后 getSprite 恒返回 null
+  img.onerror = () => { rec.state = "fail"; };
+  img.src = BASE + file;
+}
+
+/** Boss 批（3 张）：对局开始后延时加载，避开首屏带宽竞争 */
+export function preloadBossSkin() {
+  if (typeof Image === "undefined") return;
+  for (const [id, file] of Object.entries(MANIFEST)) {
+    if (BOSS_IDS.has(id)) loadOne(id, file);
+  }
+}
+
+/** 道具/技能图标批（27 张）：图鉴或空闲时补加载 */
+export function preloadRestSkin() {
+  if (typeof Image === "undefined") return;
+  for (const [id, file] of Object.entries(MANIFEST)) {
+    if (!CORE_IDS.has(id) && !BOSS_IDS.has(id)) loadOne(id, file);
+  }
+}
+
+/** 兜底：核心之外全部补齐（Node 测试与显式预热用） */
+export function preloadRemainingSkin() {
+  if (typeof Image === "undefined") return;
+  for (const [id, file] of Object.entries(MANIFEST)) {
+    if (!CORE_IDS.has(id)) loadOne(id, file);
+  }
+}
+
+/** 触发贴图加载（幂等）：核心集立即发；Boss 组 2s、道具/技能空闲批次 */
 export function preloadSkin() {
   if (started) return;
   started = true;
   if (typeof Image === "undefined") return; // Node 测试环境：保持全部回退
   for (const [id, file] of Object.entries(MANIFEST)) {
-    const img = new Image();
-    const rec = { img, state: "loading" };
-    entries.set(id, rec);
-    img.onload = () => { rec.state = "ok"; };
-    // 失败即回退：置 fail 后 getSprite 恒返回 null
-    img.onerror = () => { rec.state = "fail"; };
-    img.src = BASE + file;
+    if (CORE_IDS.has(id)) loadOne(id, file);
+  }
+  // Node 测试环境无 rAF：直接补全，保持「preloadSkin 覆盖完整清单」的既有断言；
+  // 真实浏览器才分批，避免非战斗资源与核心贴图抢首屏带宽。
+  if (typeof requestAnimationFrame !== "function") {
+    preloadRemainingSkin();
+    return;
+  }
+  if (restScheduled) return;
+  restScheduled = true;
+  if (typeof setTimeout === "function") {
+    // Boss 最早 L=5（约 30s+）出现，2s 后加载足够提前
+    bossTimer = setTimeout(preloadBossSkin, 2000);
+    restTimer = setTimeout(preloadRestSkin, 3500);
+  } else {
+    preloadRemainingSkin();
   }
 }
 
@@ -253,6 +310,9 @@ export function drawBackground(ctx, id, w, h) {
 /** 供测试重置启动标记（测试内部用，业务代码勿调） */
 export function _resetSkinForTest() {
   started = false;
+  restScheduled = false;
+  if (bossTimer) { clearTimeout(bossTimer); bossTimer = null; }
+  if (restTimer) { clearTimeout(restTimer); restTimer = null; }
   entries.clear();
   tintCache.clear();
   contentCache.clear();

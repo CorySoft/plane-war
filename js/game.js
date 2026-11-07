@@ -3,7 +3,7 @@
  * =========================================================== */
 
 import { W, H, STATE, BULLET as BCFG, TAU, DIFFICULTY_PRESETS, POWERUP_DROP, META, COMBO, XP_BASE, XP_GROWTH, PLAYER, SCORE_AXIS, levelFromScore, computeViewport, setViewport, skillMax } from "./config.js";
-import { clamp, rand, hypot, setf } from "./utils.js";
+import { clamp, rand, hypot, setf, cachedRadialGradient } from "./utils.js";
 import { glowText } from "./theme.js";
 import { sfx, startMusic, stopMusic, initAudio, setSfxMuted, setMusicMuted, setMusicIntensity, duckMusic } from "./audio.js";
 import { initInput, bindTouchButtons, getStick, isStickActive, setDifficulty as setPlayerDifficulty, isEasyMode, getEasyTouch } from "./input.js";
@@ -1406,11 +1406,13 @@ function paintSpace(ctx, frame = 0) {
     ctx.fillRect(-10, -10, W + 20, H + 20);
   }
 
-  // 星云随 frame 缓慢漂移，位置每帧变化，渐变保持即时创建
+  // 星云随 frame 缓慢漂移；按 4px 位置桶复用渐变，偏差远小于光晕半径且限制缓存规模。
   const nebula = (x, y, r, c0) => {
-    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
-    g.addColorStop(0, c0);
-    g.addColorStop(1, "rgba(0,0,0,0)");
+    const gx = Math.round(x / 4) * 4;
+    const g = cachedRadialGradient(ctx, `nebula:${W}x${H}:${DPR}:${gx}:${y}:${r}:${c0}`, gx, y, 0, gx, y, r, gg => {
+      gg.addColorStop(0, c0);
+      gg.addColorStop(1, "rgba(0,0,0,0)");
+    });
     ctx.fillStyle = g;
     ctx.fillRect(x - r, y - r, r * 2, r * 2);
   };
@@ -1461,11 +1463,18 @@ function draw() {
     // 残血警告：只剩 1 条命时屏幕边缘脉动红光，提示玩家谨慎
     if (lives === 1 && deathTimer <= 0) {
       const a = 0.10 + 0.08 * Math.sin(frame * 0.15);
-      const grad = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.7);
-      grad.addColorStop(0, "rgba(255,40,40,0)");
-      grad.addColorStop(1, `rgba(255,40,40,${a})`);
+      // 坐标固定：缓存渐变，用 globalAlpha 承担脉动（乘性等价，避免每帧重建）
+      const m = ctx.getTransform?.() || { a: DPR, b: 0, c: 0, d: DPR, e: 0, f: 0 };
+      const key = `lowHp:${W}x${H}:${m.a},${m.b},${m.c},${m.d},${m.e},${m.f}`;
+      const grad = cachedRadialGradient(ctx, key, W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.7, g => {
+        g.addColorStop(0, "rgba(255,40,40,0)");
+        g.addColorStop(1, "rgba(255,40,40,1)");
+      });
+      const prevAlpha = ctx.globalAlpha;
+      ctx.globalAlpha = prevAlpha * a;
       ctx.fillStyle = grad;
       ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = prevAlpha;
     }
   }
 

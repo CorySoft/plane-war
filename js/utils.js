@@ -59,3 +59,40 @@ export function setf(ctx, fontStr) {
   const scaled = Math.max(8, Math.round(parseFloat(m[2]) * (W / 480)));
   ctx.font = fontStr.replace(/(\d+(?:\.\d+)?)px/, scaled + "px");
 }
+
+// 渐变对象按 (ctx, key) 缓存。仅当坐标/色标及创建时的画布变换都固定时安全复用；
+// 受 translate/rotate 影响的动态渐变必须按帧创建，CanvasGradient 不跟随后续变换。
+const gradientCaches = new WeakMap();
+const MAX_GRADIENTS_PER_CONTEXT = 128;
+function gradientMap(ctx) {
+  let map = gradientCaches.get(ctx);
+  if (!map) { map = new Map(); gradientCaches.set(ctx, map); }
+  return map;
+}
+
+function cachedGradient(ctx, key, create) {
+  const map = gradientMap(ctx);
+  let g = map.get(key);
+  if (!g) {
+    g = create();
+    if (map.size >= MAX_GRADIENTS_PER_CONTEXT) map.delete(map.keys().next().value);
+    map.set(key, g);
+  }
+  return g;
+}
+
+export function cachedLinearGradient(ctx, key, x0, y0, x1, y1, init) {
+  return cachedGradient(ctx, key, () => {
+    const g = ctx.createLinearGradient(x0, y0, x1, y1);
+    if (init) init(g);
+    return g;
+  });
+}
+
+export function cachedRadialGradient(ctx, key, x0, y0, r0, x1, y1, r1, init) {
+  return cachedGradient(ctx, key, () => {
+    const g = ctx.createRadialGradient(x0, y0, r0, x1, y1, r1);
+    if (init) init(g);
+    return g;
+  });
+}
