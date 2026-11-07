@@ -225,6 +225,16 @@ export function flushMeta() {
   writeNow();
 }
 
+/**
+ * 修改状态后立即落盘：先置 dirty 再 flush。
+ * flushMeta 在 saveDirty=false 时会直接跳过，若调用方只调 flush 而不标记脏，
+ * 改动就只停在内存里（刷新即丢）。所有「购买/解锁/结算」这类必须不丢的低频操作走这里。
+ */
+export function saveNow() {
+  saveDirty = true;
+  flushMeta();
+}
+
 // 页面被切后台/关闭/刷新时强制落盘，避免攒着的改动随标签页一起消失
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
   const flush = () => flushMeta();
@@ -248,7 +258,7 @@ export function earnStardust(score) {
   // 每日任务：本局次数与得分
   questEvent("runs", 1);
   questEvent("score", score);
-  flushMeta();   // 一局结算：必须立刻落盘，否则切后台丢失整局收益
+  saveNow();   // 一局结算：必须立刻落盘，否则切后台丢失整局收益
   return amount;
 }
 
@@ -257,7 +267,7 @@ export function bonusStardust(amount) {
   if (amount <= 0) return;
   metaData.stardust += amount;
   metaData.totalStardustEarned += amount;
-  saveMeta();
+  saveNow();
 }
 
 /** 扣除星尘，余额不足返回 false */
@@ -265,7 +275,7 @@ export function spendStardust(amount) {
   if (amount <= 0) return true;
   if (metaData.stardust < amount) return false;
   metaData.stardust -= amount;
-  flushMeta();   // 花星尘是低频但必须立刻生效的操作
+  saveNow();   // 花星尘是低频但必须立刻生效的操作
   return true;
 }
 
@@ -305,7 +315,7 @@ export function unlockAircraft(id) {
   if (!cfg || metaData.stardust < cfg.cost || isAircraftUnlocked(id)) return false;
   metaData.stardust -= cfg.cost;
   metaData.unlockedAircraft.push(id);
-  flushMeta();
+  saveNow();
   return true;
 }
 
@@ -344,7 +354,7 @@ export function purchaseTalent(id) {
   if (cfg.requires && !isTalentPurchased(cfg.requires)) return false;
   metaData.stardust -= cfg.cost;
   metaData.purchasedTalents.push(id);
-  flushMeta();
+  saveNow();
   return true;
 }
 
@@ -432,8 +442,7 @@ export function recordCampaignStageCompletion(campaignId, stageId, nextStageId =
     }
   }
   if (changed) {
-    saveMeta();
-    flushMeta();
+    saveNow();
   }
   return true;
 }
@@ -486,7 +495,7 @@ export function claimQuest(id) {
   if ((q.progress[def.type] || 0) < def.target) return 0;
   q.claimed.push(id);
   bonusStardust(def.reward);
-  flushMeta();
+  saveNow();
   return def.reward;
 }
 
@@ -538,7 +547,7 @@ export function purchaseShopItem(id) {
   metaData.stardust -= cost;
   if (!metaData.shopLevels) metaData.shopLevels = {};
   metaData.shopLevels[id] = lv + 1;
-  flushMeta();
+  saveNow();
   return true;
 }
 

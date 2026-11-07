@@ -215,11 +215,11 @@ describe("meta 落盘节流", () => {
     const orig = localStorage.setItem.bind(localStorage);
     localStorage.setItem = (...a) => { writes++; return orig(...a); };
     try {
-      bonusStardust(1);
+      addKill();   // 高频事件走 saveMeta：只打脏标记
       assert.equal(writes, 0, "saveMeta 应当只打脏标记");
       flushMeta();
       assert.equal(writes, 1, "flushMeta 应当真正落盘");
-      assert.equal(JSON.parse(localStorage.getItem("planeWarMeta")).stardust, 2);
+      assert.equal(JSON.parse(localStorage.getItem("planeWarMeta")).totalKills, 1);
     } finally {
       localStorage.setItem = orig;
     }
@@ -228,17 +228,17 @@ describe("meta 落盘节流", () => {
   it("页面隐藏时强制落盘（visibilitychange / pagehide）", () => {
     localStorage.setItem("planeWarMeta", '{"stardust":1}');
     loadMeta();
-    bonusStardust(1);
+    addKill();   // 攒一笔待写（saveMeta）
     document.hidden = true;
     document.dispatchEvent(new Event("visibilitychange"));
-    assert.equal(JSON.parse(localStorage.getItem("planeWarMeta")).stardust, 2);
+    assert.equal(JSON.parse(localStorage.getItem("planeWarMeta")).totalKills, 1);
   });
 
   it("resetMeta 取消待写队列，不会把默认档写回", () => {
     localStorage.setItem("planeWarMeta", '{"stardust":500}');
     loadMeta();
-    // 攒一笔待写
-    bonusStardust(1);
+    // 攒一笔待写（addKill → saveMeta 打脏，但尚未落盘）
+    addKill();
     // 清档：不应有任何后续写入把默认值落回
     resetMeta();
     assert.equal(localStorage.getItem("planeWarMeta"), null);
