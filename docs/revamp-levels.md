@@ -4,7 +4,7 @@
 - 范围：关卡数据化、弹幕图案注册表、节拍内容与迁移路径
 - 状态：**P-A 已随 v0.3.9 受控上线（灰度，默认关闭）**；P-B 待启动，P-C/P-D 为后续提案
 - P-A 交付：`?campaign=campaign-01` 灰度入口（不带参数时执行路径与 v0.3.8 逐位一致）、`assets/levels/` 三关、`js/level/` 零依赖校验与安全回退、敌弹独立密度闸门（active/rate 双上限 + 原子 volley 准入）；测试 317→326，deploy 版本化完整性 27→29。
-- 灰度说明：仅 URL 参数可进入战役，默认无限模式零变化；静态 JSON 走 `mirror` 普通上传，loader 以 `?v=APP_VERSION` 查询串破缓存（Byethost 忽略查询串的历史结论见 `deploy.sh` 注释，JSON 每次随版本变；若后续要 edit-in-place 改 JSON 内容，需评估文件名版本化。
+- 灰度说明：仅 URL 参数可进入战役，默认无限模式零变化；静态 JSON 走 `mirror` 普通上传，loader 以 `?v=APP_VERSION` 查询串破缓存（`.htaccess` 对 `.json` 设了 no-cache 头，且版本号每次部署递增）。若后续要在同一版本内 edit-in-place 改 JSON 内容，需评估文件名版本化（Byethost 忽略查询串的历史结论见 `deploy.sh` 注释）。
 - P-B 待办：敌弹图案注册表、spiral/petal 跨齐射角度状态、rain/laserGrid 预告弹道；P-A 的密度闸门与 fallback 保留不回滚。
 - 依据：`docs/design-levels-editor.md`、`docs/design-current-state.md`、`docs/design-research.md`
 
