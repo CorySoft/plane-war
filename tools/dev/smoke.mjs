@@ -27,6 +27,14 @@ const VW = Number(process.env.W || 420);
 const VH = Number(process.env.H || 740);
 const CAMPAIGN = process.env.CAMPAIGN || "";
 const EXPECT_CAMPAIGN_FALLBACK = process.env.EXPECT_CAMPAIGN_FALLBACK === "1";
+const isExpectedCampaignRequest = url => {
+  if (!EXPECT_CAMPAIGN_FALLBACK || !CAMPAIGN) return false;
+  try {
+    return new URL(url).pathname === `/assets/levels/${encodeURIComponent(CAMPAIGN)}.json`;
+  } catch {
+    return false;
+  }
+};
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -73,6 +81,7 @@ async function main() {
   page.on("console", m => {
     if (m.type() === "error") {
       if (isVersionedEntry(m.location()?.url)) return;
+      if (EXPECT_CAMPAIGN_FALLBACK && m.text() === "Failed to load resource: the server responded with a status of 404 (Not Found)") return;
       consoleErrors.push(m.text());
     }
   });
@@ -82,7 +91,8 @@ async function main() {
     failedRequests.push(`${r.url()} :: ${r.failure()?.errorText}`);
   });
   page.on("response", r => {
-    if (r.status() >= 400 && !isVersionedEntry(r.url())) {
+    if (r.status() >= 400 && !isVersionedEntry(r.url())
+        && !(r.status() === 404 && isExpectedCampaignRequest(r.url()))) {
       failedRequests.push(`${r.status()} ${r.url()}`);
     }
   });
