@@ -29,7 +29,7 @@ import {
 } from "./wave.js";
 import { APP_VERSION } from "./version.js";
 import {
-  createCampaignRunner, getCampaignId, loadCampaignSafely,
+  createCampaignRunner, getCampaignId, loadCampaignSafely, beatLabel,
 } from "./level/loader.js";
 import {
   buildBossPatternSpecs, buildPatternSpecs, rankFromScore,
@@ -60,8 +60,6 @@ import {
 import { initFeedback, showFeedback, hideFeedback, isFeedbackOpen } from "./feedback.js";
 import { preloadSkin, drawBackground, skinProgress } from "./assets.js";
 
-// Debug mode
-const DEBUG_MODE = true;
 import {
   loadMeta, earnStardust, getBest, getTalentEffects, getShopEffects, purchaseShopItem, addKill, getSelectedAircraftConfig,
   discoverSkill, getDiscoveredSkills, spendStardust, getStardust,
@@ -475,10 +473,11 @@ function update(dt, realDt = dt) {
       }
       if (progress.beatChanged || progress.stageChanged) {
         clearBullets(true, false);
-        const title = progress.stageChanged
+        // 关卡切换显示关卡名；节拍切换显示中文节拍名（role 是内部标识，不能直接展示）
+        const text = progress.stageChanged
           ? progress.stage.title
-          : progress.beat.role;
-        toast = { text: title, color: "#66e0ff", t: 1.8 };
+          : beatLabel(progress.beat.role);
+        if (text) toast = { text, color: "#66e0ff", t: 1.8 };
       }
       for (const event of progress.events) {
         if (event.type === "boss") {

@@ -7,6 +7,20 @@ import {
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const FETCH_TIMEOUT_MS = 8000;
 
+// beat.role 是关卡内部标识（teach/test/twist/rest/boss），不能直接展示给玩家。
+// 玩家可见的节拍提示统一走这里的中文映射；未知 role 返回空串，宁可不弹也不弹英文。
+const BEAT_LABELS = {
+  teach: "教学",
+  test: "实战",
+  twist: "变招",
+  rest: "喘息",
+  boss: "首领战",
+};
+
+export function beatLabel(role) {
+  return BEAT_LABELS[role] || "";
+}
+
 export function getCampaignId(search = "") {
   return new URLSearchParams(search).get("campaign");
 }

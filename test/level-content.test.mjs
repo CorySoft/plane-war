@@ -49,4 +49,23 @@ describe("campaign chapter content", () => {
       "aimed", "fan", "laser", "laserGrid", "petal", "rain", "ring", "spiral", "stack",
     ]);
   });
+
+  it("beat 角色均有玩家可读中文映射，内部 role 不会弹给玩家", async () => {
+    const { beatLabel } = await import("../js/level/loader.js");
+    const manifest = validateCampaignManifest(await readJson("campaign-01.json"), "campaign-01");
+    const roles = new Set();
+    for (const chapter of manifest.chapters) {
+      for (const stageId of chapter.stages) {
+        const stage = await readJson(`${stageId}.json`);
+        for (const beat of stage.beats) {
+          roles.add(beat.role);
+          const label = beatLabel(beat.role);
+          assert.ok(label, `${stageId}.${beat.id} 的 role=${beat.role} 缺少中文映射`);
+          assert.notEqual(label, beat.role, `role=${beat.role} 不能原样展示给玩家`);
+          assert.ok(!/test|debug/i.test(label), `${beat.role} 的中文映射不得含开发标识`);
+        }
+      }
+    }
+    assert.ok(roles.has("test"), "内部 test 节拍仍存在，只是不再直接展示");
+  });
 });
