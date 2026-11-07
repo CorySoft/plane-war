@@ -3,7 +3,7 @@ export {
   spawnDamageNumber, updateDamageNumbers, drawDamageNumbers, clearDamageNumbers,
   initStars, updateStars, drawStars,
 } from "./ui/effects.js";
-export { hitTestButton } from "./ui/common.js";
+export { hitTestButton, getTouchTargetRect } from "./ui/common.js";
 export {
   setMenuPage, getMenuPage, getPageVeilAlpha, drawMenu,
   getStartButton, getCampaignButton, setCampaignLoading, getDifficultyRects, getCodexButton, getCodexBackButton,

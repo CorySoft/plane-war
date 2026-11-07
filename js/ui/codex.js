@@ -116,11 +116,11 @@ export function drawSkillCodex(ctx, discovered, player) {
     }
 
     // 名称（顶部）
-    ctx.fillStyle = got ? s.color : "rgba(255,255,255,.30)";
+    ctx.fillStyle = got ? s.color : "#b8c5dc";
     setf(ctx, "bold 13px 'sans-serif'");
     ctx.fillText(s.name, x + cardW / 2, y + 12);
     // 描述（名称下方，未点亮时显示「未点亮」）
-    ctx.fillStyle = got ? "rgba(255,255,255,.55)" : "rgba(255,255,255,.22)";
+    ctx.fillStyle = got ? "rgba(255,255,255,.72)" : "#aebbd2";
     setf(ctx, "11px 'sans-serif'");
     ctx.fillText(got ? s.desc : "未点亮", x + cardW / 2, y + 30);
 
@@ -196,12 +196,12 @@ export function drawPowerupCodex(ctx, discovered) {
     }
 
     // 名称
-    ctx.fillStyle = got ? def.color : "rgba(255,255,255,.30)";
+    ctx.fillStyle = got ? def.color : "#b8c5dc";
     setf(ctx, "bold 13px 'sans-serif'");
     ctx.fillText(def.name, x + cardW / 2, y + 35);
 
     // 描述（已精简，无需截断）
-    ctx.fillStyle = got ? "rgba(255,255,255,.55)" : "rgba(255,255,255,.22)";
+    ctx.fillStyle = got ? "rgba(255,255,255,.72)" : "#aebbd2";
     setf(ctx, "11px 'sans-serif'");
     const desc = got ? String(powerupDesc(k)) : "未拾取";
     ctx.fillText(desc, x + cardW / 2, y + 52);

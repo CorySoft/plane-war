@@ -1,4 +1,4 @@
-import { W, H } from "../config.js";
+import { W, H, computeViewport } from "../config.js";
 import { roundRect, setf } from "../utils.js";
 import { lineBtn, hexToRgba, C } from "../theme.js";
 
@@ -35,8 +35,20 @@ export function titleRule(ctx, x, y, halfW, color) {
   ctx.restore();
 }
 
+export function getTouchTargetRect(rect) {
+  if (!rect) return null;
+  const scale = typeof window === "undefined" ? 1 : computeViewport().scale;
+  const minSize = 44 / scale;
+  const w = Math.min(W, Math.max(rect.w, minSize));
+  const h = Math.min(H, Math.max(rect.h, minSize));
+  const x = Math.min(Math.max(rect.x - (w - rect.w) / 2, 0), W - w);
+  const y = Math.min(Math.max(rect.y - (h - rect.h) / 2, 0), H - h);
+  return { ...rect, x, y, w, h };
+}
+
 export function hitTestButton(mx, my, rect) {
-  return rect && mx >= rect.x && mx <= rect.x + rect.w && my >= rect.y && my <= rect.y + rect.h;
+  const target = getTouchTargetRect(rect);
+  return target && mx >= target.x && mx <= target.x + target.w && my >= target.y && my <= target.y + target.h;
 }
 
 export function drawBackButton(ctx, label = "← 返回主菜单") {

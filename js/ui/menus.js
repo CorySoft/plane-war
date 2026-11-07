@@ -233,7 +233,7 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = [], pla
     ["powerupCodex", "道具图鉴", C.redSoft],
     ["shop", "系统商城", C.lilacDark],
   ];
-  const nw = 148, nh = 40, ng = 8;
+  const nw = 148, nh = 40, ng = 12;
   const nStartY = H * 0.64;
   for (let i = 0; i < nav.length; i++) {
     const [id, label, color] = nav[i];
@@ -330,16 +330,16 @@ function drawShop(ctx) {
     ctx.fill(); ctx.stroke();
 
     // 图标
-    ctx.fillStyle = maxed ? C.green : affordable ? C.lilacDark : "rgba(255,255,255,.30)";
+    ctx.fillStyle = maxed ? C.green : affordable ? C.lilacDark : "#aebbd2";
     setf(ctx, "bold 18px monospace");
     ctx.textAlign = "left"; ctx.textBaseline = "middle";
     ctx.fillText(item.icon, x + 10, y + cardH * 0.5);
 
     // 名称 + 描述
-    ctx.fillStyle = maxed ? C.green : affordable ? C.white : "rgba(255,255,255,.50)";
+    ctx.fillStyle = maxed ? C.green : "#e0e7f2";
     setf(ctx, "bold 13px 'sans-serif'");
     ctx.fillText(item.name + " " + lv + "/" + item.max, x + 32, y + cardH * 0.32);
-    ctx.fillStyle = "rgba(255,255,255,.50)";
+    ctx.fillStyle = "#c2ccdd";
     setf(ctx, "10px 'sans-serif'");
     ctx.fillText(item.desc, x + 32, y + cardH * 0.72);
 
@@ -350,7 +350,7 @@ function drawShop(ctx) {
       setf(ctx, "bold 12px 'sans-serif'");
       ctx.fillText("已满级", x + cardW - 10, y + cardH * 0.5);
     } else {
-      ctx.fillStyle = affordable ? C.gold : "rgba(255,255,255,.35)";
+      ctx.fillStyle = affordable ? C.gold : "#aebbd2";
       setf(ctx, "bold 12px 'sans-serif'");
       ctx.fillText("✦ " + cost, x + cardW - 10, y + cardH * 0.5);
     }
@@ -562,7 +562,7 @@ function drawAchieve(ctx) {
   ctx.fillText("每日 0 点刷新 · 领取后发放星尘", 16 + 76, H * 0.15);
 
   const qv = getQuestView();
-  const rowH = 46;
+  const rowH = 50;
   uiState.questClaimRects = [];
   for (let i = 0; i < qv.items.length; i++) {
     const it = qv.items[i];

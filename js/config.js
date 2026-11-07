@@ -229,7 +229,7 @@ export const SHOP_ITEMS = [
   { id: "startShield",name: "起始护盾",   icon: "S", desc: "开局护盾 +1",          baseCost: 150, max: 2, effect: (n) => ({ maxShield: n }) },
   { id: "explosion",  name: "爆炸伤害",   icon: "✴", desc: "爆炸AOE伤害 +10%",    baseCost: 150, max: 4, effect: (n) => ({ expDmgBonus: 0.10 * n }) },
   { id: "xpGain",     name: "经验获取",   icon: "X", desc: "获得经验 +10%",         baseCost: 150, max: 5, effect: (n) => ({ xpGain: 0.10 * n }) },
-  { id: "score",      name: "金币加成",   icon: "¥", desc: "得分 +5%",            baseCost: 150, max: 5, effect: (n) => ({ scoreBonus: 0.05 * n }) },
+  { id: "score",      name: "得分加成",   icon: "✦", desc: "得分 +5%",            baseCost: 150, max: 5, effect: (n) => ({ scoreBonus: 0.05 * n }) },
   { id: "dropRate",   name: "道具掉落",   icon: "☘", desc: "掉落率 +5%",           baseCost: 150, max: 4, effect: (n) => ({ dropRate: 0.05 * n }) },
   { id: "invTime",    name: "无敌时间",   icon: "✦", desc: "受伤无敌时间 +0.2s",   baseCost: 150, max: 3, effect: (n) => ({ invTime: 0.2 * n }) },
 ];
@@ -264,7 +264,7 @@ export const SKILLS = [
   { id: "lifesteal", name: "能量吸取",   desc: "6%击杀回血",    fullDesc: "每级 6% 概率击毁敌机回复 1 生命（触发后 5 秒冷却）", color: "#7CFC00", max: 4 },
   { id: "xpboost",   name: "经验增幅",   desc: "经验+15%",       fullDesc: "每级获得经验 +15%，满级 +90%",                color: "#c8a6ff", max: 6 },
   { id: "magnet",    name: "磁力核心",   desc: "永久吸道具",     fullDesc: "永久自动吸引附近道具",                        color: "#c8a6ff", max: 1 },
-  { id: "score",     name: "幸运金币",   desc: "得分+10%",       fullDesc: "每级得分 +10%，满级 +60%",                    color: "#c8a6ff", max: 6 },
+  { id: "score",     name: "幸运得分",   desc: "得分+10%",       fullDesc: "每级得分 +10%，满级 +60%",               color: "#c8a6ff", max: 6 },
   { id: "drop",      name: "爆率提升",   desc: "掉落+5%",        fullDesc: "每级道具掉落率 +5%，满级 +30%",               color: "#c8a6ff", max: 6 },
   { id: "knockback", name: "子弹击退",   desc: "击退+30%",       fullDesc: "子弹命中击退敌机，每级 +30% 击退力",          color: "#c8a6ff", max: 6 },
   { id: "bulletSpeed", name: "子弹加速", desc: "弹速+15%",      fullDesc: "每级子弹飞行速度 +15%，满级 +90%",            color: "#5ee6ff", max: 6 },

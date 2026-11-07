@@ -4,7 +4,7 @@ import "./_env.mjs";
 import { resetStorage, makeCtx, installFakeImage, removeFakeImage, makeSpyCtx } from "./_env.mjs";
 import { resetMeta, loadMeta, discoverPowerup } from "../js/meta.js";
 import {
-  hitTestButton, setMenuPage, getMenuPage,
+  hitTestButton, getTouchTargetRect, setMenuPage, getMenuPage,
   spawnDamageNumber, updateDamageNumbers, clearDamageNumbers,
   initStars, updateStars,
   drawMenu,
@@ -18,6 +18,7 @@ import {
   getCodexCardRects, getPowerupCardRects, getCodexScroll, getCodexMaxScroll,
   getCodexViewport, setCodexScroll,
   setDetailCard, getDetailCard, drawDetailCard, drawToast,
+  drawLevelUp,
   setTalentConfirm, getTalentConfirm, getTalentConfirmYesButton, getTalentConfirmNoButton, drawTalentConfirm,
 } from "../js/ui.js";
 import { H, META, POWERUP_DEFS, DIFFICULTY_PRESETS, setViewport } from "../js/config.js";
@@ -36,9 +37,31 @@ describe("ui", () => {
     const rect = { x: 10, y: 20, w: 40, h: 30 };
     assert.equal(hitTestButton(10, 20, rect), true);
     assert.equal(hitTestButton(50, 50, rect), true);
-    assert.equal(hitTestButton(51, 50, rect), false);
+    assert.equal(hitTestButton(53, 50, rect), false);
     assert.equal(hitTestButton(0, 0, rect), false);
     assert.equal(hitTestButton(10, 20, null), null);
+  });
+
+  it("小屏触控目标扩至 44 CSS px 且保持在画布内", () => {
+    const oldWidth = window.innerWidth;
+    const oldHeight = window.innerHeight;
+    window.innerWidth = 360;
+    window.innerHeight = 640;
+    setViewport(405, 720);
+    try {
+      const visible = { x: 325, y: 690, w: 70, h: 24 };
+      const target = getTouchTargetRect(visible);
+      assert.equal(target.w, 70);
+      assert.equal(target.h, 49.5);
+      assert.ok(target.x >= 0 && target.y >= 0);
+      assert.ok(target.x + target.w <= 405 && target.y + target.h <= 720);
+      assert.equal(hitTestButton(target.x, target.y, visible), true);
+      assert.equal(hitTestButton(visible.x, visible.y, visible), true);
+    } finally {
+      window.innerWidth = oldWidth;
+      window.innerHeight = oldHeight;
+      setViewport(480, 720);
+    }
   });
 
   it("菜单分页切换", () => {
@@ -371,6 +394,13 @@ describe("ui", () => {
     const y20 = texts.find(t => t.t === "成就达成").y;
     assert.ok(Math.abs(y20 - H * 0.20) < 0.5, "结算态应落在 0.20H，实测 " + y20);
     assert.ok(y20 < y38, "结算态的横幅必须离开大标题所在的 0.30~0.40H 区间");
+  });
+
+  it("升级选择界面显示期间不绘制遮挡选项的 Toast", () => {
+    const { ctx, texts } = makeSpyCtx();
+    drawLevelUp(ctx, [{ id: "dmg", name: "火力强化", desc: "伤害+1", color: "#5ee6ff" }], {});
+    drawToast(ctx, { text: "经验包 +50", color: "#8ad4ff", t: 1 });
+    assert.equal(texts.some(t => t.t === "经验包 +50"), false);
   });
 
   it("drawToast 对 t<=0 或空对象不绘制", () => {

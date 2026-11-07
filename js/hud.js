@@ -8,8 +8,35 @@ import { bar, glowText, hexToRgba, pulse, C } from "./theme.js";
 
 // 分数滚动显示（跨帧向真实分数趋近，数字变化更顺滑）
 let shownScore = -1;
+const damageFeedback = new WeakMap();
+
+function drawDamageFeedback(ctx, player, lives, frame) {
+  const now = performance.now();
+  const previous = damageFeedback.get(player);
+  const feedback = previous || { lives, flashAt: -Infinity };
+  if (previous && lives < previous.lives) feedback.flashAt = now;
+  feedback.lives = lives;
+  damageFeedback.set(player, feedback);
+
+  const elapsed = now - feedback.flashAt;
+  if (elapsed >= 0 && elapsed < 120) {
+    const alpha = 0.24 * (1 - elapsed / 120);
+    ctx.fillStyle = `rgba(255,40,58,${alpha})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  if (lives === 1) {
+    const alpha = 0.26 + 0.12 * (0.5 + 0.5 * Math.sin(frame * 0.15));
+    ctx.save();
+    ctx.strokeStyle = `rgba(255,36,48,${alpha})`;
+    ctx.lineWidth = 28;
+    ctx.strokeRect(14, 14, W - 28, H - 28);
+    ctx.restore();
+  }
+}
 
 export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNeed, lives, maxLives, combo, comboFrac, player, frame }) {
+  drawDamageFeedback(ctx, player, lives, frame);
   if (shownScore < 0 || score < shownScore) shownScore = score;
   else shownScore += Math.max(1, Math.round((score - shownScore) * 0.2));
   const dispScore = Math.min(score, shownScore);

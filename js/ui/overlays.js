@@ -13,6 +13,8 @@ export function getSkillCards() { return uiState.skillCards; }
 export function getReviveYesButton() { return uiState.btnReviveYesRect; }
 export function getReviveNoButton() { return uiState.btnReviveNoRect; }
 
+let toastSuppressedAt = -Infinity;
+
 export function drawGameOver(ctx, score, best, isNewBest = false, campaignComplete = false) {
   const now = uiTime();
   // 聚焦暗角
@@ -92,6 +94,7 @@ export function drawGameOver(ctx, score, best, isNewBest = false, campaignComple
 
 export function drawLevelUp(ctx, choices, playerSkills) {
   if (!choices || choices.length === 0) return;
+  toastSuppressedAt = uiTime();
   ctx.save();
   const now = uiTime();
   ctx.fillStyle = "rgba(6,9,22,.8)";
@@ -263,7 +266,7 @@ export function drawPause(ctx, player) {
       dmg:"火力", rate:"射速", range:"射程", move:"机动", maxhp:"生命",
       shield:"护盾", crit:"暴击", dual:"侧翼", sideBullets:"护法", explosion:"爆炸", expChance:"爆破", expDmg:"爆裂", expRange:"扩域", volley:"连射",
       scatter:"散射", split:"分裂", splitDist:"分距", penetrate:"穿透", guard:"护体",
-      lifesteal:"吸取", xpboost:"经验", magnet:"磁力", score:"金币",
+      lifesteal:"吸取", xpboost:"经验", magnet:"磁力", score:"得分",
       bulletSpeed:"弹速", orbital:"天基", drop:"爆率", critdmg:"致命", knockback:"击退",
     };
     const learned = [];
@@ -306,6 +309,7 @@ export function drawPause(ctx, player) {
 }
 
 export function drawToast(ctx, toast, yFrac = 0.38) {
+  if (uiTime() - toastSuppressedAt < 0.01) return;
   if (!toast || toast.t <= 0) return;
   const a = clamp(toast.t / 1.2, 0, 1);
   const size = 30;

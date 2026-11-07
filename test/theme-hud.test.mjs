@@ -55,3 +55,28 @@ test("drawHUD: 高分连击与多 buff 下正常绘制（含计数趋近）", ()
   // 低血量、低连击路径
   assert.doesNotThrow(() => drawHUD(ctx, { ...base, lives: 1, combo: 2, frame: 3 }));
 });
+
+test("drawHUD: 受击红闪仅在掉命时触发，残血边框增强", () => {
+  const ctx = makeCtx();
+  const fullScreenFills = [];
+  const redEdges = [];
+  ctx.fillRect = (x, y, w, h) => {
+    if (x === 0 && y === 0 && w === 480 && h === 720 && String(ctx.fillStyle).startsWith("rgba(255,40,58,")) {
+      fullScreenFills.push(ctx.fillStyle);
+    }
+  };
+  ctx.strokeRect = () => {
+    if (String(ctx.strokeStyle).startsWith("rgba(255,36,48,")) redEdges.push(ctx.strokeStyle);
+  };
+  const base = {
+    score: 0, best: 0, level: 1, enemyLevel: 1, pLevel: 1, xp: 0, xpNeed: 10,
+    maxLives: 3, combo: 0, player: fakePlayer(), frame: 1,
+  };
+
+  drawHUD(ctx, { ...base, lives: 3 });
+  drawHUD(ctx, { ...base, lives: 2 });
+  assert.equal(fullScreenFills.length, 1, "每次掉命应触发一次短促的全屏红闪");
+  drawHUD(ctx, { ...base, lives: 1 });
+  assert.equal(fullScreenFills.length, 2);
+  assert.equal(redEdges.length, 1, "仅剩一条命时应绘制强化边缘警告");
+});
