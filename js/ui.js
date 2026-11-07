@@ -1125,6 +1125,7 @@ export function drawGameOver(ctx, score, best, isNewBest = false) {
 
 export function drawLevelUp(ctx, choices, playerSkills) {
   if (!choices || choices.length === 0) return;
+  ctx.save();
   const now = uiTime();
   ctx.fillStyle = "rgba(6,9,22,.8)";
   ctx.fillRect(0, 0, W, H);
