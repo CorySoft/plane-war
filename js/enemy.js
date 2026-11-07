@@ -216,7 +216,7 @@ function enemySpriteId(e) {
 }
 
 // 贴图原生机鼻朝向（目检裁定）→ 绘制旋转量，统一旋到「机鼻朝下（朝向玩家）」。
-// 上→π、下→0、左→-π/2；未知类型按「朝上」处理（保守）。
+// 上→π、下→0、左→-π/2；未知类型按「朝上」处理（保守，必定翻成朝下）。
 export const ENEMY_TEXTURE_ROT = {
   small: Math.PI,      // 朝上
   mid: 0,              // 朝下
@@ -231,10 +231,21 @@ export const BOSS_TEXTURE_ROT = {
   phantom: 0,          // 朝下
 };
 
+let warnedUnknownBoss = false;
+
 /** 敌机贴图绘制基础旋转：让所有敌机机鼻朝下（朝向玩家） */
 export function enemyBaseRotation(e) {
   if (!e) return Math.PI;
-  if (e.isBoss) return BOSS_TEXTURE_ROT[e.bossType] ?? 0;
+  if (e.isBoss) {
+    const rot = BOSS_TEXTURE_ROT[e.bossType];
+    if (typeof rot === "number") return rot;
+    // 新增 Boss 忘了登记朝向时，按素材「机鼻朝下」的创作意图兜底，并只告警一次
+    if (!warnedUnknownBoss) {
+      warnedUnknownBoss = true;
+      console.warn("[plane_war] 未知 Boss 类型，按机鼻朝下（π）兜底：", e.bossType);
+    }
+    return Math.PI;
+  }
   return ENEMY_TEXTURE_ROT[e.type] ?? Math.PI;
 }
 
@@ -243,7 +254,9 @@ export function drawEnemies(ctx, frame) {
     if (!e) continue;
     ctx.save();
     ctx.translate(e.x, e.y);
-    ctx.rotate(Math.sin(e.t * 2) * 0.15);
+    // 整机摇摆只用于机体；血条/护盾环/炮线是世界向元素，下面用反向旋转抵消。
+    const sway = Math.sin(e.t * 2) * 0.15;
+    ctx.rotate(sway);
     const r = e.r;
 
     // 冰冻特效
@@ -310,6 +323,10 @@ export function drawEnemies(ctx, frame) {
       ctx.restore();
     }
 
+    // 世界向覆盖层：抵消整机摇摆，保持血条水平、护盾环/炮线方位稳定
+    ctx.save();
+    ctx.rotate(-sway);
+
     if (e.type === "laser" && e.laserTimer > 0 && e.laserTimer < 0.55) {
       ctx.strokeStyle = `rgba(255,68,68,${0.45 + Math.sin(frame * 0.4) * 0.25})`;
       ctx.lineWidth = 2;
@@ -337,6 +354,8 @@ export function drawEnemies(ctx, frame) {
       ctx.fillStyle = pct > 0.5 ? "#7CFC00" : pct > 0.25 ? "#ffd166" : "#ff6b6b";
       ctx.fillRect(-w / 2, r + 6, w * pct, 4);
     }
+
+    ctx.restore();
 
     ctx.restore();
   }

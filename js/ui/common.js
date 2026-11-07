@@ -1,20 +1,9 @@
 import { W, H, computeViewport } from "../config.js";
-import { roundRect, setf } from "../utils.js";
+import { setf } from "../utils.js";
 import { lineBtn, hexToRgba, C } from "../theme.js";
 
 const uiTime = () => (typeof performance !== "undefined" ? performance.now() : 0) / 1000;
 export { uiTime };
-
-function sectionLabel(ctx, text, x, y, color = "rgba(255,255,255,.75)", size = 15) {
-  ctx.save();
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  setf(ctx, "bold " + size + "px 'sans-serif'");
-  ctx.fillStyle = color;
-  const spaced = text.split("").join(" ");
-  ctx.fillText(spaced, x, y);
-  ctx.restore();
-}
 
 export function pageTitle(ctx, text, x, y, color, size = 32, font = "'sans-serif'") {
   ctx.save();

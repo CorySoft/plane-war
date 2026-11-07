@@ -5,7 +5,6 @@
 import { SKILLS } from "./config.js";
 import { shuffle } from "./utils.js";
 import { sfx } from "./audio.js";
-import { spawnParticles } from "./particles.js";
 import { discoverSkill } from "./meta.js";
 
 export function getMaxLives(baseHp, skillMaxHp) {

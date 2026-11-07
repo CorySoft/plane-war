@@ -2,7 +2,7 @@
  * wave.js — 波次 / 难度管理 + Boss系统
  * =========================================================== */
 
-import { W, H, DIFFICULTY } from "./config.js";
+import { W, DIFFICULTY } from "./config.js";
 import { rand } from "./utils.js";
 import { spawnEnemy, enemies, nextEnemyUid, getCurrentBossPhase } from "./enemy.js";
 

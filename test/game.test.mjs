@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { makeCtx, stubRandom } from "./_env.mjs";
-import { STATE } from "../js/config.js";
+import { STATE, POWERUP_DURATION } from "../js/config.js";
 import { getSettings } from "../js/meta.js";
 import { spawnBoss } from "../js/wave.js";
 
@@ -163,6 +163,65 @@ describe("game 集成冒烟", () => {
     }
     assert.ok(minLives >= 0, "lives 不得变成负数（实测最低 " + minLives + "）");
     assert.notEqual(game().state(), STATE.PLAYING, "必须在一段死亡动画后离开 PLAYING");
+    assert.ok(errors.length === 0, errors.join("\n"));
+  });
+
+  // ---------- 回归：连锁爆炸必须用「最近一次」爆炸参数 ----------
+  // 旧实现是「先写先赢」：弱爆炸先把 _deathExplosion 写到幸存敌机上，
+  // 之后强爆炸的 AOE 即使命中同一敌机也不刷新标记，连锁按弱参数算半径与伤害。
+  it("AOE 命中后 _deathExplosion 刷新为最新（强）爆炸参数", () => {
+    getSettings().skipTutorial = true;
+    game().resetGame();
+    const p = game().getPlayer();
+    p.invincible = 9e9;
+    p.fireCd = 999;
+    p.skills.explosion = 0;   // 只让显式 isExplosion 的子弹带爆炸行为
+    const DIFF = { hpScale: 1, speedScale: 0, spawnScale: 0, enemyFireScale: 1, fireCdScale: 99 };
+
+    // 幸存者：预置一个很弱的爆炸标记（模拟被弱爆炸先 AOE 擦到）。
+    // 位置要在爆炸半径（约 60）内、但不在子弹碰撞半径（r+b.r≈40）内，
+    // 否则子弹先命中幸存者就被消耗掉，诱饵永远打不到。
+    game().spawnEnemy(1, DIFF, 1, 238, 355, { type: "big" });
+    const survivor = game().enemies[game().enemies.length - 1];
+    survivor.vy = 0; survivor.vx = 0;
+    survivor.maxHp = 1e9; survivor.hp = 1e9;   // 强爆炸也不死，便于读标记
+    survivor._deathExplosion = { dmg: 10, radius: 40, expDmgRatio: 0.45 };
+
+    // 诱饵：与幸存者重叠，用高伤爆炸弹击杀以触发真实 AOE 路径
+    game().spawnEnemy(1, DIFF, 1, 241, 302, { type: "big" });
+    const bait = game().enemies[game().enemies.length - 1];
+    bait.vy = 0; bait.vx = 0;
+    bait.maxHp = 1; bait.hp = 1;
+
+    // 弹速取极小值，避免高速弹在一帧内穿透跳过碰撞
+    game().fireBullet(0, 9999, p, bait.x, bait.y, 0.05, true);
+    for (let f = 0; f < 6 && game().enemies.includes(bait); f++) rafCb();
+
+    assert.ok(!game().enemies.includes(bait), "诱饵必须被爆炸弹击杀");
+    assert.ok(survivor._deathExplosion, "幸存者应被 AOE 标记");
+    assert.equal(survivor._deathExplosion.dmg, 9999, "标记必须刷新为最新（强）爆炸的伤害");
+    assert.equal(survivor._deathExplosion.expDmgRatio, 0.45, "标记的伤害系数也应取最新爆炸（0 级 expDmg → 0.45）");
+    assert.ok(survivor.hp < 1e9, "幸存者必须真的吃到 AOE 伤害（否则标记来源不成立）");
+    assert.ok(errors.length === 0, errors.join("\n"));
+  });
+
+  // ---------- 回归：全场冻结时长必须读 POWERUP_DURATION 单源 ----------
+  // 旧实现 game.js 里硬编码 e.frozen = 8，与 powerup/hud/codex 的时长表脱节。
+  it("冻结道具按 POWERUP_DURATION.freeze 冻结全场敌机", () => {
+    getSettings().skipTutorial = true;
+    game().resetGame();
+    const p = game().getPlayer();
+    p.invincible = 9e9;
+    p.fireCd = 999;
+    const DIFF = { hpScale: 1, speedScale: 0, spawnScale: 0, enemyFireScale: 1, fireCdScale: 99 };
+    // 放在玩家上方（发射线以上），否则会被 freezeAll 的「打不到就跳过」规则排除
+    game().spawnEnemy(1, DIFF, 1, 240, 200, { type: "small" });
+    const e = game().enemies[game().enemies.length - 1];
+    e.vy = 0; e.vx = 0; e.fireCd = 999;
+    p._freeze = true;
+    rafCb();
+    assert.ok(e.frozen > POWERUP_DURATION.freeze - 0.5 && e.frozen <= POWERUP_DURATION.freeze,
+      `冻结时长应为表值 ${POWERUP_DURATION.freeze}（含单帧衰减），实测 ${e.frozen.toFixed(2)}`);
     assert.ok(errors.length === 0, errors.join("\n"));
   });
 });

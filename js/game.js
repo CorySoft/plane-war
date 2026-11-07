@@ -2,10 +2,10 @@
  * game.js — 主游戏循环 + 状态机 + 碰撞检测
  * =========================================================== */
 
-import { W, H, STATE, BULLET as BCFG, TAU, DIFFICULTY_PRESETS, POWERUP_DROP, META, COMBO, XP_BASE, XP_GROWTH, PLAYER, SCORE_AXIS, levelFromScore, computeViewport, setViewport, skillMax } from "./config.js";
+import { W, H, STATE, BULLET as BCFG, TAU, DIFFICULTY_PRESETS, POWERUP_DROP, POWERUP_DURATION, META, COMBO, XP_BASE, XP_GROWTH, PLAYER, SCORE_AXIS, levelFromScore, computeViewport, setViewport, skillMax } from "./config.js";
 import { clamp, rand, hypot, setf, cachedRadialGradient } from "./utils.js";
 import { glowText } from "./theme.js";
-import { sfx, startMusic, stopMusic, initAudio, setSfxMuted, setMusicMuted, setMusicIntensity, duckMusic } from "./audio.js";
+import { sfx, startMusic, stopMusic, setSfxMuted, setMusicMuted, setMusicIntensity, duckMusic } from "./audio.js";
 import { initInput, bindTouchButtons, getStick, isStickActive, setDifficulty as setPlayerDifficulty, isEasyMode, getEasyTouch } from "./input.js";
 import { spawnParticles, updateParticles, drawParticles, clearParticles } from "./particles.js";
 import { triggerShake, updateCamera, applyCamera, resetCamera, slowmo } from "./camera.js";
@@ -818,7 +818,8 @@ export function chainDamageMultiplier(depth) {
   return Math.pow(0.7, Math.max(0, depth | 0));
 }
 
-/** 爆炸填充闪的绘制半径：首帧即真实伤害半径，只做 alpha 淡出（伤害瞬时结算，视觉不应滞后） */
+/** 爆炸填充闪的绘制半径：首帧即真实伤害半径，只做 alpha 淡出（伤害瞬时结算，视觉不应滞后）。
+ *  保留为测试缝（原先是「半径随生命膨胀」的曲线，动画改为淡出后恒等）。 */
 export function blastDrawRadius(rMax) {
   return rMax;
 }
@@ -873,8 +874,10 @@ function doEnemyDeathExplosion(e, info, depth = 0) {
       other.hitFlash = 1;
       spawnDamageNumber(other.x, other.y, "" + aoeDmg, "#ff6633");
       spawnParticles(other.x, other.y, "#ff6633", Math.max(1, Math.round(4 * depthVisualFactor)), 3);
-      // 标记被爆炸AOE命中的敌机，允许触发连锁
-      if (!other._deathExplosion) other._deathExplosion = info;
+      // 标记被爆炸AOE命中的敌机，允许触发连锁。
+      // 命中即刷新：同一敌机可能先后被多次爆炸波及，连锁必须用最近一次爆炸的参数
+      //（旧实现「先写先赢」，弱爆炸先标记后，强爆炸的连锁仍按弱参数算半径/伤害）。
+      other._deathExplosion = info;
       if (other.hp <= 0) chainVictims.push(other);
     }
   }
@@ -1239,7 +1242,7 @@ function freezeAll() {
     // 刨除与我方同一水平线及以下的敌机：子弹朝上打不到它们，
     // 若冻结就会卡在原地一直挂在那，无法击毁。
     if (e.y >= freezeline) continue;
-    e.frozen = 8;
+    e.frozen = POWERUP_DURATION.freeze;
   }
 }
 

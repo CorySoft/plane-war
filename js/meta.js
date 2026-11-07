@@ -2,7 +2,7 @@
  * meta.js — 元进度系统（星尘货币 / 飞机解锁 / 天赋树）
  * =========================================================== */
 
-import { META, ACHIEVEMENTS, DAILY_QUESTS, SKILLS, SHOP_ITEMS, DIFFICULTY_PRESETS, getShopItemCost, todayKey } from "./config.js";
+import { META, ACHIEVEMENTS, DAILY_QUESTS, SHOP_ITEMS, DIFFICULTY_PRESETS, getShopItemCost, todayKey } from "./config.js";
 
 const STORAGE_KEY = "planeWarMeta";
 const PROGRESS_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
@@ -373,8 +373,6 @@ export function getTalentEffects() {
   }
   return effects;
 }
-
-export function getPurchasedTalentIds() { return metaData.purchasedTalents; }
 
 // ---------- 统计 ----------
 export function addKill() {
