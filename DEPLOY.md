@@ -121,7 +121,7 @@ htdocs/                  ← web 根
 以 `deploy.sh` 的 `EXCLUDES` 数组为准，当前是：
 
 - 目录：`.git/`、`node_modules/`、`test/`、`test-results/`、`tools/`、`js/`（js 走下面
-  「文件名版本化」单独上传，避免留下未版本化副本）、`.githooks/`
+  「文件名版本化」单独上传，避免留下未版本化副本）、`.githooks/`、`.github/`、`docs/`
 - 文件：`VERSION`、`.deploy.env`、`.gitignore`、`index.html`（单独生成后上传）、
   `deploy.sh`、`DEPLOY.md`、`README.md`、`AGENTS.md`、`package.json`、`package-lock.json`、
   `test*.mjs`、`test*.cjs`

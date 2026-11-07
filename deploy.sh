@@ -194,6 +194,8 @@ EXCLUDES=(
   #   lftp 的命令行字符串的，lftp 解析时会把 '|' 当命令分隔符，带 | 的正则会被截断成
   #   一条废规则并打断整个 mirror（实测报 "Unmatched ( or \("）。
   --exclude '^\.githooks/'    # core.hooksPath 指向它，post-commit 只在本地 git 里跑，服务器不需要
+  --exclude '^\.github/'      # CI 配置：本轮新增目录，不进静态根
+  --exclude '^docs/'          # 性能基线/设计文档：本轮新增目录，不进静态根
   --exclude-glob 'deploy.sh'
   --exclude-glob 'DEPLOY.md'
   --exclude-glob 'README.md'
