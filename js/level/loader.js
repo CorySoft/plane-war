@@ -102,6 +102,7 @@ function beatEvents(stage, beat) {
           type: "enemy",
           enemyType: spawn.type,
           patternRef: spawn.patternRef ?? null,
+          params: spawn.params ?? null,
           x: Math.max(20, Math.min(W - 20, spawn.centerX * W + dx)),
           y: spawn.spawnY + dy,
         });

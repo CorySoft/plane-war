@@ -95,6 +95,7 @@ export function spawnEnemy(level, diff, enemyLevel = 1, atX, atY, options = {}) 
   e.enemyLevel = elvl;
   e.isBoss = false;
   e.patternRef = options.patternRef || null;
+  e.patternParams = options.params || null;
   e._laserShot = false;
   e._deathExplosion = null;
   e.kx = 0; e.ky = 0; e.kbTimer = 0;

@@ -31,6 +31,9 @@ import { APP_VERSION } from "./version.js";
 import {
   createCampaignRunner, getCampaignId, loadCampaignSafely,
 } from "./level/loader.js";
+import {
+  buildBossPatternSpecs, buildPatternSpecs, rankFromScore,
+} from "./level/patterns.js";
 import { drawHUD } from "./hud.js";
 import {
   drawMenu, drawGameOver, drawLevelUp, drawPause, drawPauseButton, drawToast, drawRevive,
@@ -438,6 +441,7 @@ function update(dt, realDt = dt) {
     // 难度与敌方等级：统一读得分轴（单一真源，避免两条曲线脱钩）
     const activeScoreAxis = campaignRunner?.stage.difficulty.scoreAxis ?? SCORE_AXIS;
     const levels = levelFromScore(activeScoreAxis, score);
+    const rank = rankFromScore(activeScoreAxis, score, levels);
     if (levels.playerLevel > level) {
       level = levels.playerLevel;
       sfx.power();
@@ -472,6 +476,7 @@ function update(dt, realDt = dt) {
           spawnEnemy(level, difficulty, enemyLevel, event.x, event.y, {
             type: event.enemyType,
             patternRef: event.patternRef,
+            params: event.params,
           });
         }
       }
@@ -512,8 +517,17 @@ function update(dt, realDt = dt) {
     const shooters = getEnemyShooters(player.x, player.y, dt, difficulty.fireCdScale);
     for (const e of shooters) {
       if (e.type === "boss") {
-        bossFire(e);
-      } else if (e.patternRef === "laser" || (!e.patternRef && (e.type === "laser" || e._laserShot))) {
+        bossFire(e, rank);
+      } else if (e.patternRef) {
+        spawnHostileBullets(buildPatternSpecs(e.patternRef, e.patternParams, {
+          emitter: e,
+          targetX: player.x,
+          targetY: player.y,
+          fireScale: difficulty.enemyFireScale,
+          rank,
+          random: Math.random,
+        }));
+      } else if (e.type === "laser" || e._laserShot) {
         e._laserShot = false;
         spawnLaserVolley(e, player.x, player.y, difficulty.enemyFireScale);
       } else {
@@ -963,10 +977,22 @@ function updateBossAI(e, dt, level, diff) {
   // e.t 由 updateEnemies 的 Boss 分支统一累加（此处不再 +dt，否则时间以 2 倍速推进）
 }
 
-function bossFire(e) {
+function bossFire(e, rank = 0) {
   const phase = getCurrentBossPhase(e);
   if (!phase) return;
   const scale = difficulty.enemyFireScale || 1;
+  const registeredSpecs = buildBossPatternSpecs(phase.pattern, {
+    emitter: e,
+    targetX: player.x,
+    targetY: player.y,
+    fireScale: scale,
+    rank,
+    random: Math.random,
+  });
+  if (registeredSpecs !== null) {
+    spawnHostileBullets(registeredSpecs);
+    return;
+  }
 
   switch (phase.pattern) {
     case "spread": {

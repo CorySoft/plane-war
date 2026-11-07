@@ -1,9 +1,9 @@
 import { BULLET, ENEMY_TYPES, SCORE_AXIS } from "../config.js";
 import { BOSS_TYPES } from "../wave.js";
+import { patternBulletCount, validatePatternParams } from "./patterns.js";
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const ROLES = new Set(["teach", "test", "twist", "rest", "elite", "boss"]);
-const ENEMY_PATTERNS = new Set(["aimed", "laser"]);
 const FORMATION_TYPES = new Set(["line", "v", "column", "pincer"]);
 const MAX_CAMPAIGN_STAGES = 30;
 const MAX_BEATS_PER_STAGE = 30;
@@ -86,7 +86,7 @@ function validateAdvance(advance, path) {
   }
 }
 
-function validateWave(wave, stage, path) {
+function validateWave(wave, stage, path, beatBudget) {
   requireRecord(wave, path);
   requireFinite(wave.delaySec ?? 0, `${path}.delaySec`, 0, MAX_BEAT_SECONDS);
   if (!Array.isArray(wave.spawns)) fail(`${path}.spawns`, "must be an array");
@@ -118,9 +118,21 @@ function validateWave(wave, stage, path) {
       if (!stage.patterns.includes(spawn.patternRef)) {
         fail(`${path}.spawns[${i}].patternRef`, "references an unknown pattern");
       }
-      if (!ENEMY_PATTERNS.has(spawn.patternRef)) {
-        fail(`${path}.spawns[${i}].patternRef`, "is not supported by the legacy P-A pattern adapter");
+      try {
+        validatePatternParams(spawn.patternRef, spawn.params ?? {});
+        const emissionSize = patternBulletCount(spawn.patternRef, spawn.params ?? {});
+        if (emissionSize > beatBudget.maxHostileActive
+            || emissionSize > beatBudget.maxHostileBulletsPerSec) {
+          fail(`${path}.spawns[${i}].params`, "one emission exceeds the beat density budget");
+        }
+      } catch (error) {
+        if (error instanceof TypeError && error.message.startsWith(`${path}.spawns[${i}].params`)) {
+          throw error;
+        }
+        fail(`${path}.spawns[${i}].patternRef`, error.message);
       }
+    } else if (spawn.params !== undefined) {
+      fail(`${path}.spawns[${i}].params`, "requires patternRef");
     }
   }
   return totalCount;
@@ -189,7 +201,11 @@ export function validateStage(stage, { expectedId, expectedChapterId } = {}) {
   const stageBudget = validateDensityBudget(stage.densityBudget, "stage.densityBudget");
   if (!Array.isArray(stage.patterns)) fail("stage.patterns", "must be an array");
   for (const pattern of stage.patterns) {
-    if (!ENEMY_PATTERNS.has(pattern)) fail("stage.patterns", `unsupported P-A pattern "${pattern}"`);
+    try {
+      validatePatternParams(pattern);
+    } catch (error) {
+      fail("stage.patterns", error.message);
+    }
   }
   requireRecord(stage.formations, "stage.formations");
   for (const [name, formation] of Object.entries(stage.formations)) {
@@ -213,13 +229,15 @@ export function validateStage(stage, { expectedId, expectedChapterId } = {}) {
     if (!ROLES.has(beat.role)) fail(`stage.beats[${i}].role`, "is not a supported beat role");
     requireFinite(beat.telegraphSec ?? 0, `stage.beats[${i}].telegraphSec`, 0, 10);
     validateAdvance(beat.advance, `stage.beats[${i}].advance`);
-    if (beat.densityBudget !== undefined) {
-      validateDensityBudget(beat.densityBudget, `stage.beats[${i}].densityBudget`, stageBudget);
-    }
+    const beatBudget = beat.densityBudget === undefined
+      ? stageBudget
+      : validateDensityBudget(beat.densityBudget, `stage.beats[${i}].densityBudget`, stageBudget);
     if (!Array.isArray(beat.waves)) fail(`stage.beats[${i}].waves`, "must be an array");
     let totalEnemies = 0;
     for (let j = 0; j < beat.waves.length; j++) {
-      totalEnemies += validateWave(beat.waves[j], stage, `stage.beats[${i}].waves[${j}]`);
+      totalEnemies += validateWave(
+        beat.waves[j], stage, `stage.beats[${i}].waves[${j}]`, beatBudget,
+      );
       if (totalEnemies > MAX_ENEMIES_PER_BEAT) {
         fail(`stage.beats[${i}].waves`, `may request at most ${MAX_ENEMIES_PER_BEAT} enemies per beat`);
       }
