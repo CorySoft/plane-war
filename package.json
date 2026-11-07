@@ -2,6 +2,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "test:smoke": "node tools/dev/smoke.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
   }
 }

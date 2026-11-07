@@ -62,9 +62,14 @@ htdocs/                  ← web 根
 ./deploy.sh --force        # 强制全量上传
 ./deploy.sh --verify       # 只校验远程文件清单
 ./deploy.sh --prune        # 额外清理远程 js/ 下的历史版本副本
+./deploy.sh --rollback <版本>   # 回滚 index.html 到指定历史版本（x.y.z）
+./deploy.sh --skip-tests        # 跳过部署前测试门禁（紧急用）
+./deploy.sh --help              # 显示用法并退出（不读配置、无副作用）
 ```
 
-依赖 `lftp`（未安装时：`apt-get install -y lftp`）。
+依赖 `lftp`（未安装时：`apt-get install -y lftp`）。**部署前会先跑 `npm test` 测试门禁**（除 `--verify` / `--rollback` 外），测试不通过即中止部署、不递增版本号。紧急绕过：`SKIP_TESTS=1 ./deploy.sh --force`。
+
+**回滚**：文件名版本化后，未被 `--prune` 清理的历史 `*.v<版本>.js` 仍在远端，回滚只需把 `index.html` 指回旧版本（`--rollback 0.3.4`），**无需重传 js**：版本化文件按内容寻址留在服务器，且旧版源码本地已不存在、重传也无从生成。脚本先校验版本号为 `x.y.z`（缺失或非法直接报错，不会退化成一次正常部署），再确认远端存在 `game.v<版本>.js`，然后改写 `index.html` 并回退本地 `VERSION`；若远端该版本模块数少于当前源码模块数会给出告警（版本较旧属正常，但若曾被部分 `--prune` 或上传中断则可能缺模块，只告警不阻断）。前提：目标版本的版本化文件仍在远端；若已 `--prune`，需 checkout 旧源码重新部署。回滚后本地 `js/version.js` 仍停留在上一版本号（仅本地显示，不影响线上；下次正常部署会自动重生成）。
 
 **关于旧版本堆积**：每次部署都会在 `js/` 里多留 20 个 `<name>.v<旧版本>.js`，
 只增不删。攒多了用 `--prune` 清掉非当前版本的副本（当前版本由脚本自动排除）。
@@ -92,15 +97,24 @@ htdocs/                  ← web 根
 
 仓库已启用 `.githooks/post-commit`：**每次 `git commit` 后自动执行增量部署**，无需手动跑脚本。
 
-- 触发的提交会运行 `./deploy.sh --force`，日志写入 `/tmp/plane_war_auto_deploy.log`
-- 只涉及测试/文档/部署脚本本身的提交不会触发上传
-- 想临时跳过自动部署：`git commit --no-verify`
+- 触发的提交会运行 `./deploy.sh`（**增量**上传，含 `npm test` 测试门禁；测试不通过则不部署）
+- 只涉及测试 / CI 配置（`.github/`）/ `tools/` / 文档 / 包管理文件的提交不会触发上传（这些文件不进 `wwwroot/`）
+- 想临时跳过自动部署：`SKIP_DEPLOY=1 git commit -m "..."`。
+  > ⚠️ 不要用 `git commit --no-verify`：它只绕过 `pre-commit` / `commit-msg`，
+  > **不会**跳过 `post-commit`（实测两次提交均触发了自动部署钩子）。本轮已在钩子顶部加
+  > `SKIP_DEPLOY=1` 单次跳过开关。彻底禁用钩子用 `git -c core.hooksPath=/dev/null commit`。
 - 若钩子失效，重新启用：`git config core.hooksPath .githooks`
+- 钩子失败会以非零码返回并在终端提示，日志写入 `/tmp/plane_war_auto_deploy.log`
 
 ### 上传内容
 
-- `index.html`、`package.json`
-- `js/`（全部游戏逻辑，ES Modules）
+- `index.html`（脚本按版本号单独生成后上传）
+- `js/`（全部游戏逻辑，ES Modules，以版本化副本上传）
+- `assets/`（皮肤等资源）
+- `.htaccess`（单独上传到 `htdocs/` 根，不进 `wwwroot/`，详见上文）
+
+> `package.json` / `package-lock.json` / `DEPLOY.md` / `tools/` / `test/` 等脚手架均在
+> `deploy.sh` 的 `EXCLUDES` 里排除，**不会上传**（详见下方「排除项」）。
 
 ### 排除项（不会上传）
 
@@ -140,7 +154,7 @@ htdocs/                  ← web 根
 
 ```bash
 python3 -m http.server 8080 --bind 0.0.0.0   # 在项目根启动
-npm test                                      # 单元测试（当前 257 项 / 21 suites）
+npm test                                      # 单元测试（当前 291 项 / 24 suites）
 node tools/dev/smoke.mjs                      # 真机冒烟（需 playwright）
 ```
 
@@ -171,12 +185,40 @@ RewriteRule ^wwwroot/(feedback\.log|\.push_throttle)$ - [F]
 时匹配串是 `wwwroot/feedback.log`；只写 `^(feedback\.log)$` 匹配不上，
 文件会被原样下载出去。
 
+## 持续集成（CI）
+
+`.github/workflows/ci.yml` 在每次 push / PR 上跑两道门禁：
+
+- **单元测试**：`npm test`（全量，24 suites；用例数随测试补强增长，不在文档里写死）
+- **真机冒烟**：`npm run test:smoke`（headless Chromium 加载游戏、跑对局、遍历菜单子页，收集 console error / pageerror / 404）
+
+两个 job 各自独立、无 `needs` 依赖：冒烟失败不影响单元测试 job 的结论（但会让整条 workflow 变红）。`ci.yml` 不含任何 `deploy.sh` 调用，CI 只做校验、绝不触发部署。本地等价命令见「本地开发」。
+
+## 安全运维清单（凭据轮换 / 传输 / 回滚）
+
+> 归因：代码层面安全已硬化（同源校验、限流、输入单行化、凭据外置、日志写文档根外），
+> 以下是**运维层面**的收尾项，需人工确认/执行。
+
+1. **确认生产走 FTPS**：`.deploy.env` 中设 `FTP_SSL=1`（显式 FTPS + 证书校验）。默认 `FTP_SSL=0` 是兼容自签证书的明文回退分支，**不要**在生产长期使用。修改方式：
+   ```bash
+   echo 'FTP_SSL=1' >> .deploy.env
+   ./deploy.sh --verify   # 确认 FTPS 下仍能连通
+   ```
+2. **凭据轮换**：若 FTP / 方糖 token / 网关密钥曾走过明文 FTP、或出现在聊天/日志/截图中，立即轮换：
+   - FTP / MySQL：登录 cPanel 改密码，同步更新 `.deploy.env` 与 `~/.netrc`
+   - 方糖 `SCT_TOKEN`：到 sctapi.ftqq.com 重置，更新 `feedback.secret.php`
+   - 网关 `WP_SECRET`：更新 `feedback.secret.php` 与 wechat-publisher 侧配置
+   - 轮换后跑 `test/feedback.test.mjs` 确认凭据未泄漏进仓库/前端
+3. **避免密码进 argv**：把 FTP 凭据写进 `~/.netrc`（600），脚本会自动改用 `-u user` 不传密码。
+4. **回滚演练**：至少验证一次 `./deploy.sh --rollback <上一个版本>` 能正常回落；`--prune` 会销毁回滚能力，谨慎使用。
+5. **确认反馈端点未回显输入**：`test/feedback.test.mjs` 已锁定「成功响应不回显用户内容」；如改动 feedback.php 请保持该断言通过。
+
 ## 部署清单（Checklist）
 
 1. [ ] 文案/数值改动 → `js/config.js`、`js/*.js`
-2. [ ] 运行 `npm test` 全部通过
+2. [ ] 运行 `npm test` 全部通过（push/PR 时 CI 也会自动跑同一套 + 真机冒烟）
 3. [ ] 运行 `node tools/dev/smoke.mjs` 确认真机无 console error / 404
-4. [ ] 运行 `./deploy.sh`（增量）或 `--force`（重要改动）
+4. [ ] 运行 `./deploy.sh`（增量）或 `--force`（重要改动）；脚本会先跑测试门禁
 5. [ ] `./deploy.sh --verify` 确认远程文件大小与本地一致
 6. [ ] 上线后自查共存路由：`php ../wechat-publisher/tools/http-check.php`（13 项断言，全绿才收工）。
     > **不要用 `curl` 判 403**：ByetHost 的 openresty 门禁会在 Apache 之前应答，curl 不带

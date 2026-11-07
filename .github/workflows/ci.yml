@@ -1,0 +1,39 @@
+# ============================================================
+# CI — 单元测试 + 真机冒烟
+# 目的：把「提交即部署」的旧流程补上质量门禁。任何 push / PR 都必须
+#       先通过全量单元测试与无头 Chromium 冒烟，才能进入部署环节。
+# 说明：真机冒烟依赖 tools/dev/smoke.mjs（起本地 HTTP 服务 + headless Chromium），
+#       本地版本化入口 404 是预期回退路径，脚本已放行，不会误报。
+# ============================================================
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit:
+    name: 单元测试
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: 运行单元测试
+        run: npm test
+
+  smoke:
+    name: 真机冒烟
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: 安装 Playwright 与 Chromium
+        run: |
+          npm install --no-save playwright@1.62.1
+          npx playwright install --with-deps chromium
+      - name: 运行冒烟测试
+        run: npm run test:smoke
