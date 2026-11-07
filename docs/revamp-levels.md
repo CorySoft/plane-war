@@ -2,7 +2,7 @@
 
 - 日期：2026-11-07
 - 范围：关卡数据化、弹幕图案注册表、节拍内容与迁移路径
-- 状态：**P-A 已随 v0.3.9 受控上线（灰度，默认关闭）**；**P-B 已通过等价性复核，随本轮受控上线（v0.3.10）**；P-C/P-D 待排期
+- 状态：**P-A 已随 v0.3.9 受控上线（灰度，默认关闭）**；**P-B 已通过等价性复核并随 v0.4.0 上线**；**P-C 已通过复核，随本轮受控上线**；P-C2/P-D 待排期
 - P-A 交付：`?campaign=campaign-01` 灰度入口（不带参数时执行路径与 v0.3.8 逐位一致）、`assets/levels/` 三关、`js/level/` 零依赖校验与安全回退、敌弹独立密度闸门（active/rate 双上限 + 原子 volley 准入）；测试 317→326，deploy 版本化完整性 27→29。
 - 灰度说明：仅 URL 参数可进入战役，默认无限模式零变化；静态 JSON 走 `mirror` 普通上传，loader 以 `?v=APP_VERSION` 查询串破缓存（`.htaccess` 对 `.json` 设了 no-cache 头，且版本号每次部署递增）。若后续要在同一版本内 edit-in-place 改 JSON 内容，需评估文件名版本化（Byethost 忽略查询串的历史结论见 `deploy.sh` 注释）。
 - P-B 交付：八类图案注册表、旧 Boss pattern 兼容映射、`patternRef + params` 校验与密度预算检查；P-A 的密度闸门与 fallback 保留不回滚。
@@ -61,7 +61,7 @@ rank = hi == lo ? 0 : clamp((enemyLevel - lo) / (hi - lo), 0, 1)
 
 ### P-B：弹幕图案注册表
 
-**工作量：M。** 注册表已实现并通过独立等价性复核；旧 Boss 字符串与 P-A 的 `aimed`/`laser` 引用均走兼容映射。P-B 随本轮受控上线（v0.3.10）。
+**工作量：M。** 注册表已实现并通过独立等价性复核；旧 Boss 字符串与 P-A 的 `aimed`/`laser` 引用均走兼容映射。P-B 随 v0.4.0 受控上线。
 
 | 文件 / 区域 | P-B 实施状态 |
 |---|---|
@@ -80,20 +80,30 @@ rank = hi == lo ? 0 : clamp((enemyLevel - lo) / (hi - lo), 0, 1)
 
 **验收状态：** `npm test` 332/332；默认模式、`campaign-01` 与非法 campaign fallback 的浏览器 smoke 均通过。`node --expose-gc tools/perf/bench.mjs` 的 madHunt 六项等价指标保持一致，分配量仍减少约 95.9%。部署前补查：超 beat 密度预算的 `patternRef` 在加载期被拒、运行时整组原子拒绝（0 半截泄漏）；`?campaign=campaign-01` 实测 level-01 五节拍逐 beat 推进至 level-02.teach-laser，0 console/pageerror。
 
-### P-C：内容编排、章节接入与只读预览
+### P-C：六关章节与正式模式入口
 
-**工作量：M。** 扩展首批 stage 成一个章节节奏，接入玩家可选模式与只读预览；只在章节模式启用新内容，不替换 endless fallback。
+**工作量：M。** P-C 已通过复核，随本轮受控上线。无限模式仍是默认入口；玩家可从主菜单选择「战役模式（新）」，并从本地保存的首个未完成关卡继续。
 
-| 文件 / 区域 | 计划改动 |
+| 文件 / 区域 | P-C 实施状态 |
 |---|---|
-| `assets/levels/chapter-1/*.json` | 补齐 teach → test → twist → rest → elite/boss 节拍；类型/编队显式声明，随机 pool 只能带权重并有预算。 |
-| `js/ui/menus.js`、`js/game.js` | 增加章节模式入口/关卡选择；默认保留无限模式，章节模式初期只开放一章及经测的难度档。 |
-| `tools/level-preview/`（新增静态工具） | 只读显示 beat 时间、role、强度、spawn 数和密度预算；不先做拖拽编辑、实时修改或时间轴回放。 |
-| `test/level-content.test.mjs`、`test/boot.test.mjs`、`tools/perf/bench.mjs` | 验证内容节拍、全量 patternRef、每 beat 静态预算、章节启动/退出，以及同一配置下的敌弹峰值与更新耗时。 |
+| `assets/levels/campaign-01.json`、`level-04.json` 至 `level-06.json` | 章节扩至六关；每关五拍 teach/test/twist/rest/boss。新增内容全用 P-B 的 patternRef 与受限 params；复用白名单敌种及 phantom/fortress/mothership Boss，不添加硬编码弹道。 |
+| `js/ui/menus.js`、`js/ui/state.js`、`js/ui.js` | 主菜单新增独立「战役模式」按钮与「新」标识、完成进度和命中框；无限模式「开始游戏」仍保留且默认不变。 |
+| `js/game.js`、`js/level/loader.js` | 菜单与 `?campaign=` 共用同一 loader/runner；菜单惰性加载章节并从已解锁的首个未完成关继续，完成关卡时解锁下一关。URL 直通仍从第一关开始。 |
+| `js/meta.js` | 在现有 `planeWarMeta` 存档中新增白名单清洗的战役完成/解锁 ID；老存档缺字段时安全默认为空，关卡完成后立即落盘。 |
+| `test/campaign-menu.test.mjs`、`campaign-progress.test.mjs`、`level-content.test.mjs` | 覆盖入口绘制/命中框、旧存档迁移与解锁持久化、六关 schema/节拍/patternRef/beat 预算。`test/level-loader.test.mjs` 同步更新为六关 manifest。 |
+| `tools/dev/smoke.mjs` | 增加 `MENU_CAMPAIGN=1`，通过真实菜单命中框进入战役；保留默认、URL 直通和非法 campaign fallback 路径。 |
 
-**密度预算：** 每个新增 beat 必须有预算或继承 stage 预算；内容测试展开最大同时存活估算，bench 再以实际弹丸寿命和发射间隔采样 peak。Boss/虫群等混合段需覆盖最坏组合，不只分别测单一敌种。
+**密度预算：** 每个新增 beat 必须有预算或继承 stage 预算；内容测试保守聚合每 wave 的 `spawn.count × patternBulletCount` 并同时核对 active/rate beat 上限。运行时仍由 P-A 原子门禁兜底；Boss/虫群等混合段需在后续平衡验收中覆盖最坏组合。
 
-**验收与回滚：** 章节从菜单可启动/退出，旧无限模式的默认入口与旧波次行为不变；若章节内容回归，隐藏章节入口或回滚 JSON 即可，runner 与 pattern registry 保留但不被默认调用。
+**Boss 选择：** level-04/05/06 分别复用 phantom、fortress、mothership，避免为章节新增硬编码 Boss 弹幕；Boss pattern 继续由 P-B 注册表兼容映射控制。
+
+**验收状态：** `npm test` 338/338；默认菜单、菜单战役入口、`?campaign=campaign-01` 直通与非法 campaign 回退 smoke 均通过。`MENU_CAMPAIGN=1 COMPLETE_FIRST_STAGE=1` 通过 smoke 驱动器清空敌机推进至 level-02，并验证 level-01 完成及 level-02 解锁已落盘。madHunt 等价指标全同，分配量减少约 95.9%。
+
+**验收与回滚：** 菜单入口只改变玩家选择路径；无限模式仍为默认且不启用 campaign runner。若章节内容回归，可隐藏菜单入口或回滚 JSON/进度接线；URL 开发直通保留。
+
+### P-C2：只读时间轴预览（择期）
+
+只读显示 beat 时间、role、强度、spawn 数和密度预算；不包含拖拽编辑、实时修改或时间轴回放。该工具不影响玩家体验，明确从 P-C 拆出，择期单独实施。
 
 ### P-D（后续）：随机源收敛与可复现回放
 
@@ -103,8 +113,8 @@ rank = hi == lo ? 0 : clamp((enemyLevel - lo) / (hi - lo), 0, 1)
 
 - **旧无限模式：** 未选择章节时继续 `updateWaves` + 现有随机生成；不迁移、不删除现有波次行为。新章节只能经显式入口启用。选中章节但文件缺失或非法时明确记录错误，并回退到无限模式。
 - **旧 Boss pattern：** 未提供 `patternRef` 时按原 `phase.pattern` 执行。明确写了 `patternRef` 但引用不存在时拒绝该 stage 并报错；避免 typo 被旧默认行为掩盖。
-- **灰度：** P-A 先在测试/开发入口验证；P-B 先只迁移章节 Boss 和一类常规敌机；P-C 才开放单章节模式。每批可通过隐藏入口/回滚数据撤下，不更改默认 endless 体验。
-- **编辑器建议：** 档位 1（JSON + Schema + 内容测试）随 P-A 实施；档位 2 只读节拍/密度预览放 P-C；档位 3（时间轴编辑、确定性回放）待 P-D 和设计数据稳定后再评估。现在做完整可视化编辑器会先固化尚未验证的 schema，投入与收益不成比例。
+- **发布边界：** P-A/P-B 通过 URL 灰度验证后，P-C 才将单章入口放入主菜单；无限模式仍是默认选项，战役进度本地持久化。只读预览留给 P-C2，不捆绑玩家内容发布。
+- **编辑器建议：** 档位 1（JSON + Schema + 内容测试）随 P-A 实施；档位 2 只读节拍/密度预览放 P-C2；档位 3（时间轴编辑、确定性回放）待 P-D 和设计数据稳定后再评估。现在做完整可视化编辑器会先固化尚未验证的 schema，投入与收益不成比例。
 
 ## 主要风险与总验收门槛
 
