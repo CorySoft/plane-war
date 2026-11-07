@@ -19,6 +19,12 @@ import {
   drawStars,
   drawTalentConfirm,
   drawToast,
+  getClearNoButton,
+  getClearYesButton,
+  getHangarConfirmNoButton,
+  getHangarConfirmYesButton,
+  getTalentConfirmNoButton,
+  getTalentConfirmYesButton,
   initStars,
   setDetailCard,
   setHangarConfirm,
@@ -29,7 +35,7 @@ import {
 } from "../js/ui.js";
 
 function makeTrackedContext() {
-  const state = { depth: 0, saves: 0, restores: 0, underflows: 0 };
+  const state = { depth: 0, saves: 0, restores: 0, underflows: 0, texts: [] };
   const gradient = { addColorStop() {} };
   const target = {
     canvas: { width: 480, height: 720 },
@@ -45,6 +51,9 @@ function makeTrackedContext() {
       state.restores++;
       if (state.depth === 0) state.underflows++;
       else state.depth--;
+    },
+    fillText(text) {
+      state.texts.push(String(text));
     },
   };
   const noop = () => {};
@@ -69,6 +78,7 @@ function assertBalanced(label, render) {
   assert.equal(state.underflows, 0, `${label} called restore without a matching save`);
   assert.equal(state.depth, 0, `${label} left ${state.depth} unmatched save(s)`);
   assert.equal(state.saves, state.restores, `${label} save/restore counts differ`);
+  return state;
 }
 
 describe("UI canvas state stack", () => {
@@ -107,15 +117,21 @@ describe("UI canvas state stack", () => {
     setDetailCard(null);
 
     setShowClearCache(true);
-    assertBalanced("drawClearCacheConfirm", ctx => drawClearCacheConfirm(ctx));
+    const clearState = assertBalanced("drawClearCacheConfirm", ctx => drawClearCacheConfirm(ctx));
+    assert.ok(getClearYesButton() && getClearNoButton());
+    assert.ok(clearState.texts.includes("确认清除") && clearState.texts.includes("取消"));
     setShowClearCache(false);
 
     setHangarConfirm({ id: "falcon", name: "战机", cost: 10 });
-    assertBalanced("drawHangarConfirm", ctx => drawHangarConfirm(ctx));
+    const hangarState = assertBalanced("drawHangarConfirm", ctx => drawHangarConfirm(ctx));
+    assert.ok(getHangarConfirmYesButton() && getHangarConfirmNoButton());
+    assert.ok(hangarState.texts.includes("确认") && hangarState.texts.includes("取消"));
     setHangarConfirm(null);
 
     setTalentConfirm({ id: "t_dmg1", name: "强化", cost: 10, desc: "伤害提升" });
-    assertBalanced("drawTalentConfirm", ctx => drawTalentConfirm(ctx));
+    const talentState = assertBalanced("drawTalentConfirm", ctx => drawTalentConfirm(ctx));
+    assert.ok(getTalentConfirmYesButton() && getTalentConfirmNoButton());
+    assert.ok(talentState.texts.includes("确认") && talentState.texts.includes("取消"));
     setTalentConfirm(null);
   });
 });
