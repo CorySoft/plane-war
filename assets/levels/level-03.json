@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "id": "level-03",
+  "chapterId": "chapter-1",
+  "title": "破阵突围",
+  "difficulty": {
+    "scoreAxis": [
+      { "at": 0, "playerLevel": 1, "enemyLevel": 1 },
+      { "at": 8000, "playerLevel": 3, "enemyLevel": 3 },
+      { "at": 20000, "playerLevel": 6, "enemyLevel": 6 },
+      { "at": 35000, "playerLevel": 10, "enemyLevel": 11 },
+      { "at": 58500, "playerLevel": 14, "enemyLevel": 14 },
+      { "at": 100000, "playerLevel": 14, "enemyLevel": 16 },
+      { "at": 180000, "playerLevel": 14, "enemyLevel": 18 }
+    ]
+  },
+  "densityBudget": {
+    "maxHostileActive": 140,
+    "maxHostileBulletsPerSec": 140
+  },
+  "patterns": ["aimed", "laser"],
+  "formations": {
+    "line": { "type": "line", "spacing": 42 },
+    "v": { "type": "v", "spacing": 42 },
+    "column": { "type": "column", "spacing": 36 },
+    "pincer": { "type": "pincer", "spacing": 48 }
+  },
+  "beats": [
+    {
+      "id": "teach-split",
+      "role": "teach",
+      "telegraphSec": 1,
+      "densityBudget": { "maxHostileActive": 40, "maxHostileBulletsPerSec": 10 },
+      "advance": { "type": "allCleared", "timeoutSec": 24 },
+      "waves": [
+        {
+          "delaySec": 0,
+          "spawns": [
+            { "type": "split", "count": 1, "formation": "line", "centerX": 0.5, "spawnY": -35, "patternRef": "aimed" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "test-split",
+      "role": "test",
+      "telegraphSec": 1,
+      "densityBudget": { "maxHostileActive": 56, "maxHostileBulletsPerSec": 14 },
+      "advance": { "type": "hybrid", "atSec": 4, "timeoutSec": 30 },
+      "waves": [
+        {
+          "delaySec": 0,
+          "spawns": [
+            { "type": "split", "count": 3, "formation": "v", "centerX": 0.5, "spawnY": -35, "intervalSec": 0.9, "patternRef": "aimed" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "twist-mixed",
+      "role": "twist",
+      "telegraphSec": 1.2,
+      "densityBudget": { "maxHostileActive": 72, "maxHostileBulletsPerSec": 20 },
+      "advance": { "type": "allCleared", "timeoutSec": 42 },
+      "waves": [
+        {
+          "delaySec": 0,
+          "spawns": [
+            { "type": "split", "count": 2, "formation": "pincer", "centerX": 0.5, "spawnY": -35, "intervalSec": 0.8, "patternRef": "aimed" },
+            { "type": "laser", "count": 1, "formation": "line", "centerX": 0.5, "spawnY": -35, "intervalSec": 1.5, "patternRef": "laser" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rest",
+      "role": "rest",
+      "telegraphSec": 0,
+      "densityBudget": { "maxHostileActive": 16, "maxHostileBulletsPerSec": 4 },
+      "advance": { "type": "time", "atSec": 4 },
+      "waves": []
+    },
+    {
+      "id": "boss-phantom",
+      "role": "boss",
+      "telegraphSec": 3,
+      "densityBudget": { "maxHostileActive": 96, "maxHostileBulletsPerSec": 32 },
+      "advance": { "type": "allCleared", "timeoutSec": 90 },
+      "waves": [{ "delaySec": 0, "bossType": "phantom", "spawns": [] }]
+    }
+  ]
+}
