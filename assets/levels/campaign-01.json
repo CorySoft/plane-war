@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
   "id": "campaign-01",
-  "title": "第一章：教学空域",
+  "title": "第一章：初入空域",
   "chapters": [
     {
       "id": "chapter-1",
       "title": "初入空域",
-      "stages": ["level-01", "level-02", "level-03"]
+      "stages": ["level-01", "level-02", "level-03", "level-04", "level-05", "level-06"]
     }
   ]
 }

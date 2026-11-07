@@ -28,7 +28,7 @@ describe("campaign loader", () => {
     assert.equal(campaign.id, "campaign-01");
     assert.equal(campaign.chapters[0].stages.length, manifest.chapters[0].stages.length);
     assert.deepEqual(campaign.chapters[0].stages.map(stage => stage.id), [
-      "level-01", "level-02", "level-03",
+      "level-01", "level-02", "level-03", "level-04", "level-05", "level-06",
     ]);
     assert.ok(requested.every(url => url.endsWith(`?v=${APP_VERSION}`)));
   });

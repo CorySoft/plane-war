@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "id": "level-06",
+  "chapterId": "chapter-1",
+  "title": "终幕·苍穹防线",
+  "difficulty": {
+    "scoreAxis": [
+      { "at": 0, "playerLevel": 1, "enemyLevel": 1 },
+      { "at": 8000, "playerLevel": 3, "enemyLevel": 3 },
+      { "at": 20000, "playerLevel": 6, "enemyLevel": 6 },
+      { "at": 35000, "playerLevel": 10, "enemyLevel": 11 },
+      { "at": 58500, "playerLevel": 14, "enemyLevel": 14 },
+      { "at": 100000, "playerLevel": 14, "enemyLevel": 16 },
+      { "at": 180000, "playerLevel": 14, "enemyLevel": 18 }
+    ]
+  },
+  "densityBudget": { "maxHostileActive": 140, "maxHostileBulletsPerSec": 140 },
+  "patterns": ["rain", "ring", "petal", "laserGrid", "aimed"],
+  "formations": {
+    "line": { "type": "line", "spacing": 42 },
+    "v": { "type": "v", "spacing": 42 },
+    "column": { "type": "column", "spacing": 36 },
+    "pincer": { "type": "pincer", "spacing": 48 }
+  },
+  "beats": [
+    {
+      "id": "teach-rain",
+      "role": "teach",
+      "telegraphSec": 1.2,
+      "densityBudget": { "maxHostileActive": 40, "maxHostileBulletsPerSec": 24 },
+      "advance": { "type": "allCleared", "timeoutSec": 26 },
+      "waves": [{ "delaySec": 0, "spawns": [
+        { "type": "small", "count": 4, "formation": "line", "centerX": 0.5, "spawnY": -35, "intervalSec": 0.65,
+          "patternRef": "rain", "params": { "count": 5, "span": 220, "speed": 3 } }
+      ] }]
+    },
+    {
+      "id": "test-grid",
+      "role": "test",
+      "telegraphSec": 1.1,
+      "densityBudget": { "maxHostileActive": 60, "maxHostileBulletsPerSec": 18 },
+      "advance": { "type": "hybrid", "atSec": 4, "timeoutSec": 34 },
+      "waves": [{ "delaySec": 0, "spawns": [
+        { "type": "laser", "count": 2, "formation": "pincer", "centerX": 0.5, "spawnY": -35, "intervalSec": 1,
+          "patternRef": "laserGrid", "params": { "count": 5, "spacing": 12, "speed": 8.8 } }
+      ] }]
+    },
+    {
+      "id": "twist-ring-petal",
+      "role": "twist",
+      "telegraphSec": 1.3,
+      "densityBudget": { "maxHostileActive": 88, "maxHostileBulletsPerSec": 52 },
+      "advance": { "type": "allCleared", "timeoutSec": 48 },
+      "waves": [{ "delaySec": 0, "spawns": [
+        { "type": "shield", "count": 2, "formation": "v", "centerX": 0.5, "spawnY": -35, "intervalSec": 1,
+          "patternRef": "ring", "params": { "count": 12, "speed": { "base": 2.8, "rankGain": 0.4 } } },
+        { "type": "split", "count": 2, "formation": "column", "centerX": 0.25, "spawnY": -35, "intervalSec": 1.2,
+          "patternRef": "petal", "params": { "count": 12, "lobes": 3, "amplitude": 0.25, "speed": 2.7 } }
+      ] }]
+    },
+    {
+      "id": "rest",
+      "role": "rest",
+      "telegraphSec": 0,
+      "densityBudget": { "maxHostileActive": 18, "maxHostileBulletsPerSec": 4 },
+      "advance": { "type": "time", "atSec": 4 },
+      "waves": []
+    },
+    {
+      "id": "boss-mothership",
+      "role": "boss",
+      "telegraphSec": 3.2,
+      "densityBudget": { "maxHostileActive": 112, "maxHostileBulletsPerSec": 36 },
+      "advance": { "type": "allCleared", "timeoutSec": 100 },
+      "waves": [{ "delaySec": 0, "bossType": "mothership", "spawns": [
+        { "type": "laser", "count": 2, "formation": "line", "centerX": 0.5, "spawnY": -35, "intervalSec": 1.5,
+          "patternRef": "aimed" }
+      ] }]
+    }
+  ]
+}

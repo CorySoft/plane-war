@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "id": "level-04",
+  "chapterId": "chapter-1",
+  "title": "扇环夹击",
+  "difficulty": {
+    "scoreAxis": [
+      { "at": 0, "playerLevel": 1, "enemyLevel": 1 },
+      { "at": 8000, "playerLevel": 3, "enemyLevel": 3 },
+      { "at": 20000, "playerLevel": 6, "enemyLevel": 6 },
+      { "at": 35000, "playerLevel": 10, "enemyLevel": 11 },
+      { "at": 58500, "playerLevel": 14, "enemyLevel": 14 },
+      { "at": 100000, "playerLevel": 14, "enemyLevel": 16 },
+      { "at": 180000, "playerLevel": 14, "enemyLevel": 18 }
+    ]
+  },
+  "densityBudget": { "maxHostileActive": 140, "maxHostileBulletsPerSec": 140 },
+  "patterns": ["fan", "ring", "aimed"],
+  "formations": {
+    "line": { "type": "line", "spacing": 42 },
+    "v": { "type": "v", "spacing": 42 },
+    "column": { "type": "column", "spacing": 36 },
+    "pincer": { "type": "pincer", "spacing": 48 }
+  },
+  "beats": [
+    {
+      "id": "teach-fan",
+      "role": "teach",
+      "telegraphSec": 1,
+      "densityBudget": { "maxHostileActive": 28, "maxHostileBulletsPerSec": 10 },
+      "advance": { "type": "allCleared", "timeoutSec": 24 },
+      "waves": [{ "delaySec": 0, "spawns": [
+        { "type": "small", "count": 3, "formation": "line", "centerX": 0.5, "spawnY": -35, "intervalSec": 0.7,
+          "patternRef": "fan", "params": { "count": 3, "spreadDeg": 34, "speed": 2.5 } }
+      ] }]
+    },
+    {
+      "id": "test-fan",
+      "role": "test",
+      "telegraphSec": 0.9,
+      "densityBudget": { "maxHostileActive": 40, "maxHostileBulletsPerSec": 12 },
+      "advance": { "type": "hybrid", "atSec": 4, "timeoutSec": 30 },
+      "waves": [{ "delaySec": 0, "spawns": [
+        { "type": "mid", "count": 2, "formation": "v", "centerX": 0.5, "spawnY": -35, "intervalSec": 0.8,
+          "patternRef": "fan", "params": { "count": 5, "spreadDeg": 52, "speed": { "base": 2.7, "rankGain": 0.3 } } }
+      ] }]
+    },
+    {
+      "id": "twist-ring",
+      "role": "twist",
+      "telegraphSec": 1.1,
+      "densityBudget": { "maxHostileActive": 56, "maxHostileBulletsPerSec": 20 },
+      "advance": { "type": "allCleared", "timeoutSec": 38 },
+      "waves": [{ "delaySec": 0, "spawns": [
+        { "type": "shield", "count": 2, "formation": "pincer", "centerX": 0.5, "spawnY": -35, "intervalSec": 1,
+          "patternRef": "ring", "params": { "count": 8, "speed": 2.8 } },
+        { "type": "small", "count": 3, "formation": "column", "centerX": 0.25, "spawnY": -30, "intervalSec": 0.55,
+          "patternRef": "aimed" }
+      ] }]
+    },
+    {
+      "id": "rest",
+      "role": "rest",
+      "telegraphSec": 0,
+      "densityBudget": { "maxHostileActive": 16, "maxHostileBulletsPerSec": 4 },
+      "advance": { "type": "time", "atSec": 4 },
+      "waves": []
+    },
+    {
+      "id": "boss-phantom",
+      "role": "boss",
+      "telegraphSec": 3,
+      "densityBudget": { "maxHostileActive": 96, "maxHostileBulletsPerSec": 32 },
+      "advance": { "type": "allCleared", "timeoutSec": 90 },
+      "waves": [{ "delaySec": 0, "bossType": "phantom", "spawns": [
+        { "type": "small", "count": 2, "formation": "line", "centerX": 0.5, "spawnY": -35, "intervalSec": 1,
+          "patternRef": "aimed" }
+      ] }]
+    }
+  ]
+}
