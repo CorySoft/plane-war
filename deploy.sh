@@ -123,20 +123,20 @@ fi
 # 前提：目标版本的版本化文件仍在远端（被 prune 过则无法回滚，需 checkout 旧源码重发）。
 if [ -n "$ROLLBACK_VER" ]; then
   echo ">> 回滚到版本 $ROLLBACK_VER"
-  remote_list="$(lftp_run "cls $FTP_REMOTE_DIR/js/ -1; quit" || true)"
-  if ! printf '%s\n' "$remote_list" | grep -q "game\.v${ROLLBACK_VER}\.js"; then
+  remote_list="$(lftp_run "find $FTP_REMOTE_DIR/js/; quit" || true)"
+  if ! printf '%s\n' "$remote_list" | grep -qE "(^|/)game\.v${ROLLBACK_VER}\.js$"; then
     echo "错误：远端不存在 game.v${ROLLBACK_VER}.js，无法回滚。" >&2
     echo "      请 checkout 目标版本源码后重新部署，或确认未对该版本执行过 --prune。" >&2
     exit 1
   fi
-  # 完整性提示：入口存在即视为可回滚，但把该版本实际存在的模块数报出来，
+  # 完整性提示：递归统计该版本的模块数（包括 ui/ 等子目录），
   # 便于发现「上传中断 / 部分 prune 导致半套版本」。版本较旧时模块数偏少属正常，
   # 故只警告不阻断（旧版本的模块集本就与当前源码不同）。
-  module_count=$(find js -maxdepth 1 -name '*.js' | wc -l | tr -d ' ')
+  module_count=$(find js -type f -name '*.js' | wc -l | tr -d '[:space:]')
   found_count=$(printf '%s\n' "$remote_list" | grep -c "\.v${ROLLBACK_VER}\.js$" || true)
   if [ "$found_count" -lt "$module_count" ]; then
     echo "警告：远端仅有 ${found_count} 个 v${ROLLBACK_VER} 模块（当前源码 ${module_count} 个）。" >&2
-    echo "      版本较旧属正常；若该版本曾被部分 --prune 或上传中断，游戏可能缺模块。" >&2
+    echo "      版本较旧属正常；若该版本曾被部分 --prune 或上传中断（含子目录模块），游戏可能缺模块。" >&2
   fi
   TMP_RB="$(mktemp /tmp/plane_war_index_rollback_XXXX.html)"
   sed "s/__VERSION__/${ROLLBACK_VER}/g" index.html > "$TMP_RB"
@@ -211,28 +211,113 @@ EXCLUDES=(
 upload() {
   local flag="$1"
   echo ">> 上传 [${flag}] → ftp://${FTP_HOST}/${FTP_REMOTE_DIR}/"
-  # --parallel 必须为 1：并行传输时 lftp 会先于父目录确认完成就去 mkdir 子目录，
-  # Byethost 返回 550「No such file or directory」导致 mirror 中断（set -e 直接终止整个部署）。
-  # 注意：注释必须写在 lftp 命令之前——写在续行里会被当成 -e 的参数，导致
-  # 「open: option requires an argument -- 'e'」整条命令失效。
-  lftp_run "mirror -R $flag --parallel=1 ${EXCLUDES[*]} ./ $FTP_REMOTE_DIR/; quit"
-
-  # 版本化 js：把每个模块复制为「文件名.v版本.js」并重写相对 import 指向版本化文件名。
+  # 版本化 js：递归复制整个 js/ 树为「文件名.v版本.js」，保留目录结构，
+  # 并重写 import/export 的相对路径，确保 ui/ 等子目录模块也能正常加载。
   # 必须用「文件名」而非 ?v= 查询串来破除缓存——Byethost 按路径缓存且会忽略查询串，
   # 导致 enemy.js?v=X 仍返回多年前缓存的旧文件（不含后续新增的导出），引发
   # “does not provide an export” 类错误。改文件名即换新路径，必定缓存未命中。
   TMP_JS="$(mktemp -d /tmp/plane_war_js_XXXX)"
-  for src in js/*.js; do
-    base="$(basename "$src" .js)"
-    cp "$src" "$TMP_JS/${base}.v${NEW_VER}.js"
-  done
-  # 把 from "./x.js" / from './x.js' 改写为 from "./x.v版本.js"
-  sed -i -E "s|(from [\"']\./[A-Za-z0-9_./-]+)\.js([\"'])|\\1.v${NEW_VER}.js\\2|g" "$TMP_JS"/*.js 2>/dev/null || true
+  if ! node --input-type=module - js "$TMP_JS" "$NEW_VER" <<'NODE'
+import fs from "node:fs";
+import path from "node:path";
+
+const [sourceDir, outputDir, version] = process.argv.slice(2);
+if (!/^[0-9]+\.[0-9]+\.[0-9]+$/.test(version)) {
+  throw new Error(`Invalid version: ${version}`);
+}
+
+function listModules(dir, prefix = "") {
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .flatMap(entry => {
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) return listModules(path.join(dir, entry.name), relative);
+      return entry.isFile() && entry.name.endsWith(".js") ? [relative] : [];
+    });
+}
+
+const sourceFiles = listModules(sourceDir);
+const sourceSet = new Set(sourceFiles);
+const specifierPattern = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s*)(["'])(\.{1,2}\/[^"']+\.js)\2/g;
+function moduleEdges(file) {
+  const source = fs.readFileSync(path.join(sourceDir, file), "utf8");
+  return [...source.matchAll(specifierPattern)].map(match => {
+    const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), match[3]));
+    if (target.startsWith("../") || target === "..") {
+      throw new Error(`${file} imports outside js/: ${match[3]}`);
+    }
+    if (!sourceSet.has(target)) {
+      throw new Error(`${file} imports missing module ${match[3]} (${target})`);
+    }
+    return { specifier: match[3], target };
+  });
+}
+
+const reachable = new Set();
+const pending = ["game.js"];
+while (pending.length) {
+  const file = pending.pop();
+  if (reachable.has(file)) continue;
+  if (!sourceSet.has(file)) throw new Error(`Missing entry or dependency: ${file}`);
+  reachable.add(file);
+  for (const edge of moduleEdges(file)) pending.push(edge.target);
+}
+const unreachable = sourceFiles.filter(file => !reachable.has(file));
+if (unreachable.length) {
+  throw new Error(`Unreachable JS modules: ${unreachable.join(", ")}`);
+}
+
+const versionedPath = relative => relative.replace(/\.js$/, `.v${version}.js`);
+const artifactSet = new Set(sourceFiles.map(versionedPath));
+fs.mkdirSync(outputDir, { recursive: true });
+for (const file of sourceFiles) {
+  const source = fs.readFileSync(path.join(sourceDir, file), "utf8");
+  const rewritten = source.replace(specifierPattern, (full, prefix, quote, specifier) => {
+    const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier));
+    if (!reachable.has(target)) throw new Error(`${file} references unreachable module ${target}`);
+    const versionedSpecifier = specifier.replace(/\.js$/, `.v${version}.js`);
+    const versionedTarget = path.posix.normalize(path.posix.join(path.posix.dirname(versionedPath(file)), versionedSpecifier));
+    if (!artifactSet.has(versionedTarget)) {
+      throw new Error(`${file} import has no versioned artifact: ${specifier}`);
+    }
+    return `${prefix}${quote}${versionedSpecifier}${quote}`;
+  });
+  const destination = path.join(outputDir, versionedPath(file));
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.writeFileSync(destination, rewritten);
+}
+
+const artifacts = listModules(outputDir);
+if (artifacts.length !== reachable.size
+    || artifacts.some(file => !artifactSet.has(file))
+    || [...artifactSet].some(file => !artifacts.includes(file))) {
+  throw new Error(`Versioned artifact count ${artifacts.length} does not match reachable module count ${reachable.size}`);
+}
+for (const file of artifacts) {
+  const source = fs.readFileSync(path.join(outputDir, file), "utf8");
+  for (const match of source.matchAll(specifierPattern)) {
+    const target = path.posix.normalize(path.posix.join(path.posix.dirname(file), match[3]));
+    if (!artifactSet.has(target)) throw new Error(`${file} references missing versioned artifact ${match[3]}`);
+  }
+}
+console.log(`>> 版本化 JS 完整性校验通过：${artifacts.length} 个产物，${reachable.size} 个可达模块（入口 game.js）`);
+NODE
+  then
+    rm -rf "$TMP_JS"
+    return 1
+  fi
+
+# 在本地模块图校验通过前不执行任何远端写操作。
+# --parallel 必须为 1：并行传输时 lftp 可能先于父目录确认完成就去 mkdir 子目录。
+lftp_run "mirror -R $flag --parallel=1 ${EXCLUDES[*]} ./ $FTP_REMOTE_DIR/; quit"
+
   echo ">> 上传版本化 js（v${NEW_VER}）→ $FTP_REMOTE_DIR/js/"
-  # mirror -R 对绝对路径源目录不可靠，改用 put 逐文件覆盖
-  for f in "$TMP_JS"/*.js; do
-    lftp_run "put \"$f\" -o $FTP_REMOTE_DIR/js/$(basename "$f"); quit"
-  done
+  while IFS= read -r -d '' f; do
+    rel="${f#"$TMP_JS"/}"
+    remote_path="$FTP_REMOTE_DIR/js/$rel"
+    remote_dir="${remote_path%/*}"
+    lftp_run "mkdir -p \"$remote_dir\"; put \"$f\" -o \"$remote_path\"; quit"
+  done < <(find "$TMP_JS" -type f -name '*.js' -print0)
   rm -rf "$TMP_JS"
 
   # index.html 单独上传：替换 js/game.js 的版本号（缓存破除），版本号变更后 URL 随之变化
@@ -249,18 +334,19 @@ upload() {
   echo ">> 上传 .htaccess → $HTDOCS_DIR/.htaccess"
   lftp_run "put .htaccess -o $HTDOCS_DIR/.htaccess; quit"
 
-  # 清理历史版本模块：每次部署都会在 js/ 里多留 20 个 <name>.v<旧版本>.js，
-  # 只增不删（当前 0.3.1 已累积约 600 个文件）。--prune 时删掉非当前版本的副本。
+  # 清理历史版本模块：版本化文件递归保留目录结构，--prune 时也递归删除旧副本。
   if [ "$PRUNE" = "1" ]; then
     echo ">> 清理旧版本 js 副本（保留 v${NEW_VER}）"
-    # grep -v 无匹配时返回 1，在 set -euo pipefail 下会直接终止部署，故整体兜 || true
-    lftp_run "cls $FTP_REMOTE_DIR/js/ -1; quit" \
-      | grep -oE "^[A-Za-z0-9_]+\.v[0-9]+\.[0-9]+\.[0-9]+\.js$" \
-      | grep -v "\.v${NEW_VER}\.js$" \
-      | while read -r old; do
-          echo "   rm js/$old"
-          lftp_run "rm $FTP_REMOTE_DIR/js/$old; quit"
-        done || true
+    remote_list="$(lftp_run "find $FTP_REMOTE_DIR/js/; quit" || true)"
+    while IFS= read -r old; do
+      old="${old#/}"
+      old="${old#"$FTP_REMOTE_DIR/js/"}"
+      if [[ "$old" =~ (^|/)[A-Za-z0-9_]+\.v[0-9]+\.[0-9]+\.[0-9]+\.js$ ]] \
+          && [[ "$old" != *".v${NEW_VER}.js" ]]; then
+        echo "   rm js/$old"
+        lftp_run "rm \"$FTP_REMOTE_DIR/js/$old\"; quit"
+      fi
+    done <<< "$remote_list"
   fi
   echo ">> 上传完成"
 }
