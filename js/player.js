@@ -159,9 +159,8 @@ export function updatePlayer(dt, player, refireDist = 0, maxTraveled = 0) {
 const ORBIT_RADIUS = 46;       // 轨道半径
 const ORBIT_SPEED = 2.2;       // 角速度(弧度/秒)
 const ORBIT_RESPAWN = 2.5;     // 被击毁后重生秒数
-const ORBIT_GROW_INTERVAL = 30; // 无技能时每 30 秒增长一颗
-const ORBIT_MAX_BASE = 0;      // 无护体技能时不生成护体弹
-const ORBIT_MAX_PER_LEVEL = 1; // 每级护体技能上限 1+level（1级2颗…满级6颗）
+const ORBIT_GROW_INTERVAL = 30; // 有护体技能时每 30 秒增长一颗（每级 -4s，下限 4s）
+const ORBIT_MAX_PER_LEVEL = 1;  // 每级护体技能上限 +1（1级2颗…满级6颗）
 
 /**
  * 护体弹伤害：随火力等级与「火力强化」技能成长。
@@ -185,7 +184,7 @@ function makeOrbitBullet(player) {
 /**
  * 维护护体弹：
  * - 无护体技能时不生成；有技能时立即生成 1 颗保底
- * - 之后每 ORBIT_GROW_INTERVAL 秒自动 +1 颗（直到上限）
+ * - 之后每 interval 秒自动 +1 颗（直到上限；无护体技能时不生成）
  * - 护体技能每升 1 级，增长间隔线性缩短（30→26→22→18→10s），上限 +1（1级2颗…满级6颗）
  */
 function updateOrbit(player, dt) {
@@ -266,7 +265,7 @@ export function volleyOffsets(volleyLv, player) {
 export function getShootPattern(player) {
   const lvl = player.power;
   const dmgLv = player.skills.dmg || 0;
-  const baseDmg = Math.round((1 + dmgLv + (player.talentDmg || 0)) * (player.baseDmgMul || 1));
+  const baseDmg = Math.round((BULLET.baseDmg + dmgLv + (player.talentDmg || 0)) * (player.baseDmgMul || 1));
   const dualLv = Math.min(player.skills.dual || 0, 4);   // 侧翼炮上限 4
   const rapid = player.buffs.rapid > 0;
   const scatterLv = player.skills.scatter || 0;   // 散射：每通道左右对称 ±k 展开

@@ -2,8 +2,9 @@
 
 - 起草：codearts（现状盘点人）
 - 依据：`docs/design-current-state.md`（本人数值全盘点）、`docs/design-levels-editor.md`（Codebuddy，schema 与 `scoreAxis`）、`docs/design-research.md`（Copilot，三轴难度 / DPS-TTK）
-- 状态：**批 1~3 已实施并随 v0.3.7 受控上线**（2026-11-07）；批 4（经济 / 数值孤岛）与 P-A（关卡数据地基）待排期。本文为提案底稿，落地值以代码与新增回归测试为准。
-- 实施记录：`SCORE_AXIS` 七段表 + `levelFromScore` 落在 `js/config.js`；敌机开火乘数钳正在 `js/enemy.js`；`getDifficultyLevel` 已从 `game.js` 移除读取点。新增 `test/score-axis.test.mjs` / `test/aircraft-balance.test.mjs` / `test/weapon-quota.test.mjs` 共 16 项回归（300→316）。
+- 状态：**批 1~4 全部实施完成，数值包收官**（2026-11-07，批 1~3 随 v0.3.7、批 4 随 v0.3.8 受控上线）；P-A（关卡数据地基）及以后待排期。本文为提案底稿，落地值以代码与回归测试为准。
+- 实施记录（批 1~3）：`SCORE_AXIS` 七段表 + `levelFromScore` 落在 `js/config.js`；敌机开火乘数钳正在 `js/enemy.js`；`getDifficultyLevel` 的 `game.js` 读取点移除。新增 `test/score-axis.test.mjs` / `test/aircraft-balance.test.mjs` / `test/weapon-quota.test.mjs` 共 16 项回归（300→316）。
+- 实施记录（批 4）：星尘新手保底（`META.newbieRuns=5` / `newbieStardust=10`，`earnStardust` 内生效）；死代码 `getDifficultyLevel`、`ENEMY_LEVEL.scorePerLevel`、`ORBIT_MAX_BASE` 删除；`BULLET.baseDmg` / `PLAYER_BASE.fireInterval` / `PLAYER.maxPower` 接线为真源（值等价）；`balance.test.mjs:39` 陈旧断言翻新为对 `levelFromScore` 的真实约束；`ORBIT_GROW_INTERVAL` 保留并修正误导注释。测试 316→317。
 - 用户已定：三个已证实缺陷**并入数值改版**统一处理，生产 0.3.6 暂时带缺陷运行。
 
 ---
@@ -90,7 +91,7 @@
 - **差值上限 +4**，既保留「后期敌人仍加压」，又不会重演脱钩。
 - E 封顶 18 → `scale=17` → 开火乘数 `1-0.51=0.49 > 0`，与 A 呼应。
 - 预期体验：后期不再「敌人无限变强、玩家原地踏步」；180,000 分后进入稳定终点局。
-- 回归风险：**中**。`wave.test.mjs` 仍测旧 `getDifficultyLevel`（保留为 fallback，不删）；`balance.test.mjs:40` 用新 axis 在 58,500 分处 E=14 >= 5 ✅。
+- 回归风险：已闭环。批 1 `wave.test.mjs` 随 `getDifficultyLevel` 退役改为测 `levelFromScore`；批 4 删除该函数后 `wave.test` 直接测统一轴边界。`balance.test.mjs:40` 翻新为对 `levelFromScore` 的真实运行时约束（见批 4 处置表）。
 - 依赖：`config.js` + `game.js`，**可独立上线，不必等关卡系统**；后续 `level.js` 直接复用同一个 `levelFromScore`，不各造一套。
 - 验收：新增测试断言 axis 单调不减、长度一致、任意 score 下 `enemyLevel - playerLevel <= 4`、`playerLevel <= 14`。
 
@@ -150,7 +151,7 @@
 | `BULLET.baseDmg`（0 引用） | `player.js:269` 的硬编码 `1` 改为 `BULLET.baseDmg`（值 1，行为等价） | 低 |
 | `PLAYER_BASE.fireInterval=0.16`（无人读） | 值改为 `0.56`，`calcFireRate` 读它替代字面量；测试断言 0.56 仍通过 | 低 |
 | `ORBIT_GROW_INTERVAL/ORBIT_MAX_BASE` 误导注释 | 删除「无技能每 30s 增长」注释与死常量；保留「无 guard 不生成」的正确行为 | 低 |
-| `power` 上限硬编码 4 | 新增 `BULLET.maxPower = 4`，`powerup.js:83` 引用 | 低 |
+| `power` 上限硬编码 4 | 新增 `PLAYER.maxPower = 4`，`powerup.js:83` 引用（批 4 实际落点） | 低 |
 | `critMulti` 注释 2.5 | 注释改为 1.5（与 `config.js:72` 一致） | 零 |
 | `game.js:428` 注释「8000/上限 30」 | 改为指向 `scoreAxis`（C 落地后） | 零 |
 

@@ -46,7 +46,7 @@ export const PLAYER_BASE = {
   radius: 18,       // 碰撞半径
   width: 44,
   height: 52,
-  fireInterval: 0.16,   // 基础射击间隔(秒)
+  fireInterval: 0.56,   // 基础射击间隔(秒)：calcFireRate 的唯一真源
   invincibleTime: 2.2,
   maxShield: 3,
   startLives: 3,
@@ -106,7 +106,6 @@ export const BULLET = {
 
 // ---------- 敌方等级 ----------
 export const ENEMY_LEVEL = {
-  scorePerLevel: 6000,    // 每6000分敌方升1级（原 8000 太慢，中期几乎感觉不到成长）
   hpPerLevel: 0.10,       // 每级HP +10%
   fireCdPerLevel: -0.03,  // 每级开火间隔 -3%（越快）
   fireCdMinMul: 0.25,     // 开火间隔缩放下限：防止高等级乘数变负导致敌机出生即开火
@@ -151,7 +150,7 @@ export function calcFireRate(player) {
   if (player.buffs.rapid > 0) return 0.055 * frMul;
   if (player.buffs.madHunt > 0) return 0.045 * frMul;
   const power = Math.max(1, player.power || 1);
-  return (0.56 - (power - 1) * 0.04) * (1 - 0.08 * (player.skills.rate || 0)) * frMul;
+  return (PLAYER_BASE.fireInterval - (power - 1) * 0.04) * (1 - 0.08 * (player.skills.rate || 0)) * frMul;
 }
 
 /** 子弹射程(像素)：fireBullet、HUD、暂停面板共用，避免三处各写一份常量而漂移 */
@@ -389,6 +388,7 @@ export const XP_BASE = 60;          // 1 级升 2 级所需经验
 export const XP_GROWTH = 1.28;
 export const PLAYER = {
   hitRadius: 20,      // 敌方子弹判定玩家半径（略宽于贴图便于弹幕贴身擦过）
+  maxPower: 4,        // 火力等级上限（power 道具与天赋起始等级共用）
 };
 
 // ---------- 元进度 ----------
@@ -396,6 +396,8 @@ export const META = {
   // 星尘产出：原「每 10000 分 = 1 星尘」意味着一局 2 万分只给 2 星尘，
   // 而商城/飞机/天赋动辄几百，元进度等于不存在。
   stardustPerScore: 400,     // 每400分=1星尘（一局 2 万分 ≈ 50 星尘）
+  newbieRuns: 5,            // 新手保底局数：前 N 局
+  newbieStardust: 10,       // 新手保底：每局最低星尘，避免低分局 0 收益
   reviveCost: 40,           // 死亡后立即复活所需星尘（对局内 1 次）
   aircraft: {
     falcon:  { name: "战隼", desc: "均衡型", speed: 6.2, baseDmg: 1, fireRate: 1, startHp: 3, cost: 0 },

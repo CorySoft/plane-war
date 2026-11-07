@@ -217,7 +217,9 @@ if (typeof window !== "undefined" && typeof window.addEventListener === "functio
 }
 
 export function earnStardust(score) {
-  const amount = Math.floor(score / META.stardustPerScore);
+  const raw = Math.floor(score / META.stardustPerScore);
+  // 新手前 N 局保底：低分局也有星尘进账，避免「打完一局 0 收益」
+  const amount = metaData.totalRuns < META.newbieRuns ? Math.max(raw, META.newbieStardust) : raw;
   metaData.stardust += amount;
   metaData.totalStardustEarned += amount;
   if (score > metaData.best) metaData.best = score;

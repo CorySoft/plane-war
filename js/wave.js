@@ -9,10 +9,6 @@ import { spawnEnemy, enemies, nextEnemyUid, getCurrentBossPhase } from "./enemy.
 // 相位查询由 enemy.js 提供（原本两边各写了一份），这里再导出供 game.js 使用
 export { getCurrentBossPhase };
 
-export function getDifficultyLevel(score) {
-  return Math.min(DIFFICULTY.maxLevel, 1 + Math.floor(score / DIFFICULTY.levelUpScore));
-}
-
 export function getSpawnRate(level, spawnScale = 1) {
   return Math.min(DIFFICULTY.spawnBase + level * DIFFICULTY.spawnPerLevel, DIFFICULTY.spawnCap) * spawnScale;
 }

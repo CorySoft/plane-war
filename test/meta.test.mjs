@@ -21,13 +21,24 @@ describe("meta", () => {
     loadMeta();
   });
 
-  it("earnStardust 折算并刷新最高分", () => {
+  it("earnStardust 折算并刷新最高分（新手保底期结束后）", () => {
+    for (let i = 0; i < META.newbieRuns; i++) earnStardust(0);
     const score = 2 * META.stardustPerScore + 123;
     const got = earnStardust(score);
     assert.equal(got, 2);
-    assert.equal(getStardust(), 2);
+    assert.equal(getStardust(), META.newbieRuns * META.newbieStardust + 2);
     assert.equal(getBest(), score);
-    assert.equal(getStats().totalRuns, 1);
+    assert.equal(getStats().totalRuns, META.newbieRuns + 1);
+  });
+
+  it("新手前 N 局每局保底 10 星尘，之后回归折算", () => {
+    assert.equal(META.newbieRuns, 5);
+    assert.equal(META.newbieStardust, 10);
+    for (let i = 0; i < META.newbieRuns; i++) {
+      assert.equal(earnStardust(0), META.newbieStardust, `第 ${i + 1} 局应触发保底`);
+    }
+    assert.equal(earnStardust(0), 0, "保底期结束后 0 分局不再获得星尘");
+    assert.equal(earnStardust(META.stardustPerScore * 3), 3);
   });
 
   it("spendStardust 余额不足失败", () => {

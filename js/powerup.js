@@ -2,7 +2,7 @@
  * powerup.js — 道具系统
  * =========================================================== */
 
-import { W, H, POWERUP_DEFS, POWERUP_WEIGHTS_EARLY, POWERUP_WEIGHTS_LATE, SKILLS, POWERUP_DROP, TAU, DIFFICULTY } from "./config.js";
+import { W, H, POWERUP_DEFS, POWERUP_WEIGHTS_EARLY, POWERUP_WEIGHTS_LATE, SKILLS, POWERUP_DROP, TAU, DIFFICULTY, PLAYER } from "./config.js";
 import { rand, weightedPick, setf, clamp, roundRect } from "./utils.js";
 import { spawnParticles } from "./particles.js";
 import { applySkill } from "./skill.js";
@@ -80,7 +80,7 @@ export function applyPowerup(p, player) {
   const { type } = p;
   const def = POWERUP_DEFS[type];
   if (type === "power") {
-    player.power = Math.min(4, player.power + 1);
+    player.power = Math.min(PLAYER.maxPower, player.power + 1);
     player.powerTime = 15;
   } else if (type === "life") {
     player._addLife = true;

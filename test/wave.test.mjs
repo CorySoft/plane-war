@@ -1,8 +1,8 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import "./_env.mjs";
-import { DIFFICULTY } from "../js/config.js";
-import { getDifficultyLevel, getSpawnRate, updateWaves, resetWaves, spawnBoss, getCurrentBossPhase, BOSS_TYPES } from "../js/wave.js";
+import { DIFFICULTY, SCORE_AXIS, levelFromScore } from "../js/config.js";
+import { getSpawnRate, updateWaves, resetWaves, spawnBoss, getCurrentBossPhase, BOSS_TYPES } from "../js/wave.js";
 import { enemies, clearEnemies } from "../js/enemy.js";
 
 describe("wave", () => {
@@ -11,13 +11,12 @@ describe("wave", () => {
     clearEnemies();
   });
 
-  it("难度等级按分数封顶", () => {
-    const step = DIFFICULTY.levelUpScore;
-    assert.equal(getDifficultyLevel(0), 1);
-    assert.equal(getDifficultyLevel(step - 1), 1);
-    assert.equal(getDifficultyLevel(step), 2);
-    assert.equal(getDifficultyLevel(step * 2), 3);
-    assert.equal(getDifficultyLevel(1e9), DIFFICULTY.maxLevel);
+  it("难度等级由统一得分轴派生并封顶", () => {
+    assert.equal(levelFromScore(SCORE_AXIS, 0).playerLevel, 1);
+    assert.equal(levelFromScore(SCORE_AXIS, 8000 - 1).playerLevel, 2);
+    assert.equal(levelFromScore(SCORE_AXIS, 8000).playerLevel, 3);
+    assert.equal(levelFromScore(SCORE_AXIS, 58500).playerLevel, DIFFICULTY.maxLevel);
+    assert.equal(levelFromScore(SCORE_AXIS, 1e9).playerLevel, DIFFICULTY.maxLevel);
   });
 
   it("难度档位不再过早封顶（后期仍有压迫感）", () => {

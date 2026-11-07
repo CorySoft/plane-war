@@ -7,7 +7,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import "./_env.mjs";
 import {
-  BULLET, DIFFICULTY, ENEMY_LEVEL, XP_BASE, XP_GROWTH, META,
+  BULLET, DIFFICULTY, XP_BASE, XP_GROWTH, META,
+  SCORE_AXIS, levelFromScore,
   SHOP_ITEMS, getShopItemCost, POWERUP_DROP, enemyLevelScale,
 } from "../js/config.js";
 
@@ -34,10 +35,12 @@ describe("balance", () => {
     assert.ok(mult < 2, `满级敌机速度倍率 ${mult.toFixed(2)} 过高，会挤压闪避空间`);
   });
 
-  it("敌方等级与难度等级同步推进（不会一方长期停滞）", () => {
+  it("敌方等级与难度等级由同一得分轴推进（不会脱钩）", () => {
     const capScore = DIFFICULTY.levelUpScore * (DIFFICULTY.maxLevel - 1);
-    const enemyLvAtCap = 1 + Math.floor(capScore / ENEMY_LEVEL.scorePerLevel);
-    assert.ok(enemyLvAtCap >= 5, "难度封顶时敌方等级也应已成长多轮");
+    const atCap = levelFromScore(SCORE_AXIS, capScore);
+    assert.equal(atCap.playerLevel, DIFFICULTY.maxLevel, "难度封顶时玩家等级应到上限");
+    assert.ok(atCap.enemyLevel >= 5, "难度封顶时敌方等级也应已成长多轮");
+    assert.ok(atCap.enemyLevel - atCap.playerLevel <= 4, "两曲线差值不得超过 4");
   });
 
   it("敌方等级成长在软上限后减半，不会指数爆炸", () => {
