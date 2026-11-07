@@ -1,4 +1,4 @@
-import { W, H, TAU, SKILLS, POWERUP_DEFS } from "../config.js";
+import { W, H, TAU, SKILLS, POWERUP_DEFS, POWERUP_DURATION } from "../config.js";
 import { clamp, roundRect, setf } from "../utils.js";
 import { bar, hexToRgba, C } from "../theme.js";
 import { drawSprite } from "../assets.js";
@@ -216,42 +216,42 @@ export function drawPowerupCodex(ctx, discovered) {
   uiState.btnPowerupCodexRect = null;
 }
 
-function powerupDesc(k) {
+export function powerupDesc(k) {
   return {
-    power: "火力+1，15秒",
+    power: `火力+1，${POWERUP_DURATION.power}秒`,
     life: "回复1生命",
     shield: "护盾+1层",
-    madHunt: "8秒追踪弹",
-    rapid: "8秒射速大增",
-    speed: "8秒移速+30%",
+    madHunt: `${POWERUP_DURATION.madHunt}秒追踪弹`,
+    rapid: `${POWERUP_DURATION.rapid}秒射速大增`,
+    speed: `${POWERUP_DURATION.speed}秒移速+30%`,
     freeze: "冻结全场",
-    magnet: "8秒吸道具",
-    double: "8秒得分×2",
-    xppack: "+50经验",
+    magnet: `${POWERUP_DURATION.magnet}秒吸道具`,
+    double: `${POWERUP_DURATION.double}秒得分×2`,
+    xppack: "立即升1级",
     skillup: "随机升级技能",
-    drop: "8秒掉率大增",
-    critboost: "8秒必暴击",
-    knockback: "8秒子弹击退",
+    drop: `${POWERUP_DURATION.drop}秒掉率大增`,
+    critboost: `${POWERUP_DURATION.critboost}秒必暴击`,
+    knockback: `${POWERUP_DURATION.knockback}秒子弹击退`,
     randomSkill: "随机获取技能",
   }[k] || "";
 }
 
 export function powerupDescFull(k) {
   return {
-    power: "本局火力等级 +1，持续 15 秒",
+    power: `本局火力等级 +1，持续 ${POWERUP_DURATION.power} 秒`,
     life: "立即回复 1 点生命",
     shield: "获得 1 层护盾，可抵消 1 次伤害",
-    madHunt: "5 秒内子弹向四周 360° 散发并追踪敌机",
-    rapid: "8 秒内射击间隔大幅缩短",
-    speed: "8 秒内移动速度提升 30%",
+    madHunt: `${POWERUP_DURATION.madHunt} 秒内子弹向四周 360° 散发并追踪敌机`,
+    rapid: `${POWERUP_DURATION.rapid} 秒内射击间隔大幅缩短`,
+    speed: `${POWERUP_DURATION.speed} 秒内移动速度提升 30%`,
     freeze: "冻结全场敌机与敌方子弹",
-    magnet: "8 秒内自动吸引附近道具",
-    double: "8 秒内得分翻倍",
+    magnet: `${POWERUP_DURATION.magnet} 秒内自动吸引附近道具`,
+    double: `${POWERUP_DURATION.double} 秒内得分翻倍`,
     xppack: "立即提升 1 级",
     skillup: "随机升级一个已拥有技能",
     randomSkill: "随机获得一个全新技能",
-    drop: "8 秒内道具掉落率大幅提升",
-    critboost: "8 秒内必定暴击且暴击倍率提升",
-    knockback: "8 秒内子弹附带击退效果",
+    drop: `${POWERUP_DURATION.drop} 秒内道具掉落率大幅提升`,
+    critboost: `${POWERUP_DURATION.critboost} 秒内必定暴击且暴击倍率提升`,
+    knockback: `${POWERUP_DURATION.knockback} 秒内子弹附带击退效果`,
   }[k] || "";
 }

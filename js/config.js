@@ -199,6 +199,21 @@ export const POWERUP_DEFS = {
   randomSkill: { icon: "?", color: "#d0a6ff", name: "技能随机获取", unique: true },
 };
 
+// 道具时长单一来源（秒）：powerup.js 赋值、hud.js 进度条分母、codex 文案、
+// game.js 全场冻结（freezeAll）都必须读这张表，杜绝「改一漏二」。
+export const POWERUP_DURATION = {
+  power: 15,     // 火力等级持续时间（player.powerTime）
+  madHunt: 5,
+  rapid: 8,
+  speed: 8,
+  magnet: 8,
+  double: 8,
+  drop: 8,
+  critboost: 8,
+  knockback: 8,
+  freeze: 8,     // 全场冻结时长（game.js freezeAll → e.frozen）
+};
+
 // ---------- 道具掉落率 ----------
 export const POWERUP_DROP = {
   base: 0.18,            // 击杀基础掉落率（原 0.15，配合更高的敌机密度略上调）
@@ -301,7 +316,6 @@ export function skillLevelColor(lv) {
 
 // ---------- 难度 ----------
 export const DIFFICULTY = {
-  levelUpScore: 4500,       // 每多少分升一级
   maxLevel: 14,             // 原 10 级（5 万分）就封顶，后期只剩敌方等级在涨，压迫感断档
   eliteWaveInterval: 12,    // 精英波间隔(秒)
   spawnBase: 1.6,

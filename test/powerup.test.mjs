@@ -2,13 +2,14 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import "./_env.mjs";
 import { resetStorage, installFakeImage, removeFakeImage, makeSpyCtx } from "./_env.mjs";
-import { POWERUP_DEFS, POWERUP_DROP, SKILLS, H } from "../js/config.js";
+import { POWERUP_DEFS, POWERUP_DROP, POWERUP_DURATION, SKILLS, H } from "../js/config.js";
 import {
   powerups, spawnPowerup, updatePowerups, applyPowerup, clearPowerups,
   drawPowerups, setGachaAnim, drawGachaAnim, updateGachaAnim,
   getGachaAnim, clearGachaAnim, xpPackAmount, GACHA_SKILL_POOL_IDS,
 } from "../js/powerup.js";
 import { createPlayer } from "../js/player.js";
+import { powerupDesc, powerupDescFull } from "../js/ui/codex.js";
 import { META } from "../js/config.js";
 import { loadMeta, resetMeta, getStats } from "../js/meta.js";
 import { particles, clearParticles } from "../js/particles.js";
@@ -93,10 +94,43 @@ describe("powerup", () => {
     applyPowerup({ type: "freeze", x: 0, y: 0 }, p);
     applyPowerup({ type: "xppack", x: 0, y: 0 }, p);
     applyPowerup({ type: "shield", x: 0, y: 0 }, p);
-    assert.equal(p.buffs.rapid, 8);
+    assert.equal(p.buffs.rapid, POWERUP_DURATION.rapid);
     assert.equal(p._freeze, true);
     assert.equal(p._xpPack, true, "经验包改为由 game.js 按当前升级需求折算");
     assert.equal(p.shield, 1);
+  });
+
+  it("计时 buff 时长单一来源：applyPowerup 赋值 === POWERUP_DURATION 表", () => {
+    // 锁「改一漏二」复发：powerup.js 赋值、hud.js 分母、codex 文案必须同源于此表
+    const timed = ["madHunt", "rapid", "speed", "magnet", "double", "drop", "critboost", "knockback"];
+    const expect = { power: 15, madHunt: 5, rapid: 8, speed: 8, magnet: 8, double: 8, drop: 8, critboost: 8, knockback: 8, freeze: 8 };
+    for (const type of Object.keys(POWERUP_DURATION)) {
+      assert.equal(POWERUP_DURATION[type], expect[type], `POWERUP_DURATION.${type} 被改动，需同步 hud/codex/game`);
+    }
+    for (const type of timed) {
+      const p = player();
+      applyPowerup({ type, x: 0, y: 0 }, p);
+      assert.equal(p.buffs[type], POWERUP_DURATION[type], `${type} 未按表赋时长`);
+    }
+    // power 走 player.powerTime、freeze 走 game.js 的 e.frozen，二者也必须吃表
+    const p = player();
+    applyPowerup({ type: "power", x: 0, y: 0 }, p);
+    assert.equal(p.powerTime, POWERUP_DURATION.power, "火力持续时间未按表赋值");
+    applyPowerup({ type: "freeze", x: 0, y: 0 }, p);
+    assert.equal(p._freeze, true, "冻结道具应置 _freeze");
+  });
+
+  it("图鉴文案时长数字与 POWERUP_DURATION 表一致（防漏改）", () => {
+    // codex 的短/全描述里出现的「N 秒」必须等于表值，否则视为漏改
+    const check = (fn, label) => {
+      for (const [type, secs] of Object.entries(POWERUP_DURATION)) {
+        const text = fn(type);
+        const m = text.match(/(\d+)\s*秒/);
+        if (m) assert.equal(Number(m[1]), secs, `${label}[${type}] 文案 ${m[1]} 秒 ≠ 表值 ${secs}`);
+      }
+    };
+    check(powerupDesc, "短文案");
+    check(powerupDescFull, "全文案");
   });
 
   it("经验包 = 直接 +1 级（恰好补满当前升级需求）", () => {

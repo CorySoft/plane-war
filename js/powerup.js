@@ -2,7 +2,7 @@
  * powerup.js — 道具系统
  * =========================================================== */
 
-import { W, H, POWERUP_DEFS, POWERUP_WEIGHTS_EARLY, POWERUP_WEIGHTS_LATE, SKILLS, POWERUP_DROP, TAU, DIFFICULTY, PLAYER } from "./config.js";
+import { W, H, POWERUP_DEFS, POWERUP_DURATION, POWERUP_WEIGHTS_EARLY, POWERUP_WEIGHTS_LATE, SKILLS, POWERUP_DROP, TAU, DIFFICULTY, PLAYER } from "./config.js";
 import { rand, weightedPick, setf, clamp, roundRect } from "./utils.js";
 import { spawnParticles } from "./particles.js";
 import { applySkill } from "./skill.js";
@@ -77,31 +77,31 @@ export function applyPowerup(p, player) {
   const def = POWERUP_DEFS[type];
   if (type === "power") {
     player.power = Math.min(PLAYER.maxPower, player.power + 1);
-    player.powerTime = 15;
+    player.powerTime = POWERUP_DURATION.power;
   } else if (type === "life") {
     player._addLife = true;
   } else if (type === "shield") {
     player.shield = Math.min(player.maxShield, player.shield + 1);
   } else if (type === "madHunt") {
-    player.buffs.madHunt = 5;
+    player.buffs.madHunt = POWERUP_DURATION.madHunt;
   } else if (type === "rapid") {
-    player.buffs.rapid = 8;
+    player.buffs.rapid = POWERUP_DURATION.rapid;
   } else if (type === "speed") {
-    player.buffs.speed = 8;
+    player.buffs.speed = POWERUP_DURATION.speed;
   } else if (type === "freeze") {
     player._freeze = true;
   } else if (type === "magnet") {
-    player.buffs.magnet = 8;
+    player.buffs.magnet = POWERUP_DURATION.magnet;
   } else if (type === "double") {
-    player.buffs.double = 8;
+    player.buffs.double = POWERUP_DURATION.double;
   } else if (type === "xppack") {
     player._xpPack = true;   // 由 game.js 按当前 xpNeed 直接补满一级
   } else if (type === "drop") {
-    player.buffs.drop = 8;
+    player.buffs.drop = POWERUP_DURATION.drop;
   } else if (type === "critboost") {
-    player.buffs.critboost = 8;
+    player.buffs.critboost = POWERUP_DURATION.critboost;
   } else if (type === "knockback") {
-    player.buffs.knockback = 8;
+    player.buffs.knockback = POWERUP_DURATION.knockback;
   } else if (type === "skillup") {
     const sk = pickUpgradableSkill(player.skills);
     if (!sk) {

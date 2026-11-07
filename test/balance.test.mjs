@@ -16,7 +16,8 @@ describe("balance", () => {
   // ---------- 难度曲线 ----------
   it("难度等级上限撑得住中后期，不会过早断档", () => {
     assert.ok(DIFFICULTY.maxLevel >= 12);
-    assert.ok(DIFFICULTY.levelUpScore * (DIFFICULTY.maxLevel - 1) >= 45000);
+    // 封顶分数 = 玩家难度首次到达 maxLevel 的真实得分（旧 levelUpScore 为无消费死字段，已删）
+    assert.ok(SCORE_AXIS.find((p) => p.playerLevel >= DIFFICULTY.maxLevel).at >= 45000);
   });
 
   it("生成率随难度等级单调上升并最终封顶", () => {
@@ -36,7 +37,8 @@ describe("balance", () => {
   });
 
   it("敌方等级与难度等级由同一得分轴推进（不会脱钩）", () => {
-    const capScore = DIFFICULTY.levelUpScore * (DIFFICULTY.maxLevel - 1);
+    // 封顶分数取真实 SCORE_AXIS 首达 maxLevel 的得分（旧 levelUpScore 死字段已删）
+    const capScore = SCORE_AXIS.find((p) => p.playerLevel >= DIFFICULTY.maxLevel).at;
     const atCap = levelFromScore(SCORE_AXIS, capScore);
     assert.equal(atCap.playerLevel, DIFFICULTY.maxLevel, "难度封顶时玩家等级应到上限");
     assert.ok(atCap.enemyLevel >= 5, "难度封顶时敌方等级也应已成长多轮");

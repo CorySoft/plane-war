@@ -22,8 +22,11 @@ describe("wave", () => {
   it("难度档位不再过早封顶（后期仍有压迫感）", () => {
     // maxLevel 决定「多久之后只剩敌方等级在涨」
     assert.ok(DIFFICULTY.maxLevel >= 12, "难度等级上限过低会让中后期难度断档");
-    const capScore = DIFFICULTY.levelUpScore * (DIFFICULTY.maxLevel - 1);
+    // 封顶分数 = 玩家难度首次到达 maxLevel 的真实得分（旧 levelUpScore 为无消费死字段，已删）
+    const capScore = SCORE_AXIS.find((p) => p.playerLevel >= DIFFICULTY.maxLevel).at;
     assert.ok(capScore >= 45000, "封顶分数应撑到中后期");
+    assert.equal(levelFromScore(SCORE_AXIS, capScore).playerLevel, DIFFICULTY.maxLevel,
+      "SCORE_AXIS 首达 maxLevel 的得分应名副其实");
   });
 
   it("生成率随等级提升并封顶", () => {

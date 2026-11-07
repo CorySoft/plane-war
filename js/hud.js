@@ -2,7 +2,7 @@
  * hud.js — HUD 绘制
  * =========================================================== */
 
-import { W, H, calcRangePx } from "./config.js";
+import { W, H, calcRangePx, POWERUP_DURATION } from "./config.js";
 import { clamp, roundRect, setf } from "./utils.js";
 import { bar, glowText, hexToRgba, pulse, C } from "./theme.js";
 
@@ -148,16 +148,16 @@ export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNee
 
   // ===== buff 状态条（按功能合并色组） =====
   const activeBuffs = [];
-  if (player.buffs.rapid > 0) activeBuffs.push(["rapid", "⚡急速", "#5ee6ff", 8, player.buffs.rapid]);
-  if (player.buffs.speed > 0) activeBuffs.push(["speed", "»加速", "#5ee6ff", 8, player.buffs.speed]);
-  if (player.buffs.double > 0) activeBuffs.push(["double", "双倍", "#ffd166", 8, player.buffs.double]);
+  if (player.buffs.rapid > 0) activeBuffs.push(["rapid", "⚡急速", "#5ee6ff", POWERUP_DURATION.rapid, player.buffs.rapid]);
+  if (player.buffs.speed > 0) activeBuffs.push(["speed", "»加速", "#5ee6ff", POWERUP_DURATION.speed, player.buffs.speed]);
+  if (player.buffs.double > 0) activeBuffs.push(["double", "双倍", "#ffd166", POWERUP_DURATION.double, player.buffs.double]);
   if (player.shield > 0) activeBuffs.push(["shield", "护盾", "#66e0ff", player.maxShield, player.shield]);
   if ((player.skills.magnet || 0) > 0 && player.buffs.magnet <= 0) activeBuffs.push(["magnet", "磁力", "#66e0ff", 1, 1]);
-  if (player.powerTime > 0) activeBuffs.push(["power", "火力", "#ffd166", 15, player.powerTime]);
-  if (player.buffs.madHunt > 0) activeBuffs.push(["madHunt", "追击", "#fca311", 8, player.buffs.madHunt]);
-  if (player.buffs.drop > 0) activeBuffs.push(["drop", "☘爆率", "#7CFC00", 8, player.buffs.drop]);
-  if (player.buffs.critboost > 0) activeBuffs.push(["critboost", "致命", "#ff8fa3", 8, player.buffs.critboost]);
-  if (player.buffs.knockback > 0) activeBuffs.push(["knockback", "»击退", "#ff8fa3", 8, player.buffs.knockback]);
+  if (player.powerTime > 0) activeBuffs.push(["power", "火力", "#ffd166", POWERUP_DURATION.power, player.powerTime]);
+  if (player.buffs.madHunt > 0) activeBuffs.push(["madHunt", "追击", "#fca311", POWERUP_DURATION.madHunt, player.buffs.madHunt]);
+  if (player.buffs.drop > 0) activeBuffs.push(["drop", "☘爆率", "#7CFC00", POWERUP_DURATION.drop, player.buffs.drop]);
+  if (player.buffs.critboost > 0) activeBuffs.push(["critboost", "致命", "#ff8fa3", POWERUP_DURATION.critboost, player.buffs.critboost]);
+  if (player.buffs.knockback > 0) activeBuffs.push(["knockback", "»击退", "#ff8fa3", POWERUP_DURATION.knockback, player.buffs.knockback]);
 
   let bx = 16;
   let by = H - 98;
