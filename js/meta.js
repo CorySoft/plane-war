@@ -5,6 +5,7 @@
 import { META, ACHIEVEMENTS, DAILY_QUESTS, SKILLS, SHOP_ITEMS, DIFFICULTY_PRESETS, getShopItemCost, todayKey } from "./config.js";
 
 const STORAGE_KEY = "planeWarMeta";
+const PROGRESS_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 function defaultMeta() {
   return {
@@ -22,6 +23,7 @@ function defaultMeta() {
     discoveredPowerups: [], // 道具图鉴：历史上拾取过的道具 id
     shopLevels: {},         // 系统商城：各道具已购买等级 { id: level }
     achievements: [],       // 已达成成就 id（一次性）
+    campaignProgress: {},   // { campaignId: { completedStageIds, unlockedStageIds } }
     quests: null,           // { date, progress:{kills,score,runs,boss,powerups}, claimed:[] }
     settings: { sfxMuted: false, musicMuted: false, skipTutorial: false, difficulty: "normal" },
   };
@@ -66,6 +68,24 @@ function sanitizeMeta(raw) {
   }
   next.shopLevels = cleanShop;
   if (!Array.isArray(next.achievements)) next.achievements = [];
+  const campaignProgress = {};
+  if (next.campaignProgress && typeof next.campaignProgress === "object"
+      && !Array.isArray(next.campaignProgress)) {
+    for (const [campaignId, progress] of Object.entries(next.campaignProgress)) {
+      if (!PROGRESS_ID.test(campaignId) || !progress || typeof progress !== "object"
+          || Array.isArray(progress)) continue;
+      const cleanIds = value => Array.isArray(value)
+        ? [...new Set(value.filter(id => typeof id === "string" && PROGRESS_ID.test(id)))].slice(0, 30)
+        : [];
+      const completedStageIds = cleanIds(progress.completedStageIds);
+      const unlockedStageIds = [...new Set([
+        ...completedStageIds,
+        ...cleanIds(progress.unlockedStageIds),
+      ])].slice(0, 30);
+      campaignProgress[campaignId] = { completedStageIds, unlockedStageIds };
+    }
+  }
+  next.campaignProgress = campaignProgress;
   if (typeof next.stardust !== "number" || !Number.isFinite(next.stardust) || next.stardust < 0) next.stardust = 0;
   if (typeof next.best !== "number" || !Number.isFinite(next.best) || next.best < 0) next.best = 0;
   // 统计计数器数值加固（旧档/损坏档缺省或非法时回退）
@@ -375,6 +395,46 @@ export function getStats() {
     aircraftCount: metaData.unlockedAircraft.length,
     talentCount: metaData.purchasedTalents.length,
   };
+}
+
+export function getCampaignProgress(campaignId) {
+  if (typeof campaignId !== "string" || !PROGRESS_ID.test(campaignId)) {
+    return { completedStageIds: [], unlockedStageIds: [] };
+  }
+  const progress = Object.hasOwn(metaData.campaignProgress, campaignId)
+    ? metaData.campaignProgress[campaignId]
+    : null;
+  return {
+    completedStageIds: progress ? [...progress.completedStageIds] : [],
+    unlockedStageIds: progress ? [...progress.unlockedStageIds] : [],
+  };
+}
+
+export function recordCampaignStageCompletion(campaignId, stageId, nextStageId = null) {
+  if (typeof campaignId !== "string" || !PROGRESS_ID.test(campaignId)
+      || typeof stageId !== "string" || !PROGRESS_ID.test(stageId)
+      || (nextStageId !== null && (typeof nextStageId !== "string" || !PROGRESS_ID.test(nextStageId)))) {
+    return false;
+  }
+  const progress = Object.hasOwn(metaData.campaignProgress, campaignId)
+    ? metaData.campaignProgress[campaignId]
+    : (metaData.campaignProgress[campaignId] = { completedStageIds: [], unlockedStageIds: [] });
+  let changed = false;
+  if (!progress.completedStageIds.includes(stageId)) {
+    progress.completedStageIds.push(stageId);
+    changed = true;
+  }
+  for (const id of [stageId, nextStageId]) {
+    if (id && !progress.unlockedStageIds.includes(id)) {
+      progress.unlockedStageIds.push(id);
+      changed = true;
+    }
+  }
+  if (changed) {
+    saveMeta();
+    flushMeta();
+  }
+  return true;
 }
 
 // ---------- 每日任务 ----------

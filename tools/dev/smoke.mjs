@@ -26,6 +26,8 @@ const PORT = Number(process.env.PORT || 18099);
 const VW = Number(process.env.W || 420);
 const VH = Number(process.env.H || 740);
 const CAMPAIGN = process.env.CAMPAIGN || "";
+const MENU_CAMPAIGN = process.env.MENU_CAMPAIGN === "1";
+const COMPLETE_FIRST_STAGE = process.env.COMPLETE_FIRST_STAGE === "1";
 const EXPECT_CAMPAIGN_FALLBACK = process.env.EXPECT_CAMPAIGN_FALLBACK === "1";
 const isExpectedCampaignRequest = url => {
   if (!EXPECT_CAMPAIGN_FALLBACK || !CAMPAIGN) return false;
@@ -118,11 +120,35 @@ async function main() {
   const sx = geo.cw / geo.lw, sy = geo.ch / geo.lh;
   const click = (lx, ly) => page.mouse.click(geo.l + lx * sx, geo.t + ly * sy);
 
-  // 主菜单 → 开始游戏 → 跳过教程
-  await click(geo.lw / 2, geo.lh * 0.485);
+  // 主菜单 → 无限模式或菜单战役入口 → 跳过教程
+  if (MENU_CAMPAIGN) {
+    const campaignButton = await page.evaluate(() => window.__game?.getCampaignButton?.());
+    if (!campaignButton) throw new Error("campaign menu button is unavailable");
+    await click(campaignButton.x + campaignButton.w / 2, campaignButton.y + campaignButton.h / 2);
+    await page.waitForFunction(() => window.__game?.getCampaignStatus?.().active, null, { timeout: 8000 });
+  } else {
+    await click(geo.lw / 2, geo.lh * 0.485);
+  }
   await page.waitForTimeout(400);
   await click(geo.lw / 2, geo.lh * 0.70);
   await page.waitForTimeout(300);
+
+  let campaignProgression = null;
+  if (MENU_CAMPAIGN && COMPLETE_FIRST_STAGE) {
+    campaignProgression = await page.evaluate(async () => {
+      const deadline = Date.now() + 45000;
+      while (Date.now() < deadline) {
+        const game = window.__game;
+        game?.enemies?.splice(0);
+        const status = game?.getCampaignStatus?.();
+        if (status?.stageId === "level-02") {
+          return { status, progress: game.getCampaignProgress?.() };
+        }
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      return { status: window.__game?.getCampaignStatus?.(), progress: null };
+    });
+  }
 
   // 跑 6 秒对局（中途加压到高难度）
   await page.evaluate(() => window.__game?.setScore?.(60000));
@@ -156,6 +182,7 @@ async function main() {
   console.log("视口:", `${VW}x${VH}`, " 逻辑分辨率:", `${geo.lw}x${geo.lh}`, " 缩放:", sx.toFixed(3));
   console.log("启动:", JSON.stringify(boot));
   console.log("对局中:", JSON.stringify(mid));
+  if (campaignProgression) console.log("战役解锁:", JSON.stringify(campaignProgression));
   console.log("暂停状态值:", pausedState, "(4=PAUSED)");
   const expectedFallbackErrors = EXPECT_CAMPAIGN_FALLBACK
     ? consoleErrors.filter(message => message.startsWith("[plane_war] 关卡加载失败"))
@@ -170,9 +197,15 @@ async function main() {
   const campaignFailed = CAMPAIGN && (EXPECT_CAMPAIGN_FALLBACK
     ? (!mid.campaign?.fallbackError || mid.campaign.active)
     : (!mid.campaign?.active || mid.campaign.fallbackError));
+  const menuCampaignFailed = MENU_CAMPAIGN
+    && (!mid.campaign?.active || mid.campaign.requested !== "campaign-01" || mid.campaign.fallbackError);
+  const progressionFailed = COMPLETE_FIRST_STAGE && MENU_CAMPAIGN
+    && (campaignProgression?.status?.stageId !== "level-02"
+      || !campaignProgression.progress?.completedStageIds?.includes("level-01")
+      || !campaignProgression.progress?.unlockedStageIds?.includes("level-02"));
   await browser.close();
   server.close();
-  if (bad > 0 || !boot.gameReady || campaignFailed) {
+  if (bad > 0 || !boot.gameReady || campaignFailed || menuCampaignFailed || progressionFailed) {
     console.log("\n[FAIL] 存在异常");
     process.exitCode = 1;
   } else {

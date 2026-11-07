@@ -112,11 +112,17 @@ function beatEvents(stage, beat) {
   return events.sort((a, b) => a.atSec - b.atSec);
 }
 
-export function createCampaignRunner(campaign) {
+export function createCampaignRunner(campaign, { startStageId = null } = {}) {
   const stages = campaign.chapters.flatMap(chapter => chapter.stages);
   if (stages.length === 0) throw new TypeError("campaign must contain at least one stage");
 
-  let stageIndex = 0;
+  const requestedStageIndex = startStageId === null
+    ? 0
+    : stages.findIndex(stage => stage.id === startStageId);
+  if (requestedStageIndex < 0) {
+    throw new TypeError(`campaign start stage "${startStageId}" does not exist`);
+  }
+  let stageIndex = requestedStageIndex;
   let beatIndex = 0;
   let beatElapsed = 0;
   let pending = [];

@@ -6,7 +6,7 @@ export {
 export { hitTestButton } from "./ui/common.js";
 export {
   setMenuPage, getMenuPage, getPageVeilAlpha, drawMenu,
-  getStartButton, getDifficultyRects, getCodexButton, getCodexBackButton,
+  getStartButton, getCampaignButton, setCampaignLoading, getDifficultyRects, getCodexButton, getCodexBackButton,
   getPowerupCodexButton, getPowerupCodexBackButton, getAchieveButton,
   getAchieveBackButton, getQuestClaimButtons, getShopButton, getShopBackButton,
   getShopBuyButtons, getClearCacheButton, getAchieveCardRects, getHangarButton,

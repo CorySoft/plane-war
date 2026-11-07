@@ -48,6 +48,7 @@ import {
   getCodexButton, getCodexBackButton, getPowerupCodexButton, getPowerupCodexBackButton, getAchieveButton, getAchieveBackButton, getQuestClaimButtons,
   getShopButton, getShopBackButton, getShopBuyButtons,
   getReviveYesButton, getReviveNoButton, setMenuPage, getMenuPage,
+  getCampaignButton, setCampaignLoading,
   getHangarButton, getHangarBackButton, getHangarCards,
   getTalentButton, getTalentBackButton, getTalentCards,
   getSettingsButton, getSettingsBackButton, getSettingToggles,
@@ -66,13 +67,18 @@ import {
   discoverSkill, getDiscoveredSkills, spendStardust, getStardust,
   checkAchievements, getQuestView, claimQuest, addBossKill,
   getSettings, toggleSetting, setDifficulty as setMetaDifficulty,
+  getCampaignProgress, recordCampaignStageCompletion,
   unlockAircraft, setSelectedAircraft, purchaseTalent,
   resetMeta,
 } from "./meta.js";
 
 const requestedCampaign = getCampaignId(globalThis.location?.search || "");
 const campaignLoad = await loadCampaignSafely(requestedCampaign, { version: APP_VERSION });
-const campaignDefinition = campaignLoad.campaign;
+let campaignDefinition = campaignLoad.campaign;
+let campaignLoadError = campaignLoad.error;
+let activeCampaignId = requestedCampaign;
+let campaignStartStageId = null;
+let campaignLoading = false;
 if (campaignLoad.error) {
   console.error("[plane_war] 关卡加载失败，已回退到无限模式:", campaignLoad.error.message);
   if (typeof window !== "undefined") {
@@ -452,7 +458,15 @@ function update(dt, realDt = dt) {
     }
 
     if (campaignRunner) {
+      const completedStageId = campaignRunner.stage.id;
       const progress = campaignRunner.update(dt, enemies.length);
+      if (progress.stageChanged || progress.complete) {
+        recordCampaignStageCompletion(
+          activeCampaignId,
+          completedStageId,
+          progress.stageChanged ? progress.stage?.id : null,
+        );
+      }
       setHostileBulletBudget(progress.densityBudget);
       if (progress.timedOut) {
         console.warn(`[plane_war] 关卡节拍超时，清理残留敌机后继续: ${progress.stage?.id}`);
@@ -1209,6 +1223,36 @@ function freezeAll() {
   }
 }
 
+function getCampaignResumeStage(campaign, progress) {
+  const stages = campaign.chapters.flatMap(chapter => chapter.stages);
+  const completed = new Set(progress.completedStageIds);
+  const unlocked = new Set(progress.unlockedStageIds);
+  return stages.find(stage => unlocked.has(stage.id) && !completed.has(stage.id))?.id
+    ?? stages[0]?.id
+    ?? null;
+}
+
+async function startCampaignFromMenu() {
+  if (campaignLoading) return;
+  campaignLoading = true;
+  setCampaignLoading(true);
+  activeCampaignId = "campaign-01";
+  const result = await loadCampaignSafely(activeCampaignId, { version: APP_VERSION });
+  campaignLoading = false;
+  setCampaignLoading(false);
+  if (result.error) {
+    campaignLoadError = result.error;
+    console.error("[plane_war] 战役菜单加载失败:", result.error.message);
+    return;
+  }
+  campaignDefinition = result.campaign;
+  campaignLoadError = null;
+  campaignStartStageId = getCampaignResumeStage(
+    campaignDefinition, getCampaignProgress(activeCampaignId),
+  );
+  resetGame();
+}
+
 function resetGame() {
   score = 0; lives = 3; level = 1; enemyLevel = 1; combo = 0; comboTime = 0;
   pLevel = 1; xp = 0; xpNeed = XP_BASE;
@@ -1251,7 +1295,9 @@ function resetGame() {
   resetCamera();
   duckMusic(false);   // 复位上一局暂停时压低的 BGM 增益
   resetWaves();
-  campaignRunner = campaignDefinition ? createCampaignRunner(campaignDefinition) : null;
+  campaignRunner = campaignDefinition
+    ? createCampaignRunner(campaignDefinition, { startStageId: campaignStartStageId })
+    : null;
   campaignComplete = false;
   setHostileBulletBudget(campaignRunner?.densityBudget ?? null);
   skillChoices = null;
@@ -1856,7 +1902,27 @@ canvas.addEventListener("pointerdown", e => {
         return;
       }
     }
-    if (hitTestButton(mx, my, getStartButton())) { sfx.click(); resetGame(); return; }
+    if (campaignLoading) return;
+    if (hitTestButton(mx, my, getCampaignButton())) {
+      sfx.click();
+      void startCampaignFromMenu().catch(error => {
+        campaignLoading = false;
+        setCampaignLoading(false);
+        console.error("[plane_war] 战役启动失败:", error?.message || error);
+      });
+      return;
+    }
+    if (hitTestButton(mx, my, getStartButton())) {
+      sfx.click();
+      if (!requestedCampaign) {
+        campaignDefinition = null;
+        campaignStartStageId = null;
+        activeCampaignId = null;
+        campaignLoadError = null;
+      }
+      resetGame();
+      return;
+    }
   }
 
   if (state === STATE.REVIVE) {
@@ -1919,16 +1985,18 @@ canvas.addEventListener("wheel", e => {
 
 // 导出给外部（调试用）
 window.__game = {
-  resetGame, freezeAll,
+  resetGame, freezeAll, startCampaignFromMenu,
   state: () => state, getPlayer: () => player,
   getScore: () => score, getEnemyLevel: () => enemyLevel,
   getCampaignStatus: () => ({
-    requested: requestedCampaign,
+    requested: activeCampaignId,
     active: !!campaignRunner,
     stageId: campaignRunner?.stage?.id ?? null,
     beatId: campaignRunner?.beat?.id ?? null,
-    fallbackError: campaignLoad.error?.message ?? null,
+    fallbackError: campaignLoadError?.message ?? null,
   }),
+  getCampaignProgress: () => getCampaignProgress(activeCampaignId),
+  getCampaignButton,
   getMaxLives: () => maxLives, getLives: () => lives,
   getMenuPage: getMenuPage, setMenuPage,
   get enemies() { return enemies; },

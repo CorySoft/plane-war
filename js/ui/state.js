@@ -2,6 +2,8 @@ export const uiState = {
   damageNumbers: [],
   stars: [],
   btnStartRect: null,
+  btnCampaignRect: null,
+  campaignLoading: false,
   btnRestartRect: null,
   btnGameOverMenuRect: null,
   btnPauseResumeRect: null,

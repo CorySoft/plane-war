@@ -4,7 +4,7 @@ import { glowText, softPanel, lineBtn, bar, hexToRgba, C, pulse, veil } from "..
 import { APP_VERSION } from "../version.js";
 import {
   getStardust, getQuestView, getAchievementView, getDiscoveredPowerups, getShopLevel,
-  isAircraftUnlocked, getSelectedAircraft, isTalentPurchased, getSettings,
+  isAircraftUnlocked, getSelectedAircraft, isTalentPurchased, getSettings, getCampaignProgress,
 } from "../meta.js";
 import { uiState } from "./state.js";
 import { drawBackButton, pageTitle, titleRule, uiTime } from "./common.js";
@@ -31,6 +31,8 @@ export const setMenuPage = p => {
 };
 export const getMenuPage = () => uiState.menuPage;
 export function getStartButton() { return uiState.btnStartRect; }
+export function getCampaignButton() { return uiState.btnCampaignRect; }
+export function setCampaignLoading(loading) { uiState.campaignLoading = !!loading; }
 export function getDifficultyRects() { return uiState.difficultyRects; }
 export function getCodexButton() { return uiState.btnCodexRect; }
 export function getCodexBackButton() { return uiState.btnCodexBackRect; }
@@ -76,6 +78,7 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = [], pla
   uiState.btnShopRect = uiState.btnShopBackRect = null;
   uiState.btnShopBuyRects = [];
   uiState.btnClearCacheRect = null;
+  uiState.btnCampaignRect = null;
 
   if (uiState.menuPage === "codex") { drawSkillCodex(ctx, discovered, player); drawPageVeil(ctx); return; }
   if (uiState.menuPage === "achieve") { drawAchieve(ctx); drawPageVeil(ctx); return; }
@@ -201,6 +204,25 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = [], pla
   ctx.restore();
   uiState.btnStartRect = { x: bx, y: by, w: bw, h: bh };
 
+  const campaignButton = { x: W / 2 - 110, y: by + bh + 8, w: 220, h: 42 };
+  const campaignProgress = getCampaignProgress("campaign-01");
+  lineBtn(ctx, campaignButton.x, campaignButton.y, campaignButton.w, campaignButton.h,
+    C.gold, uiState.campaignLoading ? "正在加载战役…" : "战役模式", {
+      size: 20, weight: "bold", glow: 10, r: 12, textColor: C.bgDark,
+    });
+  ctx.fillStyle = C.redSoft;
+  roundRect(ctx, campaignButton.x + campaignButton.w - 37, campaignButton.y + 4, 30, 16, 8);
+  ctx.fill();
+  ctx.fillStyle = C.bgDark;
+  setf(ctx, "bold 10px 'sans-serif'");
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("新", campaignButton.x + campaignButton.w - 22, campaignButton.y + 12);
+  ctx.fillStyle = "rgba(255,255,255,.55)";
+  setf(ctx, "10px 'sans-serif'");
+  ctx.fillText(`已通关 ${campaignProgress.completedStageIds.length}/6 · 点击继续`,
+    W / 2, campaignButton.y + campaignButton.h + 3);
+  uiState.btnCampaignRect = campaignButton;
+
   // 导航瓦片：机库 / 天赋 / 图鉴 / 成就 / 设置 / 道具图鉴 / 商城
   const nav = [
     ["hangar", "机库", C.cyan],
@@ -212,7 +234,7 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = [], pla
     ["shop", "系统商城", C.lilacDark],
   ];
   const nw = 148, nh = 40, ng = 8;
-  const nStartY = H * 0.56;
+  const nStartY = H * 0.64;
   for (let i = 0; i < nav.length; i++) {
     const [id, label, color] = nav[i];
     const col = i % 2;
