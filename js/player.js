@@ -343,9 +343,10 @@ export function getShootPattern(player) {
       }
     }
   }
-  // 主弹道至少保留每个通道 1 发，避免副武器把主弹挤没
-  const reserve = Math.min(cap - channels.length, sidePairs.length * 2);
-  const mainCap = Math.max(channels.length, cap - Math.max(0, reserve));
+  // 主弹道至少保留每个通道 1 发；副武器最多占 50% 配额，
+  // 避免高配时主武器被侧翼炮/护法完全挤占（16 发里主弹只剩 4 发）。
+  const sideCap = Math.min(sidePairs.length * 2, Math.floor(cap * 0.5));
+  const mainCap = Math.max(channels.length, cap - sideCap);
   const perCh = Math.max(1, Math.floor(mainCap / channels.length));
 
   // 散射左右交替：每级只加 1 发（保持"升级多一颗"），但整组符号按射击次数翻转，
