@@ -185,6 +185,8 @@ EXCLUDES=(
   --exclude-glob '.gitignore'
   --exclude-glob '.htaccess'
   --exclude-glob 'index.html'
+  --exclude '^js/plane_war_js_'
+  --exclude '^js/pw_test_'
   --exclude '^js/'            # js 由下方「文件名版本化」步骤单独上传，避免留下未版本化副本
   --exclude '^tools/'         # 皮肤生成脚本与 raw 缓存不上传
   # ↓ 2026-11-06 补：以下都是仓库/部署脚手架，曾经被 mirror 传进 wwwroot/ 变成可公开下载
@@ -196,6 +198,8 @@ EXCLUDES=(
   --exclude '^\.githooks/'    # core.hooksPath 指向它，post-commit 只在本地 git 里跑，服务器不需要
   --exclude '^\.github/'      # CI 配置：本轮新增目录，不进静态根
   --exclude '^docs/'          # 性能基线/设计文档：本轮新增目录，不进静态根
+  --exclude '^\.clawbench/'   # 远端清理的本地备份：含旧 DEPLOY.md 明文 FTP 账号，绝不可发布
+  --exclude-glob '.clawbench'
   --exclude-glob 'deploy.sh'
   --exclude-glob 'DEPLOY.md'
   --exclude-glob 'README.md'
@@ -231,7 +235,10 @@ function listModules(dir, prefix = "") {
     .sort((a, b) => a.name.localeCompare(b.name))
     .flatMap(entry => {
       const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) return listModules(path.join(dir, entry.name), relative);
+      if (entry.isDirectory()) {
+        if (!prefix && /^(?:plane_war_js_|pw_test_)/.test(entry.name)) return [];
+        return listModules(path.join(dir, entry.name), relative);
+      }
       return entry.isFile() && entry.name.endsWith(".js") ? [relative] : [];
     });
 }

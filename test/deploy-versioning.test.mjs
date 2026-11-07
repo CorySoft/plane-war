@@ -30,6 +30,11 @@ function makeDeploymentFixture({ omitModule = null } = {}) {
   // 且 deploy.sh 自身的 npm test 门禁也含本用例 → 部署一次后再也部署不了。
   fs.writeFileSync(path.join(dir, "VERSION"), "0.3.5\n");
   fs.cpSync(path.join(ROOT, "js"), path.join(dir, "js"), { recursive: true });
+  for (const dirname of ["plane_war_js_fixture", "pw_test_fixture"]) {
+    const temporaryModuleDir = path.join(dir, "js", dirname);
+    fs.mkdirSync(temporaryModuleDir);
+    fs.writeFileSync(path.join(temporaryModuleDir, "game.js"), "export const fixtureOnly = true;\n");
+  }
   if (omitModule) fs.rmSync(path.join(dir, "js", omitModule));
   fs.writeFileSync(path.join(dir, ".deploy.env"), [
     "FTP_HOST=invalid.example",
@@ -97,6 +102,7 @@ describe("recursive deployment versioning", () => {
     assert.equal(modules.length, 27);
     assert.ok(modules.includes("game.v0.3.6.js"));
     assert.ok(modules.includes("ui/menus.v0.3.6.js"));
+    assert.equal(modules.some(file => file.startsWith("plane_war_js_") || file.startsWith("pw_test_")), false);
 
     const moduleSet = new Set(modules);
     const importPattern = /\b(?:from\s*|import\s*\(\s*|import\s*)(["'])(\.{1,2}\/[^"']+\.js)\1/g;

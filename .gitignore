@@ -12,6 +12,8 @@ feedback.secret.php
 # 测试产物与调试截图
 test-results/
 screenshot*.png
+# 远端清理的本地备份（含旧 DEPLOY.md 明文 FTP 账号，绝不可入库）
+.clawbench/
 # Agnes 生成的原图缓存（可重新生成，且体积大）
 tools/raw/
 
