@@ -4,7 +4,7 @@
 
 import { W, H, ENEMY_TYPES, DIFFICULTY, ENEMY_LEVEL, TAU, enemyLevelScale } from "./config.js";
 import { rand, pick } from "./utils.js";
-import { drawSprite, drawSpriteFlash } from "./assets.js";
+import { drawSprite, drawSpriteFlash, getSprite } from "./assets.js";
 
 export let enemies = [];
 
@@ -215,6 +215,29 @@ function enemySpriteId(e) {
   return id;
 }
 
+// 贴图原生机鼻朝向（目检裁定）→ 绘制旋转量，统一旋到「机鼻朝下（朝向玩家）」。
+// 上→π、下→0、左→-π/2；未知类型按「朝上」处理（保守）。
+export const ENEMY_TEXTURE_ROT = {
+  small: Math.PI,      // 朝上
+  mid: 0,              // 朝下
+  big: 0,              // 朝下
+  laser: -Math.PI / 2, // 朝左
+  shield: Math.PI,     // 朝上
+  split: 0,            // 近球对称，按朝下
+};
+export const BOSS_TEXTURE_ROT = {
+  mothership: 0,       // 朝下
+  fortress: Math.PI,   // 朝上（双联炮塔朝上）
+  phantom: 0,          // 朝下
+};
+
+/** 敌机贴图绘制基础旋转：让所有敌机机鼻朝下（朝向玩家） */
+export function enemyBaseRotation(e) {
+  if (!e) return Math.PI;
+  if (e.isBoss) return BOSS_TEXTURE_ROT[e.bossType] ?? 0;
+  return ENEMY_TEXTURE_ROT[e.type] ?? Math.PI;
+}
+
 export function drawEnemies(ctx, frame) {
   for (const e of enemies) {
     if (!e) continue;
@@ -234,16 +257,24 @@ export function drawEnemies(ctx, frame) {
       }
     }
 
-    // 身体：优先贴图（Boss 用 boss_<类型>，普通机用 enemy_<类型>）。
-    // 贴图 id 按类型缓存：旧实现每帧每架敌机都拼一次模板字符串，
-    // 同屏 60 架就是 60 次字符串分配。
+    // 身体：贴图与程序化 fallback 分两条路径，但最终都机鼻朝下。
+    // 贴图按敌种原方向补旋转；fallback 形状统一按「朝上」绘制，固定再翻 π。
     const spriteId = enemySpriteId(e);
     const box = r * 2.35;   // 贴图带 4% 透明留白，略放大补偿
-    const skinned = drawSprite(ctx, spriteId, 0, 0, box, box);
-    if (skinned) {
-      // 受击白闪：叠一层白色剪影（无 document 环境返回 false，直接跳过）
-      if (e.hitFlash > 0) drawSpriteFlash(ctx, spriteId, 0, 0, box, box, e.hitFlash);
-    } else {
+    let skinned = false;
+    if (getSprite(spriteId)) {
+      ctx.save();
+      ctx.rotate(enemyBaseRotation(e));
+      skinned = drawSprite(ctx, spriteId, 0, 0, box, box);
+      if (skinned && e.hitFlash > 0) {
+        // 受击白闪：叠一层白色剪影（无 document 环境返回 false，直接跳过）
+        drawSpriteFlash(ctx, spriteId, 0, 0, box, box, e.hitFlash);
+      }
+      ctx.restore();
+    }
+    if (!skinned) {
+      ctx.save();
+      ctx.rotate(Math.PI);   // 程序化形状按机鼻朝上绘制，翻成朝下
       ctx.fillStyle = e.hitFlash > 0 ? "#ffffff" : e.color;
       ctx.beginPath();
       if (e.type === "small" || e.type === "split") {
@@ -269,6 +300,14 @@ export function drawEnemies(ctx, frame) {
       }
       ctx.closePath();
       ctx.fill();
+      // 眼睛（仅 fallback，与机体同一旋转，保持在机鼻一侧）
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.arc(-r * 0.3, -r * 0.2, r * 0.18, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(r * 0.3, -r * 0.2, r * 0.18, 0, TAU); ctx.fill();
+      ctx.fillStyle = "#222";
+      ctx.beginPath(); ctx.arc(-r * 0.3 + r * 0.05, -r * 0.2, r * 0.08, 0, TAU); ctx.fill();
+      ctx.beginPath(); ctx.arc(r * 0.3 + r * 0.05, -r * 0.2, r * 0.08, 0, TAU); ctx.fill();
+      ctx.restore();
     }
 
     if (e.type === "laser" && e.laserTimer > 0 && e.laserTimer < 0.55) {
@@ -297,16 +336,6 @@ export function drawEnemies(ctx, frame) {
       ctx.fillRect(-w / 2, r + 6, w, 4);
       ctx.fillStyle = pct > 0.5 ? "#7CFC00" : pct > 0.25 ? "#ffd166" : "#ff6b6b";
       ctx.fillRect(-w / 2, r + 6, w * pct, 4);
-    }
-
-    // 眼睛（贴图自带面部细节，走贴图时不再画程序化眼睛）
-    if (!skinned) {
-      ctx.fillStyle = "#fff";
-      ctx.beginPath(); ctx.arc(-r * 0.3, -r * 0.2, r * 0.18, 0, TAU); ctx.fill();
-      ctx.beginPath(); ctx.arc(r * 0.3, -r * 0.2, r * 0.18, 0, TAU); ctx.fill();
-      ctx.fillStyle = "#222";
-      ctx.beginPath(); ctx.arc(-r * 0.3 + r * 0.05, -r * 0.2, r * 0.08, 0, TAU); ctx.fill();
-      ctx.beginPath(); ctx.arc(r * 0.3 + r * 0.05, -r * 0.2, r * 0.08, 0, TAU); ctx.fill();
     }
 
     ctx.restore();
