@@ -66,15 +66,32 @@ describe("feedback.php 静态安全", () => {
     assert.ok(/push_throttle/.test(HTACCESS), ".htaccess 应屏蔽 .push_throttle");
   });
 
-  it("推送凭据外置、失败关闭、不进仓库", () => {
+  it("推送凭据外置、失败关闭；仅密钥文件被忽略，接口源码入库", () => {
     assert.ok(!/SCT[A-Za-z0-9]{20,}/.test(PHP), "feedback.php 不得硬编码 token");
     assert.ok(/feedback\.secret\.php/.test(PHP), "应从 feedback.secret.php 加载凭据");
     assert.ok(
       /if\s*\(!defined\('SCT_TOKEN'\)\)\s*\{\s*define\('SCT_TOKEN',\s*''\)/.test(PHP),
       "缺失凭据时应默认空串（失败关闭）"
     );
-    for (const f of [".deploy.env", "feedback.php", "feedback.secret.php"]) {
-      assert.ok(GITIGNORE.includes(f), `.gitignore 必须忽略 ${f}`);
+
+    // 按 .gitignore 的「有效规则」判定忽略状态：注释行不作数，! 行是反忽略。
+    // feedback.php 本身零密钥、必须入库（CI 全新 checkout 才能跑本文件的静态断言），
+    // 真正含密钥的 feedback.secret.php / .deploy.env 才需要被忽略。
+    // 不再用 GITIGNORE.includes(文件名) 做子串匹配——注释里出现同名就会误判。
+    const rules = GITIGNORE.split(/\r?\n/)
+      .map(l => l.trim())
+      .filter(l => l && !l.startsWith("#"));
+    const isIgnored = (file) => {
+      let ignored = false;
+      for (const r of rules) {
+        const neg = r.startsWith("!");
+        if ((neg ? r.slice(1) : r) === file) ignored = !neg;
+      }
+      return ignored;
+    };
+    assert.ok(!isIgnored("feedback.php"), "feedback.php 应纳入版本库，不得被 .gitignore 忽略");
+    for (const f of ["feedback.secret.php", ".deploy.env"]) {
+      assert.ok(isIgnored(f), `.gitignore 必须忽略 ${f}`);
     }
   });
 
