@@ -45,7 +45,7 @@ export function generateSkillChoices(playerSkills) {
       if (s.requires) {
         if ((playerSkills[s.requires] || 0) <= 0) continue;
       }
-      pool.push(s);
+      pool.push({ ...s, level: cur });
     }
   }
   if (pool.length === 0) return [];

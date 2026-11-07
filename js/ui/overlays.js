@@ -113,15 +113,17 @@ export function drawLevelUp(ctx, choices, playerSkills) {
   setf(ctx, "13px 'sans-serif'");
   ctx.fillText("按 1 / 2 / 3 或点击选择", W / 2, H * 0.26);
 
-  const cardW = 280, cardH = 88, gap = 18;
+  const cardW = 280, cardH = 96, gap = 14;
   const startY = H * 0.34;
   uiState.skillCards = [];
   for (let i = 0; i < choices.length; i++) {
     const s = choices[i];
     const cy = startY + i * (cardH + gap);
     const cx = W / 2;
+    const cur = Number.isInteger(s.level) ? s.level : (playerSkills[s.id] || 0);
+    const maxed = cur >= s.max;
+    const selectable = !maxed;
     // 按当前等级取不同主题色：1级暗白 / 2-4功能组色 / 5+金
-    const cur = playerSkills[s.id] || 0;
     const themeColor = skillLevelColor(cur) ?? s.color;
     // 1级暗白：文字为白色(rgba)，底色必须是深色才能看清（hexToRgba 对非十六进制原样返回）
     const isLv1White = themeColor[0] !== "#";
@@ -170,13 +172,16 @@ export function drawLevelUp(ctx, choices, playerSkills) {
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = themeColor;
     setf(ctx, "bold 19px 'sans-serif'");
-    ctx.fillText(s.name + (cur > 0 ? "  " + cur + "→" + (cur + 1) + "级" : "  新"), cx - cardW / 2 + 54, cy + 28);
+    ctx.fillText(s.name, cx - cardW / 2 + 54, cy + 25);
+    ctx.fillStyle = maxed ? C.gold : C.cyanSoft;
+    setf(ctx, "bold 13px 'sans-serif'");
+    ctx.fillText(maxed ? "已满级 MAX" : `Lv.${cur} → Lv.${cur + 1}`, cx - cardW / 2 + 54, cy + 48);
     ctx.fillStyle = "rgba(255,255,255,.75)";
     setf(ctx, "14px 'sans-serif'");
-    ctx.fillText(s.desc, cx - cardW / 2 + 54, cy + 58);
+    ctx.fillText(s.desc, cx - cardW / 2 + 54, cy + 72);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    uiState.skillCards.push({ id: s.id, x: cx - cardW / 2, y: cy, w: cardW, h: cardH });
+    uiState.skillCards.push({ id: s.id, selectable, x: cx - cardW / 2, y: cy, w: cardW, h: cardH });
   }
   ctx.restore();
 }

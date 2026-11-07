@@ -15,6 +15,7 @@ import {
   getCodexButton, getCodexBackButton,
   getAchieveButton, getAchieveBackButton, getQuestClaimButtons,
   drawGameOver, getRestartButton, getGameOverMenuButton,
+  getSkillCards,
   getCodexCardRects, getPowerupCardRects, getCodexScroll, getCodexMaxScroll,
   getCodexViewport, setCodexScroll,
   setDetailCard, getDetailCard, drawDetailCard, drawToast,
@@ -419,6 +420,21 @@ describe("ui", () => {
     drawLevelUp(ctx, [{ id: "dmg", name: "火力强化", desc: "伤害+1", color: "#5ee6ff" }], {});
     drawToast(ctx, { text: "经验包 +50", color: "#8ad4ff", t: 1 });
     assert.equal(texts.some(t => t.t === "经验包 +50"), false);
+  });
+
+  it("升级候选显示当前/下一级，满级候选标记 MAX 且不可选择", () => {
+    const { ctx, texts } = makeSpyCtx();
+    drawLevelUp(ctx, [
+      { id: "dmg", name: "火力强化", desc: "伤害+1", color: "#5ee6ff", level: 3, max: 10 },
+      { id: "scatter", name: "散射", desc: "复杂弹道效果", color: "#ffd166", level: 5, max: 5 },
+    ], {});
+
+    assert.ok(texts.some(t => t.t === "Lv.3 → Lv.4"), "候选应显示当前等级与升级后的等级");
+    assert.ok(texts.some(t => t.t === "已满级 MAX"), "已达上限的候选应显示 MAX 状态");
+    const cards = getSkillCards();
+    assert.equal(cards[0].selectable, true);
+    assert.equal(cards[1].selectable, false, "满级候选不得参与选择");
+    assert.ok(cards[0].y + cards[0].h < cards[1].y, "等级行和描述应留在各自卡片内");
   });
 
   it("drawToast 对 t<=0 或空对象不绘制", () => {

@@ -1126,6 +1126,7 @@ function chooseSkill(skillId) {
   if (!skillChoices) return;
   const skill = skillChoices.find(s => s.id === skillId);
   if (!skill) return;
+  if ((player.skills[skill.id] || 0) >= skill.max) return;
   const t = applySkill(skill, player);
   if (t) toast = t;
   skillChoices = null;
@@ -1643,7 +1644,7 @@ window.addEventListener("keydown", e => {
   if (state === STATE.LEVELUP) {
     const idx = ["Digit1", "Digit2", "Digit3"].indexOf(e.code);
     if (idx >= 0 && skillChoices && idx < skillChoices.length) {
-      chooseSkill(skillChoices[idx].id);
+      if (skillChoices[idx].level < skillChoices[idx].max) chooseSkill(skillChoices[idx].id);
     }
   }
 });
@@ -1953,7 +1954,7 @@ canvas.addEventListener("pointerdown", e => {
   }
   if (state === STATE.LEVELUP) {
     for (const card of getSkillCards()) {
-      if (hitTestButton(mx, my, card)) { chooseSkill(card.id); return; }
+      if (card.selectable && hitTestButton(mx, my, card)) { chooseSkill(card.id); return; }
     }
   }
 });

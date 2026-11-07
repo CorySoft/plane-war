@@ -39,6 +39,15 @@ describe("skill", () => {
     assert.ok(choices.every(s => (owned[s.id] || 0) === 0));
   });
 
+  it("候选项携带玩家当前等级，且不改变满级过滤", () => {
+    const skills = Object.fromEntries(SKILLS.map(skill => [skill.id, skill.max]));
+    skills.rate = 2;
+    const choices = generateSkillChoices(skills);
+    assert.deepEqual(choices.map(skill => skill.id), ["rate"]);
+    assert.equal(choices[0].level, 2);
+    assert.equal(choices[0].max, SKILLS.find(skill => skill.id === "rate").max);
+  });
+
   it("applySkill 升级并点亮图鉴", () => {
     const p = createPlayer(META.aircraft.falcon, {});
     const skill = SKILLS.find(s => s.id === "dmg");
