@@ -95,11 +95,11 @@ describe("recursive deployment versioning", () => {
     const fixture = makeDeploymentFixture();
     const result = runDeploy(fixture);
     assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.match(result.stdout, /30 个产物，30 个可达模块/);
+    assert.match(result.stdout, /31 个产物，31 个可达模块/);
 
     const remoteJs = path.join(fixture.remoteRoot, "htdocs", "wwwroot", "js");
     const modules = listJavaScript(remoteJs);
-    assert.equal(modules.length, 30);
+    assert.equal(modules.length, 31);
     assert.ok(modules.includes("level/patterns.v0.3.6.js"));
     assert.ok(modules.includes("game.v0.3.6.js"));
     assert.ok(modules.includes("ui/menus.v0.3.6.js"));

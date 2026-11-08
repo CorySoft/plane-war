@@ -28,6 +28,7 @@ import {
   spawnBoss, getCurrentBossPhase, BOSS_TYPES, spawnSwarm
 } from "./wave.js";
 import { APP_VERSION } from "./version.js";
+import { isBossRushRequested, createBossRushState, stepBossRush, scaleBossForRound, BOSS_RUSH_BUDGET } from "./modes/bossrush.js";
 import {
   createCampaignRunner, getCampaignId, loadCampaignSafely, beatLabel,
 } from "./level/loader.js";
@@ -71,6 +72,9 @@ import {
 } from "./meta.js";
 
 const requestedCampaign = getCampaignId(globalThis.location?.search || "");
+// Boss Rush 原型：显式 URL 开关（?bossrush=1），与战役互斥；缺省时全程走原路径。
+// 开在模块加载期只算一次，不参与默认模式的任何分支。
+const bossRushRequested = !requestedCampaign && isBossRushRequested(globalThis.location?.search || "");
 const campaignLoad = await loadCampaignSafely(requestedCampaign, { version: APP_VERSION });
 let campaignDefinition = campaignLoad.campaign;
 let campaignLoadError = campaignLoad.error;
@@ -150,6 +154,7 @@ let toast = null;
 let difficultyKey = "normal";
 let difficulty = DIFFICULTY_PRESETS.normal;
 let campaignRunner = null;
+let bossRush = null;        // Boss Rush 原型状态（null = 未启用，默认路径不触碰）
 let campaignComplete = false;
 let tutorialTimer = 0;     // 教程剩余显示时间
 let musicStarted = false;
@@ -501,6 +506,20 @@ function update(dt, realDt = dt) {
         gameOver();
         toast = { text: "战役完成！", color: "#ffd166", t: 3 };
         return;
+      }
+    } else if (bossRush) {
+      // Boss Rush 原型：不跑常规波次（无小怪自然生成、无精英/虫群），
+      // 由车轮状态机连续召唤三型 Boss；击杀与结算完全沿用既有路径。
+      const hasBoss = enemies.some(e => e && e.isBoss);
+      const event = stepBossRush(bossRush, dt, hasBoss);
+      if (event) {
+        const boss = scaleBossForRound(spawnBoss(event.bossType, level), event.hpScale);
+        const bossName = BOSS_TYPES[event.bossType]?.name ?? event.bossType;
+        toast = { text: `第 ${event.round} 轮 · ${bossName}来袭！`, color: "#ff6b6b", t: 2 };
+        sfx.bossSpawn();
+        triggerShake(1.2);
+        // 供调试/测试观察轮次成长（不参与逻辑）
+        boss.bossRushRound = event.round;
       }
     } else {
       // 波次事件（enemyLevel 传入：精英波此前漏传导致后期出 1 级白板敌机）
@@ -1321,8 +1340,11 @@ function resetGame() {
   campaignRunner = campaignDefinition
     ? createCampaignRunner(campaignDefinition, { startStageId: campaignStartStageId })
     : null;
+  // 只有显式 ?bossrush=1 才建状态；默认模式保持 null，后续分支全部不进入
+  bossRush = bossRushRequested ? createBossRushState() : null;
   campaignComplete = false;
-  setHostileBulletBudget(campaignRunner?.densityBudget ?? null);
+  // 敌弹密度闸门：战役按关卡预算，Boss Rush 用专用预算（120/90），其余沿用全局上限
+  setHostileBulletBudget(campaignRunner?.densityBudget ?? (bossRush ? BOSS_RUSH_BUDGET : null));
   skillChoices = null;
   frame = 0;
   toast = null;
@@ -2050,6 +2072,10 @@ window.__game = {
     fallbackError: campaignLoadError?.message ?? null,
   }),
   getCampaignProgress: () => getCampaignProgress(activeCampaignId),
+  // Boss Rush 原型观测口（默认模式返回 enabled:false，不暴露内部状态以外的东西）
+  getBossRush: () => (bossRush
+    ? { enabled: true, round: bossRush.round, timer: bossRush.timer, awaitingBoss: bossRush.awaitingBoss }
+    : { enabled: false, round: 0, timer: 0, awaitingBoss: false }),
   getCampaignButton,
   getMaxLives: () => maxLives, getLives: () => lives,
   getMenuPage: getMenuPage, setMenuPage,
