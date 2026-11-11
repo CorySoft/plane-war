@@ -1,9 +1,11 @@
 # plane_war 现状数值全盘点（设计讨论地基）
 
-- 盘点日期：2026-11-07
-- 范围：`js/config.js`、`js/enemy.js`、`js/wave.js`、`js/bullet.js`、`js/powerup.js`、`js/player.js`、`js/skill.js`、`js/game.js`、`js/meta.js`
-- 方法：逐文件读取数值定义与消费点，行号以**当前工作区**为准（含 P6 重构与 P5b 性能优化后的偏移）
+- 首次盘点：2026-11-07
+- **最近复核：2026-11-12 @ HEAD `12aec58`**（含 `85740c5` 技能修复、`3557386` 单一真源、`12aec58` regen/nova/文案重档三批 `js/` 改动）
+- 范围：`js/config.js`、`js/enemy.js`、`js/wave.js`、`js/bullet.js`、`js/powerup.js`、`js/player.js`、`js/skill.js`、`js/game.js`、`js/meta.js`、`js/level/*`、`assets/levels/*.json`
+- 方法：**行号由 probe 字符串逐条重定位**（不是按上版偏移推），每条锚点都在 `12aec58` 上验证过实际内容；`config.js` 内部因新增注释行整体下移，旧版全部行号已作废
 - 标注约定：**「推算」**= 按代码公式手算、非运行时采样；其余数字均为代码字面量
+- 本版同时**撤回若干旧论断**（原文里写错、后被代码改掉的），逐条列在文末「附 A / 附 B」，不做悄悄改写
 
 > 本文只陈述代码事实与推导，不做业界对标。业界方案见 `docs/design-research.md`，关卡/弹幕专题见 `docs/design-levels-editor.md`。
 
@@ -15,27 +17,28 @@
 
 | 参数 | 值 | 位置 | 设计意图 / 推测 |
 |---|---|---|---|
-| 移动速度 | 6.2 | `config.js:45` | 基准 6.2 px/帧；实际 `× (1 + 0.12×move) × (speed buff ? 1.5 : 1)`（`player.js:101-103`） |
+| 移动速度 | 6.2 | `config.js:45` | 基准 6.2 px/帧；实际 `× (1 + 0.12×move) × (speed buff ? 1.5 : 1)`（`js/player.js:105-107`） |
 | 碰撞半径（渲染/逻辑） | 18 | `config.js:46` | 机身尺寸参考 |
-| **受击判定半径** | **20** | `config.js:352` | 比机身略宽，便于「贴身擦弹」；与 18 并存，属近似重复定义 |
+| **受击判定半径** | **20** | `config.js:520` | 比机身略宽，便于「贴身擦弹」；与 18 并存（`PLAYER_BASE.radius` vs `PLAYER.hitRadius`），属近似重复定义，见第十节 11 |
 | 机体宽/高 | 44 / 52 | `config.js:47-48` | 贴图与枪口锚点基准 |
-| 基础射击间隔 | 0.16 | `config.js:49` | **注释称基础间隔 0.56**（`config.js:146-147`），此字段实际未被 `calcFireRate` 读取（见「数值孤岛」） |
-| 受伤无敌时间 | 2.2s | `config.js:50` | 与死亡动画 2s 配合，避免「死了还被打」（`game.js:1041`） |
+| 基础射击间隔 | **0.56** | `config.js:49` | `PLAYER_BASE.fireInterval`，**就是 `calcFireRate` 读的那一个**（`config.js:170`），不是孤岛 —— 旧版此处写「0.16 且无人读取」是错的，见附 A-1 |
+| 受伤无敌时间 | 2.2s | `config.js:50` | 与死亡慢动作 `deathTimer`（`game.js:146`）配合，避免「死了还被打」；也是再生不变量右边的分母（见 7.1 `regen`） |
 | 护盾上限 | 3 | `config.js:51` | 可叠天赋 +1、商店 +2 → 最高 6 |
-| 起始生命 | 3 | `config.js:52` | 各机型可覆盖（2~5） |
-| 初始火力等级 | 1 | `player.js:72` | 天赋「起始武器等级+1」可 +1 |
-| 火力等级硬上限 | 4 | `powerup.js:83` | `power` 道具封顶 4；对应 4 条主弹道 |
-| 火力道具持续 | 15s | `powerup.js:84` | 到期回落 1 级（`player.js:133-136`） |
-| 升级回血 | +1 生命 | `game.js:1014` | 每次升级必回 1，满级技能时改为 +1 护盾（`game.js:1017-1018`） |
+| 起始生命 | 3 | `config.js:52` | 各机型可覆盖（2~5，`config.js:533-538`） |
+| 初始火力等级 | 1 | `js/player.js:72` | 天赋「起始武器等级+1」可 +1 |
+| 火力等级硬上限 | 4 | `powerup.js:79` | `Math.min(PLAYER.maxPower, …)`；上限值本身已单一真源到 `config.js:521 maxPower: 4`（旧版写「硬编码 4、未读配置」，见附 A-2） |
+| 火力道具持续 | 15s | `config.js:236` | 取值点 `powerup.js:80`；到期回落 1 级（`js/player.js:148-151`） |
+| 升级回血 | +1 生命 | `game.js:1246` | 每次升级必回 1；无可选技能时改为 +1 生命 +1 护盾（`game.js:1249-1251`） |
 
 ### 1.2 射击间隔真源 `calcFireRate`
 
-位置 `config.js:148-154`：
+位置 `config.js:165-179`：
 
 ```
-普通：(0.56 - (power-1)×0.04) × (1 - 0.08×rate) × fireRateMul
-急速：0.055 × fireRateMul
-疯狂追击：0.045 × fireRateMul
+普通：(PLAYER_BASE.fireInterval - (power-1)×0.04) × (1 - 0.08×rate) × fireRateMul   // :170
+急速：0.055 × fireRateMul                                                            // :167
+疯狂追击：0.045 × fireRateMul                                                        // :168
+过载核心：fr /= 1 + (1-hpRatio)×0.18×overload（仅常规路径）                            // :173-178
 ```
 
 | 状态 | 间隔 | 推导 |
@@ -46,7 +49,8 @@
 | 急速射击 | 0.055s | 固定值，不看 power/rate |
 | 疯狂追击 | 0.045s | 固定值，同上 |
 
-**再射闸门** `refireGateDistance`（`config.js:135-140`）：`min(250, max(20, 3×60×fireRate))`。射速越快波间距越小，下限 20px 防抖。
+**再射闸门** `refireGateDistance`（`config.js:152-157`）：`min(250, max(20, 3×60×fireRate))`。射速越快波间距越小，下限 20px 防抖。
+⚠ 口径：`maxRange` 与再射闸门都以子弹的 `traveled` 为尺度，而 `traveled` 是**弧长**（`bullet.js:389` 逐帧 `hypot` 累加）。追踪弹因此会比直线弹更早触顶，实测提前量 ≤14%（见 7.1 `homing` 与 `docs/perf-baseline.md` 7.5）。
 
 ### 1.3 输出能力（推算）
 
@@ -56,28 +60,30 @@
 | 中期 | dmg=10、rate=6、power=4、无 volley/scatter/副武器 | 4（主弹×4 通道） | 44 | **192** |
 | 满常规 | dmg=10、rate=6、power=4、volley6、scatter6、dual4、side4 | 16（受 `waveCap`） | ≈228 | **≈996** |
 | 满常规+暴击 | 再叠 crit6（72%）+critdmg6（×4.5） | 16 | 期望 ×3.52 | **≈3506** |
-| 疯狂追击 | dmg=10、scatter6、volley6 | **140** | **3300** | 实际受 `screenCap` 限速 → **≈2640** |
+| 疯狂追击（1b 封顶后） | dmg=10、scatter6、volley6 | **48**（原生 140 被 `madHuntWaveCap` 跨采样截断） | **≈1,130**（按 48/140 等比，弹种比例不变） | 见下方注 |
 
-> 推算口径：单目标全命中、无天赋/商店/飞机加成、不含爆炸/分裂/穿透的额外命中；暴击期望倍率 `0.28×1 + 0.72×4.5 = 3.52`（基础倍率 1.5 + critdmg6×0.5 = 4.5）。
-> 满常规单波 16 发中，主弹只占 4 发，其余被 dual/sideBullets 挤占（`player.js:347-349` 的 `mainCap` 计算）——这是「副武器先占额度」策略的直接后果。
+> 推算口径：单目标全命中、无天赋/商店/飞机加成、不含爆炸/分裂/穿透的额外命中；暴击期望倍率 `0.28×1 + 0.72×4.5 = 3.52`（基础倍率 1.5 + critdmg6×0.5 = 4.5，`bullet.js:124-127`）。
+> 伤害基数唯一来源已收敛到 `calcPlayerBaseDmg(player) = round((BULLET.baseDmg + dmgLv + talentDmg) × baseDmgMul)`（`js/player.js:291-293`），`getShootPattern`（`js/player.js:301`）与 nova（`game.js:1227`）共用同一函数。
+> 满常规单波 16 发中，主弹只占 4 发，其余被 dual/sideBullets 挤占（`js/player.js:390-394` 的 `sideCap/mainCap` 计算）——这是「副武器先占额度」策略的直接后果。
+> madHunt 一行的吞吐**不给单一数**：封顶前 `docs/perf-baseline.md` 第三节实测 0.8 波/秒（140 发/波），封顶后 `config.js:69-72` 的注释记「满配 5s 仅 ~13 波、峰值友方弹钉在 140，48 使吞吐降约 13~32%」；两个口径（单波伤害 vs 吞吐）不可混用，实测复算排在 `docs/perf-baseline.md` 待办。
 
 ### 1.4 护体弹（guard）
 
 | 参数 | 值 | 位置 |
 |---|---|---|
-| 轨道半径 | 46px | `player.js:159` |
-| 角速度 | 2.2 rad/s | `player.js:160` |
-| 击毁后重生 | 2.5s，每级 -0.24s，下限 1.3s | `player.js:161,238` |
-| 无技能增长间隔 | 30s | `player.js:162` |
-| 每级缩短 | -4s，下限 4s | `player.js:206` |
-| 数量上限 | `(guard>0?1:0) + guard×1` → 1 级 2 颗、满级 6 颗 | `player.js:197` |
-| 单颗伤害 | `max(2, round(power) + round(dmgLv×0.5))` | `player.js:170-174` |
+| 轨道半径 | 46px | `js/player.js:187` |
+| 角速度 | 2.2 rad/s | `js/player.js:188` |
+| 击毁后重生 | 2.5s，每级 -0.24s，下限 1.3s | `js/player.js:189`、`js/player.js:265` |
+| 无技能增长间隔 | 30s（**永不生效**，见第九节） | `js/player.js:190` |
+| 每级缩短 | -4s，下限 4s | `js/player.js:233` |
+| 数量上限 | `(guard>0?1:0) + guard×1` → 1 级 2 颗、满级 6 颗 | `js/player.js:224` |
+| 单颗伤害 | `max(2, round(power) + round(dmgLv×0.5))` | `js/player.js:197-201` |
 
 ---
 
 ## 二、子弹与武器数值
 
-### 2.1 `BULLET` 配置（`config.js:56-105`）
+### 2.1 `BULLET` 配置（`config.js:56-122`）
 
 | 参数 | 值 | 位置 | 消费点 / 意图 |
 |---|---|---|---|
@@ -88,62 +94,66 @@
 | rangeCapMargin | 80 | :61 | 射程上限 = 屏高 + 80 |
 | refireDist | 250 | :62 | 再射闸门上限 10m |
 | waveCap | **16** | :66 | 单波子弹总量上限（副武器与主弹共享） |
-| screenCap | **140** | :67 | 同屏友弹硬上限 |
-| baseRadius / critRadius | 4 / 5.5 | :68-69 | 弹体判定半径 |
-| critChance | 0.12 | :71 | 每级暴击率 |
-| critMulti | 1.5 | :72 | **代码值 1.5**，但 `bullet.js:93-94` 注释写「基础 2.5」；实现为 `1.5 + 0.5×critdmg + 0.5×buff`，满级 = 4.5 |
-| knockbackPerLevel | 0.30 | :74 | 击退力 = 伤害 × 0.3/级 |
-| splitDmgRatio | 0.30 | :76 | 分裂碎片伤害比例（`BCFG.splitDmgRatio` 被引用 1 次） |
-| splitCountPerLevel | 1 | :77 | 分裂片数 = 1 + lv（满级 6） |
-| splitFragBaseRange | 25 | :80 | 碎片基础射程 1m |
-| splitFragRangePerLevel | 60 | :81 | 分裂距离技能每级 +60px |
-| volleyAngleGap | 0.04 | :83 | 连射角间距 |
-| scatterSpread | 0.06 | :84 | 散射角间距 |
-| explosionBaseRadius | 40 | :85 | 爆炸基础半径 |
-| explosionRadiusPerLevel | 12 | :86 | 冲击扩域每级 +12px |
-| explosionBaseChance | 0.10 | :88 | 爆炸基础触发率 |
-| explosionChancePerLevel | 0.10 | :89 | 爆破掌握每级 +10% |
-| explosionBaseDmgRatio | 0.45 | :91 | 爆炸伤害比例 |
-| explosionDmgRatioPerLevel | 0.15 | :92 | 爆裂强化每级 +15% |
-| explosionMaxRadius | 250 | :94 | AOE 半径硬上限 |
-| explosionMaxChainDepth | 2 | :95 | 连锁爆炸深度 |
-| explosionParticlesPerHit | 8 | :96 | 每次爆炸粒子数 |
-| fxRingsCap / fxBlastsCap | 48 / 24 | :97,100 | 特效池上限 |
-| orbitalAccel | 0.035 | :102 | 天基武器每帧加速基数 |
-| orbitalAccelPerLevel | 0.015 | :103 | 每级额外加速 |
-| orbitalMaxSpeed | 22 | :104 | 加速上限 |
+| madHuntWaveCap | **48** | :73 | 疯狂追击单波原生 140 → 均匀跨采样截断到 48（1b 封顶，代码 `js/player.js:327-336`，实测 `tools/perf/madhunt-cap-probe.mjs`） |
+| screenCap | **140** | :74 | **单轮发射闸**：`friendlyCount + patterns.length <= 140` 才发整波（`game.js:405`）。注释已明确它**不是同屏硬上限**：分裂碎片走 `spawnSplitBurst → spawnSplitBullet → pushBullet`（`bullet.js:224-235`、`:185-207`）不经过此闸 |
+| hostileScreenCap / hostileSpawnRateCap | 140 / 140 | :75,:76 | 敌弹同屏与每秒发射上限（整组原子准入，`bullet.js:298-307`） |
+| baseRadius / critRadius | 4 / 5.5 | :79,:80 | 弹体判定半径 |
+| **baseDmg** | **1** | :81 | **有消费点**：`js/player.js:293` 的 `calcPlayerBaseDmg` 是玩家伤害唯一来源 —— 旧版列为「全仓引用 0 次的数值孤岛」是错的，见附 A-1 |
+| critChance | 0.12 | :82 | 每级暴击率 |
+| critMulti | 1.5 | :83 | 实现为 `1.5 + 0.5×critdmg + 0.5×buff`（`bullet.js:124-127`），满级 = 4.5；旧注释曾写「基础 2.5」，与代码不符（第九节漂移表） |
+| knockbackPerLevel | 0.30 | :85 | 击退力 = 伤害 × 0.3/级 |
+| splitDmgRatio | 0.30 | :87 | 分裂碎片伤害比例（满级 6 片，降权防爆量） |
+| splitCountPerLevel | 1 | :88 | 分裂片数 = 1 + lv（满级 6） |
+| splitFragBaseRange | 25 | :91 | 碎片基础射程 1m |
+| splitFragRangePerLevel | 60 | :92 | 分裂距离技能每级 +60px |
+| volleyAngleGap | 0.04 | :94 | 连射角间距 |
+| scatterSpread | 0.06 | :95 | 散射角间距 |
+| explosionBaseRadius | 40 | :96 | 爆炸基础半径 |
+| explosionRadiusPerLevel | 12 | :97 | 冲击扩域每级 +12px |
+| explosionBaseChance | 0.10 | :99 | 爆炸基础触发率 |
+| explosionChancePerLevel | 0.10 | :100 | 爆破掌握每级 +10% |
+| explosionBaseDmgRatio | 0.45 | :102 | 爆炸伤害比例 |
+| explosionDmgRatioPerLevel | 0.15 | :103 | 爆裂强化每级 +15% |
+| explosionMaxRadius | 250 | :105 | AOE 半径硬上限 |
+| explosionMaxChainDepth | 2 | :106 | 连锁爆炸深度 |
+| explosionParticlesPerHit | 8 | :107 | 每次爆炸粒子数 |
+| fxRingsCap / fxBlastsCap | 48 / 24 | :108,:111 | 特效池上限 |
+| orbitalAccel / PerLevel / MaxSpeed | 0.035 / 0.015 / 22 | :113-115 | 天基武器出膛加速 |
+| chainRange / **chainDecay** | 170 / **0.7** | :116,:117 | 闪电链半径与每跳衰减；`chainDecay` 现为爆炸连锁与闪电链**共用**的单一真源（`game.js:899` `chainDamageMultiplier` 读它） |
+| novaBaseRadius / PerLevel | 120 / 40 | :118,:119 | 新星环半径 3 级 = 200 |
+| novaBaseDmg / PerLevel | 2 / 1 | :120,:121 | **乘数**而非平值：伤害 = `round(calcPlayerBaseDmg × (2 + (lvl-1)))`（`game.js:1226-1227`），旧版「2→4 平值」已在 `12aec58` 改为随主弹成长 |
 
 ### 2.2 敌方子弹
 
 | 参数 | 值 | 位置 |
 |---|---|---|
-| 普通敌弹速度 | `(3 + rand(0,1.5)) × enemyFireScale` | `bullet.js:235` |
-| 普通敌弹半径 / 射程 / 寿命 | 5 / 600 / 6s | `bullet.js:237` |
-| 激光弹速度 | `(8.5 + rand(0,1.2)) × enemyFireScale` | `bullet.js:248` |
-| 激光弹（三发平行） | 半径 3.5、射程 720、寿命 2.4s、间距 11px | `bullet.js:251-255` |
-| 分裂碎片数量上限 | 12 | `bullet.js:195` |
-| 分裂扇形张角 | `min(1.2, n×0.2)` rad（±34°） | `bullet.js:197` |
-| 碎片半径 | `max(2, parentR×0.45)` | `bullet.js:161` |
+| 普通敌弹速度 | `(3 + rand(0,1.5)) × enemyFireScale` | `bullet.js:319` |
+| 普通敌弹半径 / 射程 / 寿命 | 5 / 600 / 6s | `bullet.js:320-322` |
+| 激光弹速度 | `(8.5 + rand(0,1.2)) × enemyFireScale` | `bullet.js:332` |
+| 激光弹（三发平行） | 半径 3.5、射程 720、寿命 2.4s、间距 11px | `bullet.js:335-341` |
+| 分裂碎片数量上限 | 12 | `bullet.js:226` |
+| 分裂扇形张角 | `min(1.2, n×0.2)` rad（±34°） | `bullet.js:228` |
+| 碎片半径 | `max(2, parentR×0.45)` | `bullet.js:192` |
 
 ### 2.3 疯狂追击与常规模式的关系
 
-- 常规：`waveCap=16` 限制单波总量，`screenCap=140` 限制同屏。
-- 疯狂追击：绕过 `waveCap`，单波 = `(8 + scatter×2) × (1 + volley)`；满技能 = **20 × 7 = 140**，恰好等于 `screenCap`（`game.js` 的 `expectedMadHuntPatterns` 与 `player.js:277-293` 同步）。
-- 伤害权重：madHunt 主弹 `×3`、连射 `×2`（`player.js:283,288`），而常规主弹 `×1`、散射 `×0.5`、连射 `×0.6`（`player.js:313-314`）。
-- 结论：madHunt 是**数量与伤害双高**的 8 秒爆发道具，实际输出被 `screenCap` 从理论 22.2 波/秒压到约 0.8 波/秒（P5b 基线实测 48 波/60s）。
+- 常规：`waveCap=16` 限制单波总量（`js/player.js:390-394` 分配给主弹道与副武器），`screenCap=140` 是整波发射闸（`game.js:405`）。
+- 疯狂追击：不走 `waveCap`，原生单波 = `(8 + scatter×2) × (1 + volley)`；满技能原生 **140**，现被 `BULLET.madHuntWaveCap=48` 以**等步长跨采样**截断（`js/player.js:327-336`），保留 360° 角度覆盖、只削单波数量。
+- 伤害权重：madHunt 主弹 `×3`、连射 `×2`（`js/player.js:315`、`:320`），而常规主弹 `×1`、散射 `×0.5`、连射 `×0.6`（`js/player.js:357-358`、`:404`）。
+- 结论：madHunt 仍是数量与伤害双高的爆发道具，但 1b 封顶后「单波 140 发」这个量级已不存在；`POWERUP_DURATION.madHunt` 也已从 8s 收到 **5s**（`config.js:237`）。
 
 ---
 
 ## 三、敌机数值
 
-### 3.1 六种敌机（`config.js:172-179`）
+### 3.1 六种敌机（`config.js:205-212`）
 
 | 类型 | 半径 | HP | 得分 | 经验 | 速度 | 开火间隔配置 | 特殊 |
 |---|---|---|---|---|---|---|---|
-| small | 16 | 1 | 100 | 8 | 2.4 | [4, 6] | 基础型 |
+| small | 16 | 1 | 100 | 8 | 2.4 | **[1.4, 2.0]** | 基础型（旧版写 [4,6]，已实改为快射型） |
 | mid | 24 | 3 | 300 | 20 | 1.6 | [3.2, 3.2] | 中型 |
 | big | 36 | 8 | 800 | 45 | 1.0 | [2.2, 2.2] | 高血量 |
-| laser | 22 | 4 | 400 | 25 | 1.4 | [2.5, 3.5] | 三发平行激光 |
+| laser | 22 | 4 | 400 | 25 | 1.4 | [2.5, 3.5] | 三发平行激光（复射另走 `rand(2.4,3.6)`，见第九节） |
 | shield | 28 | 6 | 500 | 30 | 1.2 | [3, 4] | 护盾 3 层 |
 | split | 20 | 3 | 250 | 15 | 1.8 | [3.5, 5] | 死亡分裂 2 子代 |
 
@@ -151,84 +161,99 @@
 
 | 项 | 公式 | 位置 |
 |---|---|---|
-| 敌方等级成长系数 | `scale = (min(E,30)-1) + max(0,E-30)×0.5` | `config.js:123-128` |
-| HP | `round(cfg.hp × hpScale × (1 + scale×0.10))` | `enemy.js:64-66` |
-| 得分/经验 | `cfg.score × (1 + scale×0.10)` | `enemy.js:73-74` |
-| 下落速度 | `cfg.speed × speedScale × rand(0.8,1.25) × (1 + 玩家难度等级×0.045)` | `enemy.js:79` |
-| 初始开火冷却 | `rand(cfg.fireCd) × fireCdScale × (1 + scale×(-0.03))` | `enemy.js:81` |
-| 护盾层数 | 固定 3 | `enemy.js:85` |
-| 分裂子代数 | 固定 2 | `enemy.js:86` |
-| 激光首发延迟 | `rand(1,2)` s | `enemy.js:87` |
+| 敌方等级成长系数 | `scale = enemyLevelScale(E)`：`(min(E,30)-1) + max(0,E-30)×0.5` | `config.js:140-145`，键值 `config.js:131-132` |
+| HP | `max(1, round(cfg.hp × hpScale × (1 + scale×0.10)))` | `enemy.js:68,:70` |
+| 得分/经验 | `cfg.score × (1 + scale×0.10)` | `enemy.js:69,:77-78` |
+| 下落速度 | `cfg.speed × speedScale × rand(0.8,1.25) × (1 + 玩家难度等级×0.045)` | `enemy.js:83` |
+| 初始开火冷却 | `rand(cfg.fireCd) × fireCdScale × fireMul`，`fireMul = max(0.25, 1 + scale×(-0.03))` | `enemy.js:87-89` |
+| 复射间隔 | 与首射同源：读表 + `fireCdScale` + `e.fireMul` | `enemy.js:203-204` |
+| 护盾层数 | 固定 3 | `enemy.js:93` |
+| 分裂子代数 | 固定 2 | `enemy.js:94` |
+| 激光首发延迟 | `rand(1,2)` s | `enemy.js:95` |
 
-### 3.3 敌方等级与难度等级的双轨
+> `fireCdMinMul = 0.25`（`config.js:128`）把乘数钳在正区间：旧版「E≈34 后开火乘数变负、出生即开火」这条断点**已不成立**，且运行时敌方等级根本到不了 34（见 3.3）。
 
-| 曲线 | 公式 | 位置 | 封顶所需分数 |
-|---|---|---|---|
-| 玩家难度等级 L | `min(14, 1+floor(score/4500))` | `config.js:288-289`、`wave.js:12-14` | 14 级 = **58,500 分** |
-| 敌方等级 E | `min(99, 1+floor(score/6000))` | `config.js:108-116`、`game.js:429` | 99 级 = **588,000 分** |
+### 3.3 玩家难度等级与敌方等级：**已合并为同一张得分轴**
 
-- **断点**：L 在 58,500 分封顶后不再增长，E 继续涨到 99。代码注释也承认「后期只剩敌方等级在涨」。
-- E=99 时 `scale=63.5` → 敌机 HP ×7.35、速度 ×1.63（L=14）、开火乘数 `1-1.905 = -0.905`（见「配置漂移」）。
+单一真源 `SCORE_AXIS` + `levelFromScore`（`config.js:436-444`、`config.js:451-462`），消费点 `game.js:481-482`：
+
+| at（累计分） | playerLevel | enemyLevel |
+|---|---|---|
+| 0 | 1 | 1 |
+| 8,000 | 3 | 3 |
+| 20,000 | 6 | 6 |
+| 35,000 | 10 | 11 |
+| 58,500 | **14** | 14 |
+| 100,000 | 14 | 16 |
+| 180,000 | 14 | **18** |
+
+- 表头注释（`config.js:433-435`）明写设计意图：**消除「玩家 58,500 分封顶 14、敌方涨到 99」的脱钩**；`ENEMY_LEVEL.maxLevel=99`（`config.js:130`）只作为 `enemyLevelScale` 的理论上限保留，**运行时敌方等级由本表封顶 18，与玩家等级差 ≤4**。
+- 因此 E=18 → `scale = 17` → HP ×2.7、得分/经验 ×2.7、下落速度 ×1.765（L=14）、开火乘数 `1-0.51 = 0.49`（未触到 0.25 下限）。
+- 旧版「两条曲线不同步 / 后期只剩敌方在变强」的表述**已作废**，见附 A-3。关卡（战役模式）可自带 `difficulty.scoreAxis` 覆盖本表（`game.js:481`）。
 
 ---
 
 ## 四、波次 / 关卡节奏
 
-### 4.1 生成与波次（`config.js:287-300`、`wave.js`）
+### 4.1 生成与波次（`config.js:418-430`、`wave.js`）
 
 | 参数 | 值 | 位置 | 意图 |
 |---|---|---|---|
-| 生成率 | `min(1.6 + 0.18×L, 4.0)` 次/秒 | `config.js:291-293`、`wave.js:16-18` | 每秒判定 `random < rate×dt`（`game.js:458`） |
+| 生成率 | `min(1.6 + 0.18×L, 4.0)` 次/秒 | `config.js:421-423`、`js/wave.js:12-18` | 每帧按 `random < rate×dt` 判定（`game.js:574` 取率） |
 | 同屏敌机上限 | 60 | `enemy.js:58` | 防爆量 |
-| 精英波间隔 | 12s | `config.js:290` | L≥2 触发，数量 `2+min(L,5)` = 3~7（`wave.js:31-35`） |
-| Boss 间隔 | 每 5 个难度等级 | `config.js:295` | L=5/10 两次（L 封顶 14），类型 3 选 1 随机（`game.js:437-440`） |
-| Boss 预警 | 3s | `wave.js:46` | 旧 2s 太短 |
-| 虫群间隔 | 30s | `config.js:296` | L≥2，预警 3s |
-| 虫群数量 | `8 + min(L×2, 16)` = 10~24 | `wave.js:71` | 纵向编队 `-30 - i×25` |
-| 敌机类型解锁 | L≥2 mid、L≥3 mid×2、L≥4 laser、L≥5 big+shield、L≥6 split、L≥7 big、L≥8 shield+laser | `enemy.js:45-55` | 权重靠 `push` 次数实现 |
+| 精英波间隔 | 12s | `config.js:420` | L≥2 触发，判定 `js/wave.js:27-31` |
+| Boss 间隔 | 每 5 个难度等级 | `config.js:425` | 默认模式在 `game.js:557` 出 Boss；战役/BossRush 走 `game.js:519`/`:543` |
+| Boss 预警 | 3s | `js/wave.js:42`（`bossWarnTimer`） | 旧 2s 太短 |
+| 虫群间隔 | 30s | `config.js:426` | L≥2（`config.js:428`），预警 `config.js:427` |
+| 虫群数量 | `8 + min(L×2, 16)` = 10~24 | `js/wave.js:66-71` | 纵向编队 |
+| 敌机类型解锁 | L≥2 mid、L≥3 mid×2、L≥4 laser、L≥5 big+shield、L≥6 split、L≥7 big、L≥8 shield+laser | `enemy.js:45-55` | 权重靠 `push` 次数；同等级内随机 `enemy.js:63` |
 
-### 4.2 关卡结构现状
+### 4.2 关卡结构现状：**战役模式已落地为数据驱动，默认模式仍是无限波次**
 
-- **没有关卡/章节数据结构**：只有「无限波次 + 难度等级 + 周期性 Boss/精英/虫群」三类事件（`wave.js:28-68`）。
-- 敌机类型池由难度等级决定，但**同等级内是均匀随机**（`enemy.js:59` `pick(...)`），没有波次编队/主题/教学曲线。
-- Boss 类型随机，与进度无关（`game.js:438-440`），不存在「第 1 章母舰 → 第 2 章堡垒」的编排。
+> 旧版本节写「没有关卡/章节数据结构，只有无限波次」——**该论断已不成立**，属代码前进、文档落后的漂移，见附 A-3。
+
+- 数据层：`assets/levels/campaign-01.json`（1 章 6 关，`title: 第一章：初入空域`）+ `level-01…level-06.json`，每关 **5 个 beat**，role 固定 `teach / test / twist / rest / boss`（`test/level-content.test.mjs:12-23` 逐关断言）。
+- 运行时：`js/level/schema.js` 校验（stage ≤ 30，`js/level/schema.js:8`、`:170-171`）、`js/level/loader.js` 拉取 `assets/levels/<id>.json`（`js/level/loader.js:55`、`:61`）并带 `?campaign=` 选择与超时保护（`js/level/loader.js:8`）、`js/level/patterns.js` 是弹幕词汇表（`fan/ring/spiral/petal/rain/stack/laserGrid/aimed` **8 种**，`js/level/patterns.js:3-12`；别名 `laser→laserGrid`、`burst→ring` 在 `js/level/patterns.js:14-17`，各型参数白名单 `js/level/patterns.js:19-28`）。
+- 编排能力：beat 级 `densityBudget`（如 `level-01 teach` = 同屏 32 发 / 8 发每秒，逐 beat 到 boss 段 80/24）、`advance: allCleared|timeoutSec`、`waves[].spawns[]`（type/count/formation/centerX/spawnY/intervalSec/patternRef）。生成器在 `game.js:493-495` 推进，密度预算经 `setHostileBulletBudget` 注入（`game.js:1467` → `bullet.js:238-250`）。
+- 规模实测（读 `assets/levels/*.json`）：level-01「初次接敌」3 个 spawn 组（small×8、mid×2，仅 `aimed`）→ level-05「棱镜风暴」5 组并首次引入 `spiral/petal/stack/laserGrid` → level-06「终幕·苍穹防线」5 组 + `rain/laserGrid/ring/petal`，boss beat 密度预算最高 112/36。
+- **仍然存在的缺口**：① 入口是菜单「战役模式」按钮（`js/ui/menus.js:230-249`，显示 `已通关 N/6`），默认开局仍是无限波次 + 周期事件，玩家不点就遇不到编排；② 每关 stage 级 `densityBudget` 六关全为 140/140（与全局上限同值，等于没收紧），真正生效的是更细的 beat 级预算；③ Boss 类型由 beat 数据指定，但默认模式仍是 3 选 1 随机。
 
 ---
 
 ## 五、Boss 数值
 
-`wave.js:87-112`：
+`js/wave.js:83-107`：
 
 | Boss | 半径 | HP | 一阶段 | 二阶段（≤50%） | 三阶段（≤25%） |
 |---|---|---|---|---|---|
-| 母舰 mothership | 70 | 200 | 召唤 3s / 不开枪 | 开火 2s spread | 召唤 4s + 开火 1.5s laser |
+| 母舰 mothership | 70 | 200 | 召唤 3s / 不开枪 | 召唤 999s（停）/ 开火 2s spread | 召唤 4s + 开火 1.5s laser |
 | 堡垒 fortress | 60 | 150 | 护盾 4 层 / 开火 4s homing | 护盾 2 层 / 3s | 护盾 0 / 1.5s burst |
 | 幻影 phantom | 40 | 100 | 开火 2s + 瞬移 4s burst | 1.5s + 2.5s | 0.8s + 1.5s |
 
-- 血量成长：`hp × (1 + 0.15×max(0, L-5))`（`wave.js:118-119`）；L=10 时 ×1.75。
-- 奖励固定基数：score 2000、xp 100（`wave.js:129-130`），同样乘 `lvlScale`。
-- 护盾层数直接复用 `shieldHp`，但 Boss 的护盾只是数值，没有独立护盾发生器实体（`shieldGens` 字段仅在配置里，未在 `spawnBoss` 中落地）。
+- 血量成长：`lvlScale = 1 + 0.15×max(0, L-5)`（`js/wave.js:114-115`）；L=10 时 ×1.75。Boss Rush 另有 `scaleBossForRound`（`game.js:543`）。
+- 奖励基数 score 2000、xp 100，同样乘 `lvlScale`（`js/wave.js:125-126`）。
+- 护盾：`shieldGens` 在 `spawnBoss` 落成首阶段的 `shieldHp`（`js/wave.js:137`），**切相位时会按新相位重新赋值**（`game.js:1041` `e.shieldHp = phase.shieldGens || 0`）。旧版说它「只在 spawnBoss 映射成数值、无消费点」不准确：它是堡垒三阶段护盾的实际来源，只是没有独立的「护盾发生器」实体。
 
 ---
 
 ## 六、道具数值
 
-### 6.1 掉落（`config.js:201-220`、`game.js:982-989`）
+### 6.1 掉落（`config.js:249-253`、`game.js:1189-1196`）
 
 | 参数 | 值 | 位置 |
 |---|---|---|
-| 基础掉落率 | 0.18 | `config.js:202` |
-| 爆率技能每级 | +0.05（满级 +0.30） | `config.js:204` |
-| 幸运爆率 buff | +0.10 | `config.js:204` |
-| 天赋掉落 | +0.05 | `config.js:379` |
-| 商店掉落满级 | +0.20 | `config.js:231` |
-| **理论最高掉落率** | **0.83** | 0.18+0.30+0.10+0.05+0.20 |
-| 同屏道具上限 | 30 | `config.js:299` |
-| 道具下落速度 | 1.8 px/帧 | `powerup.js:46` |
-| 拾取半径 | 32px | `powerup.js:70` |
-| 磁铁范围 | 120px（buff 期间 200px） | `powerup.js:60` |
+| 基础掉落率 | 0.18 | `config.js:250` |
+| 爆率技能每级 | +0.05（满级 +0.30） | `config.js:251`、技能 `config.js:314` |
+| 幸运爆率 buff | +0.10 | `config.js:252` |
+| 天赋掉落 | +0.05（仅 t_drop1，无二级） | `config.js:550` |
+| 商店掉落 | +0.05×n，max 4 → +0.20 | `config.js:279` |
+| **理论最高掉落率** | **0.83** | `getDropBonus()` 组装（`game.js:1189-1196`），调用点 `game.js:749`/`:765`/`:863`/`:872`/`:1000`/`:1008` |
+| 同屏道具上限 | 30 | `config.js:429`，判定 `js/powerup.js:33` |
+| 道具下落速度 | 1.8 px/帧 | `powerup.js:42` |
+| 拾取半径 | 32px（按平方距离判定） | `powerup.js:66` |
+| 磁铁范围 | 120px（buff 期间 200px） | `powerup.js:56` |
 
-### 6.2 权重（早期 L=1 / 后期 L≥2）
+### 6.2 权重（早期 L=1 / 后期 L≥2，`config.js:259-268`）
 
 | 道具 | 早期 | 后期 | 变化 |
 |---|---|---|---|
@@ -239,41 +264,42 @@
 | xppack | 12 | 10 | ↓ |
 | rapid | 7 | 9 | ↑ |
 | drop | 7 | 6 | ↓ |
-| freeze | 6 | 7 | ↑ |
+| **freeze** | **3** | **3** | =（旧文档写 6/7，与代码不符） |
 | knockback | 6 | 6 | = |
 | critboost | 5 | 7 | ↑ |
-| speed | 5 | 5 | = |
+| speed | 5 | **6** | ↑（旧文档写 5/5） |
 | double | 5 | 6 | ↑ |
 | skillup | 4 | 6 | ↑ |
 | madHunt | **3** | **4** | 最稀有常规道具 |
-| randomSkill | — | — | 仅 Boss 掉落（`powerup.js:41`） |
+| randomSkill | — | — | 仅 Boss 掉落（`js/powerup.js:36-37` 的 `isBoss` 分支二选一） |
 
-> 权重总和：早期 **132**、后期 **128**。`madHunt` 早期命中率 3/132 ≈ 2.3%。
+> 权重总和（逐项相加复核）：早期 **129**、后期 **124**。`madHunt` 早期命中率 3/129 ≈ **2.3%**。旧版写的 132/128 是加总错误。
 
 ### 6.3 效果时长
 
 | 道具 | 效果 | 位置 |
 |---|---|---|
-| power | 火力 +1（上限 4），持续 15s | `powerup.js:82-84` |
-| life | 生命 +1 | :85-86 |
-| shield | 护盾 +1（上限 maxShield） | :87-88 |
-| madHunt / rapid / speed / magnet / double / drop / critboost / knockback | buff 计时 **8s** | :89-108 |
-| freeze | 全体冰冻 | :95-96 |
+| power | 火力 +1（上限 `PLAYER.maxPower=4`），持续 15s | `powerup.js:79-80`、`config.js:236`、`config.js:521` |
+| life | 生命 +1 | `powerup.js:82` 一带 |
+| shield | 护盾 +1（上限 maxShield） | `powerup.js:84` |
+| **madHunt** | buff **5s** | `config.js:237`（旧文档归入 8s 组，错） |
+| rapid / speed / magnet / double / drop / critboost / knockback / freeze | buff 计时 **8s** | `config.js:238-245`，写入点 `powerup.js:86-108` |
 | xppack | `max(50, 当前升级需求×20%)` | `powerup.js:16-22` |
-| skillup / randomSkill | 随机技能 +1（含前置校验） | :109-135 |
+| skillup / randomSkill | 随机技能 +1（含前置校验） | `js/powerup.js:105-117` / `js/powerup.js:118-131` |
 
 ---
 
 ## 七、养成与元进程数值
 
-### 7.1 局内技能（`config.js:287-323`，共 34 条）
+### 7.1 局内技能（`config.js:289-325`，共 34 条）
 
-> **旧债修正（非 Phase-1 引入的问题被记成 Phase-1 的问题）**：本表此前停在 28 条，缺 Phase-1 新增的 6 个技能（下表 `#29–#34`）。
-> 补齐后条目数与 `SKILLS` 数组（`config.js:287-323`，34 项）一致。
+> **旧债修正（非 Phase-1 引入的问题被记成 Phase-1 的问题）**：本表在 2026-11-07 版停在 28 条，缺 Phase-1 新增的 6 个技能（下表 `#29–#34`）。
+> 补齐后条目数与 `SKILLS` 数组（`config.js:289-325`，34 项）一致。
+> 本轮（`12aec58`）又按实码改了 4 条的**数值口径**：`regen` 降档、`nova` 改为随主弹成长、`homing` 补「最近目标」说明、`secondWind` 观测口拆分。
 
 | 技能 | 每级 | 上限 | 满级总效果 |
 |---|---|---|---|
-| dmg | 伤害 +1 | 10 | +10 |
+| dmg | 伤害 +1 | 10 | +10（进 `calcPlayerBaseDmg`，`js/player.js:291-293`） |
 | rate | 间隔 -8% | 6 | -48% |
 | range | 射程 +2m | 10 | +20m（500px） |
 | move | 移速 +12% | 6 | +72% |
@@ -293,7 +319,7 @@
 | splitDist | 碎片射程 +60 | 5 | +300px |
 | penetrate | 穿透 +1 | 6 | 6 个 |
 | guard | 护体弹 | 5 | 6 颗 |
-| lifesteal | 每级 6% 击杀回血（触发后 5 秒冷却） | 4 | 24% |
+| lifesteal | 每级 6% 击杀回血（触发后 5 秒冷却） | 4 | 24%；稳态上限 `1/5s = 0.2` 命/秒（`config.js:336-339`） |
 | xpboost | 经验 +15% | 6 | +90% |
 | magnet | 永久吸道具 | 1 | — |
 | score | 得分 +10% | 6 | +60% |
@@ -301,48 +327,49 @@
 | knockback | 击退 +30% | 6 | +180% |
 | bulletSpeed | 弹速 +15% | 6 | +90% |
 | orbital | 加速 | 5 | — |
-| homing | 转向系数 `4 + 1.2×等级` | 5 | 满级转向 10（`game.js:341`） |
-| nova | 升级释放新星环：半径 +40px、伤害 +1 | 3 | 半径 200、单环伤害 5（`game.js:1220-1221`） |
-| regen | 每秒回 `0.05×等级` 命 | 5 | 0.25 命/秒 ≈ 4 秒 1 命（`config.js:328`、`game.js:461`） |
-| overload | 残血射速增益 `(1-hpRatio)×0.18×等级` | 5 | hpRatio 1/3 时 ×1.60、1/7 时 ×1.77（`config.js:171-176`，实测见 `docs/perf-baseline.md`） |
-| secondWind | 本局首次死亡免费复活 1 次 | 1 | 1 次（只读观测口 `getReviveStats`，`game.js:2187`） |
-| chain | 命中后弹射 +1 跳，每跳伤害 ×0.7 | 5 | 5 跳、链内半径 170px（`config.js:114-115`、`game.js:803-811`） |
+| homing | 转向系数 `4 + 1.2×等级` | 5 | **1 级解锁追踪（全部友弹）**，2~5 级只提升转向灵敏度：5.2 → 10（`game.js:343`）；目标是**最近敌机**，Boss 在场时会优先打小怪 —— 文案已按此如实化（`config.js:319` 的 `fullDesc`） |
+| nova | 升级释放新星环：半径 +40px、**伤害乘数 +1** | 3 | 半径 200；伤害 = `round(主弹伤害 × (2 + (lvl-1)))`（`game.js:1223-1227`）→ 无 dmg 技能时 2/3/4（与旧平值同值），`dmg=10` 满级时 = 11×4 = **44**，随玩家成长不再中期失效 |
+| regen | 每秒回 `REGEN_RATE(0.03) × 等级` 命 | 5 | **0.15 命/秒 ≈ 6.7 秒 1 命**（旧值 0.05/0.25/4.0s 已在 `12aec58` 降档）；且**受击无敌帧 2.2s 内不累计**（`game.js:463-467` 的 `player.invincible <= 0` 前置条件）。写死的不变量：`0.03×5 + 1/5 = 0.35 < 1/2.2 ≈ 0.4545`（`config.js:329-330`），即与满级吸血叠加后仍低于受击速率上限 |
+| overload | 残血射速增益 `(1-hpRatio)×0.18×等级` | 5 | hpRatio 1/3 时 ×1.60、1/7 时 ×1.77（`config.js:173-178`，实测见 `docs/perf-baseline.md` 7.6） |
+| secondWind | 本局首次死亡免费复活 1 次 | 1 | 1 次；观测口 `getReviveStats()` 现返回 `{reviveUsed, secondWindRevives, paidRevives}`（`game.js:2194`），**技能复活与付费复活已分计数**（`game.js:1297`/`:1351`，复位 `game.js:1423-1424`） |
+| chain | 命中后弹射 +1 跳，每跳伤害 ×`chainDecay(0.7)` | 5 | 5 跳、链内半径 170px（`config.js:116-117`、`game.js:899`）；衰减常量与爆炸连锁同源（`game.js:923` 用同一 `chainDamageMultiplier`） |
 
 ### 7.2 升级经验曲线
 
 > **旧债修正（不是 Phase-1 引入）**：本节此前写的是 `1.32`，而代码里 `XP_GROWTH` 早在 Phase-1 之前
-> 就已从 `1.4 → 1.32 → 1.28` 收敛（`config.js:514-515` 的注释就是这条历史）。
+> 就已从 `1.4 → 1.32 → 1.28` 收敛（`config.js:517-518` 的注释就是这条历史）。
 > 另外原表把「**当前等级升下一级**的单步需求」写成「N 级所需」，读者会当成累计量，一并拆开。
 
 | 项 | 值 | 位置 |
 |---|---|---|
-| 1→2 级经验 | 60 | `config.js:513` |
-| 增长系数 | **1.28**（1.4 → 1.32 → 1.28） | `config.js:514-515` |
-| 公式 | `xpNeed = round(60 × 1.28^(L-1))`，L = 当前等级 | `game.js:1204` |
+| 1→2 级经验 | 60 | `config.js:516` |
+| 增长系数 | **1.28**（1.4 → 1.32 → 1.28） | `config.js:517-518` |
+| 公式 | `xpNeed = round(60 × 1.28^(L-1))`，L = 当前等级 | `game.js:1207` |
 | 单步需求：10 级升 11 级 | 60×1.28⁹ = **553**（旧文档写 730，那是 1.32 的值） | 推算 |
-| 单步需求：20 级升 21 级 | 60×1.28¹⁹ = **6,533**（旧文档写 11,723；6,533 与 `config.js:514` 注释自证一致） | 推算 |
+| 单步需求：20 级升 21 级 | 60×1.28¹⁹ = **6,533**（旧文档写 11,723；与 `config.js:517-518` 注释自证一致） | 推算 |
 | 单步需求：30 级升 31 级 | 60×1.28²⁹ = **77,133**（旧文档写 188,276） | 推算 |
 | 累计：从 1 级到 10 级 | **1,762** | 推算（等比求和） |
 | 累计：从 1 级到 20 级 | **23,119** | 推算 |
 | 累计：从 1 级到 30 级 | **275,260** | 推算 |
 
-> 经验来源：敌机 xp（8~45）× 敌方等级奖励倍率；经验包按当前需求的 20% 兜底。
-> `small` 的 xp=8（`config.js:204`）→ 到 20 级需 23,119 经验 ≈ 2,890 只 small，中期之后单靠击杀明显推不动。
+> 经验来源：敌机 xp（8~45，`config.js:206-211`）× 敌方等级奖励倍率 `1 + scale×0.10`（`enemy.js:69,:77-78`）；经验包按当前需求的 20% 兜底（`powerup.js:16-22`）。
+> 到 20 级需 23,119 经验 ≈ 2,890 只 small（未计奖励倍率），中期之后单靠击杀明显推不动。
 
 ### 7.3 星尘经济
 
 | 项 | 值 | 位置 |
 |---|---|---|
-| 星尘产出 | `floor(score/400)` | `meta.js:220` |
+| 星尘产出 | `floor(score / META.stardustPerScore)`，400 分/星尘 | `meta.js:251`、`config.js:528` |
+| 新手保底 | 前 5 局每局最低 10 星尘 | `config.js:529-530` |
 | 一局 2 万分 | 50 星尘 | 推算 |
-| 复活成本 | 40 星尘/局（限 1 次） | `config.js:360`、`game.js:255` |
-| 商店成本增长 | `baseCost × 1.6^owned` | `config.js:236-238` |
+| 复活成本 | 40 星尘/局（限 1 次） | `config.js:531`、`game.js:285` |
+| 商店成本增长 | `round(baseCost × 1.6^owned)` | `config.js:285`（增长注释 `config.js:283`） |
 | 单件满级（5 级） | 150+240+384+614+983 = **2,371** | 推算 |
-| 9 件商店全满 | **14,198** | 推算（逐件按 `round(baseCost×1.6^n)` 求和） |
-| 全成就奖励 | **2,950** 星尘 | `config.js:388-401` 求和 |
-| 每日任务全清 | **20**/天 | `config.js:404-410` 求和 |
-| 飞机售价 | 500 / 500 / 800 / 1000 / 1200 | `config.js:361-368` |
-| 天赋总成本 | 100+200+150+200+100+200+250+150+100+150+300+200 = **2,100** | `config.js:369-382` 求和 |
+| 9 件商店全满 | **14,198** | 推算（逐件按 `round(baseCost×1.6^n)` 求和，表 `config.js:271-281`） |
+| 全成就奖励 | **2,950** 星尘 | `config.js:559-572` 求和 |
+| 每日任务全清 | **20**/天 | `config.js:575-581` 求和 |
+| 飞机售价 | 500 / 500 / 800 / 1000 / 1200 | `config.js:532-538` |
+| 天赋总成本 | **2,100** | `config.js:540-552` 求和 |
 
 > 经济断点：按一局 2 万分 ≈ 50 星尘，商店 9 件全满约需 **260~300 局**（不含飞机与天赋），元进程满级周期极长。
 
@@ -352,14 +379,14 @@
 
 | # | 断点 | 证据 |
 |---|---|---|
-| 1 | **玩家难度等级 14 级封顶，敌方等级可到 99** | `config.js:289` vs `:113`；58,500 分后玩家侧停止成长，敌方继续变强 |
-| 2 | **敌方开火加速在高等级变负** | `enemy.js:81` 乘数 `1 + scale×(-0.03)`；scale>33.3（E≈34，约 198,000 分）后为负 → 新敌机首射延迟 ≤0 |
-| 3 | **敌方等级 HP 在 30 级后减半成长** | `config.js:114` `softCapFactor=0.5`；E>30 后每级只算 0.5 |
-| 4 | **经验需求指数增长 vs 经验来源线性** | `XP_GROWTH=1.28`（`config.js:514-515`）指数；敌机 xp 只随 scale 线性（`enemy.js:74`）→ 20 级后升级骤慢 |
-| 5 | **元进程经济陡峭** | 商店满级 14,198 星尘 vs 一局 ≈50 星尘，需 ~284 局 |
-| 6 | **madHunt 理论 22.2 波/秒被 `screenCap` 压到 0.8 波/秒** | `config.js:151` vs `:67`；P5b 实测 48 波/60s |
-| 7 | **常规满配单波 16 发中主弹仅 4 发** | `player.js:347-349`，副武器 `reserve` 先占 12 发 |
-| 8 | **Boss 只出现 2 次（L=5、10），且类型随机** | `DIFFICULTY.bossInterval=5`（`config.js:295`）+ L 封顶 14 |
+| 1 | ~~玩家难度等级 14 封顶、敌方等级可到 99，两轨脱钩~~ **已消除** | `SCORE_AXIS`（`config.js:436-444`）把两条曲线写进同一张表；运行时敌方等级封顶 18、与玩家差 ≤4（表头意图注释 `config.js:433-435`）。180,000 分之后**两条曲线都不再增长**，这才是剩下的真断点 |
+| 2 | ~~敌方开火加速在高等级变负~~ **已钳位** | `fireMul = max(fireCdMinMul 0.25, 1 + scale×(-0.03))`（`enemy.js:87`、`config.js:128`）；且运行时 scale ≤ 17，乘数最低只到 0.49 |
+| 3 | **敌方等级 HP 在 30 级后减半成长** | `softCapLevel/softCapFactor`（`config.js:131-132`、`enemyLevelScale` `config.js:140-145`）—— 但运行时等级封顶 18，该软上限**当前永不触发**，属为未来得分轴预留的保险 |
+| 4 | **经验需求指数增长 vs 经验来源线性** | `XP_GROWTH=1.28`（`config.js:517-518`）指数；敌机 xp 只随 scale 线性（`enemy.js:77-78`）→ 20 级后升级骤慢 |
+| 5 | **元进程经济陡峭** | 商店满级 14,198 星尘 vs 一局 ≈50 星尘，需 ~284 局（`config.js:285`、`meta.js:251`） |
+| 6 | madHunt 名义吞吐 vs 实发 | 封顶前实测 0.8 波/秒 × 140 发（`docs/perf-baseline.md` 第三节）；1b 后单波 48（`config.js:73`），`config.js:69-72` 记「5s ~13 波、峰值钉 140、吞吐 -13~32%」—— 两口径不可混用，待复算 |
+| 7 | **常规满配单波 16 发中主弹仅 4 发** | `js/player.js:390-394`，副武器 `sideCap` 先占最多 50% 配额 |
+| 8 | **默认模式的编排为零** | 战役数据/校验/加载/弹幕词汇表都在（4.2），但默认开局不加载战役（`game.js:1460-1462`，`campaignRunner = null` 时无编排），玩家需主动点「战役模式」（`js/ui/menus.js:230-249`） |
 
 ---
 
@@ -367,46 +394,61 @@
 
 ### 9.1 数值孤岛（定义但无消费点）
 
+> 本表 2026-11-07 版有**两行是假的**（`fireInterval`、`baseDmg`），已由主持人复核并删除，理由见附 A-1；
+> 另有「`power` 上限 4 硬编码」一行也随 `PLAYER.maxPower` 的引入失效。
+> 其余行的独立复核由 OpenCode 负责，本节只陈述我逐条 grep 到的消费点。
+
 | 字段 | 位置 | 证据 |
 |---|---|---|
-| `BULLET.baseDmg = 1` | `config.js:70` | `BULLET.baseDmg` / `BCFG.baseDmg` 全仓引用 **0 次**；玩家伤害从 `player.js:269` 的硬编码 `1 + dmgLv` 起算 |
-| `PLAYER_BASE.fireInterval = 0.16` | `config.js:49` | `calcFireRate` 用 0.56 字面量（`config.js:153`），此字段无人读取 |
-| `ENEMY_LEVEL.softCapLevel/softCapFactor` 的外部键 | `config.js:114-115` | 仅 `config.js:123-128` 内部裸名使用，属内部实现，非孤岛（列此说明已核对） |
-| `Boss.phases[].shieldGens` | `wave.js:99-101` | 只在 `spawnBoss` 映射成 `shieldHp` 数值（`wave.js:141`），无独立护盾发生器实体 |
-| `player.js` 的 `ORBIT_GROW_INTERVAL=30 / ORBIT_MAX_BASE=0` | `player.js:162-163` | 注释称「无技能时每 30 秒增长一颗」，但 `maxOrbit = (guard>0?1:0) + guard`，无技能时恒为 0，该增长路径永不执行（死配置） |
-| `power` 道具上限 `4` | `powerup.js:83` | `Math.min(4, ...)` 硬编码，未读 `SKILLS` 或配置；天赋「起始武器等级+1」也无法突破 |
+| ~~`BULLET.baseDmg`~~ | `config.js:81` | **不是孤岛**：`js/player.js:293` 的 `calcPlayerBaseDmg` 读它，是玩家伤害与 nova 伤害的共同起点 |
+| ~~`PLAYER_BASE.fireInterval`~~ | `config.js:49` | **不是孤岛**：值就是 0.56，`calcFireRate` 在 `config.js:170` 直接读它 |
+| ~~`power` 道具上限 4~~ | `config.js:521` | **不再是硬编码**：`powerup.js:79` 改为 `Math.min(PLAYER.maxPower, …)` |
+| `ENEMY_LEVEL.softCapLevel/softCapFactor` 的外部键 | `config.js:131-132` | 仅 `config.js:140-145` 内部使用，属内部实现，非孤岛（列此说明已核对） |
+| `Boss.phases[].shieldGens` | `js/wave.js:95-97` | 有消费点两处：`js/wave.js:137`（首阶段 → `shieldHp`）与 `game.js:1041`（切相位重赋值）；缺的是「独立护盾发生器实体」，不是字段本身死掉 |
+| `player.js` 的 `ORBIT_GROW_INTERVAL=30` | `js/player.js:190` | **成立**：`maxOrbit = (guard>0?1:0) + guard`（`js/player.js:224`），无护体技能时恒为 0，`js/player.js:231-241` 的增长分支永不进入；注释「有护体技能时每 30 秒增长一颗」与实际「30 - guard×4」的动态间隔（`js/player.js:233`）合写在一起，容易读成「无技能也长」 |
 
 ### 9.2 配置与实现漂移
 
-| 问题 | 配置 | 实现 | 位置 |
-|---|---|---|---|
-| **飞机 fireRate 语义与描述相反** | blaze「高射速」`fireRate:1.3` | `fireRateMul *= 1.3` 使射击**间隔** +30%（更慢）；ironwall「高血量」`fireRate:0.8` 反而更快 | `config.js:363-364`、`player.js:24`、`config.js:148-154` |
-| **敌机 fireCd 部分失效** | laser [2.5,3.5]、shield [3,4]、split [3.5,5] | `getEnemyShooters` 对 shield 硬编码 3.5、split 走 else 的 `rand(4,6)`、laser 走独立 `rand(2.4,3.6)` | `enemy.js:183,190`、`config.js:176-178` |
-| **暴击基础倍率注释与配置不符** | `critMulti: 1.5` | `bullet.js:93-94` 注释写「基础 2.5 + 每级 0.5」 | `config.js:72`、`bullet.js:93-96` |
-| **敌方等级注释过时** | `scorePerLevel=6000`、`maxLevel=99` | 注释写「每 8000 分升 1 级，上限 30」 | `game.js:428`、`config.js:109,113` |
-| **`power` 道具上限 4 与 `PLAYER.power` 初始值** | 上限 4 | 天赋「起始武器等级+1」可让初始 power=2，但道具仍按 `min(4, +1)` 封顶，天赋不会突破 4 | `powerup.js:83`、`player.js:72` |
+| 问题 | 状态 | 位置 |
+|---|---|---|
+| 飞机 `fireRate` 语义与描述相反 | **已修**：blaze「高射速」现为 `fireRate: 0.8`（间隔 ×0.8 = 更快），ironwall 为 `1.2`（更慢） | `config.js:534-535`、倍率入口 `js/player.js:24` |
+| 敌机 `fireCd` 三型被硬编码覆盖 | **主体已修**：复射与首射同源读表（`enemy.js:203-204`，附修复理由注释 `enemy.js:201-202`）。**残留**：laser 复射仍走独立字面量 `rand(2.4, 3.6)`，与表值 `[2.5, 3.5]` 不一致 | `enemy.js:193` vs `config.js:209` |
+| 暴击基础倍率注释与配置不符 | **仍在**：`bullet.js:124` 注释写「基础 1.5 + 每级 0.5 + buff 0.5」已与 `critMulti: 1.5` 一致；旧版「注释写 2.5」的错配在早期提交中被顺手改掉，本文按当前文本记录 | `config.js:83`、`bullet.js:124-127` |
+| 敌方等级注释过时 | **已随 `SCORE_AXIS` 重写**：`ENEMY_LEVEL.maxLevel=99` 现明确标注为「理论上限，运行时由得分轴封顶 18」 | `config.js:130`、`config.js:433-435` |
+| `screenCap` 注释称「同屏硬上限」 | **已修**：改为「单轮发射闸」，并写明分裂碎片不经此闸、峰值可能超过它 | `config.js:74-76`、闸门 `game.js:405`、旁路 `bullet.js:224-235` |
 
 ---
 
 ## 十、现状设计短板清单（仅基于上述数字）
 
-1. **无关卡结构**：只有无限波次 + 三类周期事件；敌机类型由难度等级决定，同等级内均匀随机（`enemy.js:59`），没有编队、主题、教学或阶段目标。
-2. **两条难度曲线不同步**：玩家难度等级 14 级封顶（58,500 分），敌方等级通向 99 级（588,000 分）；后期只剩敌人在变强。
-3. **敌机成长公式存在负数区间**：`1 + scale×(-0.03)` 在 E≈34 后为负，开火冷却变成负值（`enemy.js:81`）。
-4. **Boss 数量与编排严重不足**：全程只有 L=5、10 两次，类型随机，没有章节化的 Boss 梯度（`game.js:437-440`）。
-5. **常规满配的弹道被副武器挤占**：`waveCap=16` 下主弹只剩 4 发，玩家的「主武器成长」在高配时反而被副武器稀释（`player.js:347-349`）。
-6. **madHunt 与常规模式量级不可比**：单波 140 发 / 总伤 3300，是常规满配（16 发 / 228 伤）的 ~14 倍，但被 `screenCap` 限速到 0.8 波/秒（`config.js:67,151`）。
-7. **道具强度断层**：`madHunt` 权重最低（3/132）却是量级最高的爆发；`power` 权重最高但只到 4 级；缺乏中间档位的稀有度分层（`config.js:211-220`）。
-8. **经验曲线 20 级后陡峭**：需求 ×1.28^n 指数增长，而经验来源线性；升级节奏在中期断崖式放缓（`config.js:514-515`、`game.js:1204`）。
-9. **元进程回收周期过长**：商店满级 14,198 星尘 vs 一局 ≈50，需 ~284 局（`config.js:236-238`、`meta.js:220`）。
-10. **配置字段与实现脱钩**：`BULLET.baseDmg`、`PLAYER_BASE.fireInterval` 无人读取；敌机 `fireCd` 三型被硬编码覆盖；飞机 `fireRate` 语义与描述相反（见 9.1/9.2）。
-11. **玩家判定半径双份定义**：`PLAYER_BASE.radius=18` 与 `PLAYER.hitRadius=20` 并存，改一处不改另一处会产生「看起来擦过却被击中」的错觉（`config.js:46,352`）。
-12. **护体弹/副武器等系统缺少统一的「值」抽象**：轨道半径、重生时间、增长间隔等散落在 `player.js:159-164`，未进 `config.js`，与主配置体系割裂。
+1. **编排已建但未默认**：战役（6 关 × 5 beat、beat 级密度预算、7 种弹幕词汇）已数据化，可默认模式仍是「无限波次 + 三类周期事件」，不点战役按钮就碰不到关卡曲线（4.2、断点 8）。
+2. **得分轴 180,000 分后完全封顶**：两条曲线都不再增长（`config.js:443`），后期只剩「同屏数量与道具随机」在撑难度，没有新的数值压力来源。
+3. ~~敌机成长公式存在负数区间~~ → 已被 `fireCdMinMul` 钳位（第九节）。
+4. **默认模式 Boss 仍只有 L=5、10 两次且类型随机**（`config.js:425`、`game.js:557`）；章节化的 Boss 梯度只存在于战役数据里。
+5. **常规满配的弹道被副武器挤占**：`waveCap=16` 下主弹只剩 4 发（`js/player.js:390-394`）。
+6. **madHunt 与常规模式量级不可比**：单波 48 / 单波伤害 ≈1,130（封顶后），仍是常规满配（16 发 / 228 伤）的数倍；且其吞吐口径目前只有代码注释的实测值，缺一次同版本复算（断点 6）。
+7. **道具强度断层**：`madHunt` 权重最低（3/129 ≈ 2.3%）却是量级最高的爆发；`power` 权重最高但只到 4 级（`config.js:521`）；缺乏中间稀有度分层。
+8. **经验曲线 20 级后陡峭**：需求 ×1.28^n 指数 vs 来源线性（`config.js:517-518`、`game.js:1207`）。
+9. **元进程回收周期过长**：商店满级 14,198 星尘 vs 一局 ≈50（`config.js:285`、`meta.js:251`）。
+10. ~~配置字段与实现脱钩（baseDmg / fireInterval / fireCd / fireRate）~~ → 大部分已单一真源化；**残留**：laser 复射仍吃独立字面量（`enemy.js:193`）。
+11. **玩家判定半径双份定义**：`PLAYER_BASE.radius=18`（`config.js:46`）与 `PLAYER.hitRadius=20`（`config.js:520`）并存，改一处不改另一处会产生「看起来擦过却被击中」的错觉。
+12. **护体弹/副武器等系统缺少统一的「值」抽象**：轨道半径、重生时间、增长间隔仍在 `js/player.js:187-191`，未进 `config.js`，与主配置体系割裂；且 `ORBIT_GROW_INTERVAL` 那条增长路径恒不执行（9.1）。
 
 ---
 
-## 附：本次盘点中新增的可复现证据
+## 附 A：本次复核撤回的旧论断（都是「代码前进、纸面落后」，非 Phase-1 引入）
 
-- madHunt 满技能单波 140 发、名义 22.2 波/秒、实测 0.8 波/秒：见 `docs/perf-baseline.md` 与 `tools/perf/bench.mjs`。
-- 敌机开火乘数负数：`enemy.js:81` 的 `1 + scale * ENEMY_LEVEL.fireCdPerLevel`，`scale` 最大 63.5。
-- 飞机 fireRate 语义：`player.js:24` 把 `fireRate` 直接乘进「间隔倍率」，与 `blaze.desc="高射速"` 矛盾。
+| # | 旧论文本（2026-11-07 版） | 现状 | 证据 |
+|---|---|---|---|
+| A-1 | `BULLET.baseDmg`「全仓引用 0 次、玩家伤害从硬编码 `1 + dmgLv` 起算」；`PLAYER_BASE.fireInterval = 0.16` 且「`calcFireRate` 用 0.56 字面量、此字段无人读取」 | **两条都错，且方向是反的**：把两个活的单一真源说成死配置，比数字过时更危险 | `fireInterval: 0.56` 在 `config.js:49`，被 `config.js:170` 读；`BULLET.baseDmg` 在 `config.js:81`，被 `js/player.js:293` 读 |
+| A-2 | 「`power` 道具上限 4 硬编码，未读 `SKILLS` 或配置」 | 已单一真源到 `PLAYER.maxPower` | `powerup.js:79` ← `config.js:521` |
+| A-3 | 「没有关卡/章节数据结构，只有无限波次」；「玩家 14 级封顶、敌方涨到 99，两轨脱钩」；「开火乘数在 E≈34 后变负」 | 全部作废：战役数据层与运行时已落地；两轨合并为 `SCORE_AXIS`；乘数被钳在 0.25 | 4.2、`config.js:436-444`、`enemy.js:87` |
+| A-4 | 「madHunt 满配单波 140、恰好等于 screenCap」 | 1b 已封顶到 48（跨采样截断，保留角度覆盖），且 buff 时长 8s → 5s | `config.js:73`、`js/player.js:327-336`、`config.js:237` |
+| A-5 | 道具权重表 freeze 6/7、speed 5/5，总和 132/128 | 实为 freeze 3/3、speed 5/6，总和 **129/124**（原为加总错误） | `config.js:259-268` |
+| A-6 | 「`shieldGens` 只在 `spawnBoss` 映射成数值，无消费点」 | 切相位还会重赋值 | `js/wave.js:137`、`game.js:1041` |
+
+## 附 B：本次复核中**由我自己撤回的测量类结论**（在 `docs/perf-baseline.md` 有对应记录）
+
+- ④ 弧长分离比旧读数 **1.008~1.014 / 1.163~1.264 作废**：探针弹被对象池复用污染（`bullet.js:20` 的 `allocBullet` 只 `pool.pop()`，身份不是稳定句柄）。干净读数为 **1.002（斜靶）/ 1.037（直角靶）/ 1.143（130° 反打靶）**，已在 `12aec58` 写进 `game.js:340` 的开发注释。
+- 「一次 `addXp` 闸门故障 = 多 3 条命 + 多 3 次三选一重 roll」**未复现**：实测是多 3 道新星环，只有完整修复前形状多 1 条命，重 roll 在 0 帧窗内不可测 → 不裁定。详见 `docs/gameplay-final-plan.md` §6 Phase-1 行与 `docs/perf-baseline.md` 7.1/7.3。
+- 我口头汇报过的「① 同屏友方弹峰值 **143 > screenCap 140**」**撤回**：留档输出里不存在这个数（`docs/perf-baseline.md` 7.2 记的是 138 / 140，两臂都没破 140）。该数被裁定 G 与「分裂碎片绕过发射闸」的论证引用过，**以撤回为准**；`screenCap` 是发射闸（`game.js:405`）、分裂碎片不经它（`bullet.js:224-235`）这一点仍成立，但「实测破闸」没有证据，要判得先加同帧直读（`docs/perf-baseline.md` 7.8 R4）。

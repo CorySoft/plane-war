@@ -1,7 +1,7 @@
 # plane_war 性能基线报告（P5 / P5b）
 
 - 测量日期：2026-11-07
-- 环境：Node v24.22.2 / V8、Linux x86_64、`--expose-gc`
+- 环境：Node v24.22.2 / V8、Linux **arm64**（订正：本文原写 `x86_64`，与当前复测机 `node -p process.arch` = `arm64` 不符；§一~§四 的 P5 微基准若在别的机器上跑过，绝对值不可跨机比，比值与计数才可比）、`--expose-gc`
 - 脚本：`tools/perf/bench.mjs`（可重复执行，见文末命令）
 - 状态：**P5b 两项优化已落地**，本文同时保留「优化前」与「优化后」数字
 - 原则：只优化 `js/game.js`，未触碰 `js/ui.js` 等其他渲染文件
@@ -142,9 +142,14 @@ node --expose-gc tools/perf/bench.mjs
 
 ## 七、Phase-1 六技能带 seed 运行期基线
 
-- 量具：`tools/perf/phase1-baseline.mjs`（LCG 播种，`SEED` / `SWEEP` / `WALL` 三个环境变量）
-- 被测版本：`3557386`（= `85740c5` 修复批次 + 衰减单源/续命观测口）
-- seed 家族：`SEED + i×7919`，i=0..11，默认 `SEED=20261108`；每个 seed 在跑之前独立重播种
+- 量具：`tools/perf/phase1-baseline.mjs`（LCG 可重播种；三个环境变量 `SEED`:19 / `SWEEP`:27 / `WALL`:28）
+- **seed 扫描模式（`e91039e` 引入，本节的分布类读数全部出自它）**：`SWEEP=N` 时用
+  `sweepSeeds(n) = (SEED + i×7919) >>> 0, i=0..n-1`（`tools/perf/phase1-baseline.mjs:29`）造一串可复现种子，
+  **同进程内逐个 `reseed()` 重跑**（`:22`，重播种比开多进程省启动成本）；默认 `SEED=20261108`，本节 12 seeds 即
+  `20261108, 20274027, …` 这 12 个整数。`SWEEP>1` 才追加 ③-b 分布与 ③-c 长窗两组（`:458`），
+  长窗秒数 = `WALL/60`（默认 9000 帧 = 150s）。随机性只来自被替换的 `Math.random`（`:23`，乘子 1664525 的数值型 LCG）。
+- 被测版本：`3557386`（= `85740c5` 修复批次 + 衰减单源/续命观测口）。**HEAD 已前进到 `12aec58`（regen/nova 文案与注释、
+  续命计数拆分落地），本节读数不是新 HEAD 的读数** → 复算项集中记在 7.8，先记不跑。
 - 口径纪律：**无 seed 不出数值判决**。单 seed 读数只用来点验机制「能不能触发」；凡「A 比 B 高/低」的
   结论必须给分布（min/median/max），分布重叠就不写结论。本节只报数，不改 `js/**`。
 
@@ -171,7 +176,11 @@ node --expose-gc tools/perf/bench.mjs
   三选一重 roll 在这个 0 帧窗内不可测（四臂 `处理过的升级事件` 都是 0，LEVELUP 面板来不及开），
   因此**不做裁定**，要判就得在有帧流的窗里数 `levelUpsHandled` 与 `等级增量` 的差。
 - 等级 +4 与闸门无关，是经验算术本身：40 次击杀的经验在同帧内重入 `addXp`，
-  每次重入仍会做一次 `pLevel++`（闸门只挡 `doLevelUp` 与 `emitNova`）。
+  每次重入仍会做一次 `pLevel++`（`js/game.js:1205`，闸门 `js/game.js:1210-1211` 只挡 `doLevelUp` 与 `emitNova`）。
+  **这一条的定性要说准（旧债修正，不记成 Phase-1 引入）**：残留的是**等级虚增**——同帧跨多次阈值时
+  等级数字涨 4~5 格，而三选一面板与送命只给 1 次（`js/game.js:1212-1214` 的注释自陈「实测一次升级被放大成 4~5 次」，
+  与本表 +4 同量级）。回归护栏 `test/skills-phase1.test.mjs:197-217` 断言的是**环数=1**（`:213`）与**生命=+1**（`:214`），
+  `:215` 只要求 `p.level > level0`，**没有断言等级增量上限**，所以「等级跑得比面板快」这件事目前不在任何护栏覆盖内。
 
 ### 7.2 ① 同屏友方子弹峰值（homing 开 / 关）
 
@@ -182,6 +191,13 @@ node --expose-gc tools/perf/bench.mjs
 
 → 关闭 2026-11-08 的遗留问「homing 会不会把同屏子弹数推高」：峰值差 2 发，两臂都撞在 140 上限，
 `screenCap` 才是约束，homing 不额外造弹。单 seed，但差值小于 cap 抖动，**不据此立数值判决**，只作排除项。
+
+- **撤回一条口头汇报**：我在群里报过「① 同屏友方弹峰值 143 > `screenCap` 140」——**这个数在任何一份留档输出里都不存在**
+  （`grep -rn "143" docs/*.md` 只命中 7.5 的弧长比 1.143，与本项无关）。留档峰值就是上表的 **138 / 140**，
+  没有超过 140 的证据。该数字曾被引用于裁定 G 与 OpenCode 的任务 (a)，**以本条为准作废**。
+  顺带把口径钉住：`screenCap=140` 是**每轮发射闸门** `friendlyCount + patterns.length <= BCFG.screenCap`
+  （`js/game.js:405`），不是「同屏硬上限」——分裂碎片走 `bullet.js:224-235` 的旁路不经此闸，
+  所以「观测值 > 140」在原理上可能发生，但**本项没测到**，要判得先加一条同帧 `friendlyBullets.length` 直读。
 
 ### 7.3 ③ 60 秒存活：12 seeds 分布
 
@@ -198,11 +214,14 @@ node --expose-gc tools/perf/bench.mjs
 - 阵亡次数满级组反而更高（median 8 vs 5.5、max 16 vs 14）：它靠 regen / secondWind / 升级送命
   把局续住，不是死得少。这两格要一起读，单看任一格都会读反。
 - 逐帧 `复活次数_逐帧下界` 是**下界**：secondWind 的续命在 `hitPlayer()` 内部完成（命 1→1），
-  帧采样看不见。真值走只读观测口 `getReviveStats()`（`js/game.js:2187`），表中 `续命次数_api` 用它。
-- **但 `revives` 不能归因给 secondWind**：`reviveCount` 在两条路径各 +1 —— 技能复活
-  （`js/game.js:1291`）与付费复活 `doRevive`（`:1345`），一局内每 12 个 seed 里
-  基线组（secondWind=0）也出现过 2 次 `revives=1`。→ 这个观测口是「本局续过几次命」，
-  不是「secondWind 生效了几次」；要判 secondWind 的触发次数需要把两条路径分开计数（本轮我不碰 `js/**`，已报主持人）。
+  帧采样看不见。真值走只读观测口 `getReviveStats()`（`js/game.js:2194`），表中 `续命次数_api` 用它。
+- **`revives` 曾不能归因给 secondWind，现已拆开（`3557386`）**：原口径缺陷是 `reviveCount` 在两条路径各 +1 ——
+  技能复活（现 `js/game.js:1297` `secondWindRevives++`）与付费复活 `doRevive`（现 `js/game.js:1351` `paidRevives++`），
+  一局内每 12 个 seed 里基线组（secondWind=0）也出现过 2 次 `revives=1` → 旧观测口只回答「本局续过几次命」。
+  现在两条路径各自计数，`getReviveStats()` 返回 `{reviveUsed, secondWindRevives, paidRevives}`
+  （声明 `js/game.js:163-164`、每局清零 `js/game.js:1423-1424`），断言在 `test/skills-phase1.test.mjs:238`。
+  **注意：本节 7.3 表里的 `续命次数_api` 仍是在拆分前测的**，用的是拆分前语义；要在 `12aec58` 上给 secondWind
+  触发次数下结论，必须按 7.8 复跑。
 
 ### 7.4 ③-c 长窗探针：满级构筑 150 秒 × 5 seeds
 
@@ -215,7 +234,7 @@ node --expose-gc tools/perf/bench.mjs
 ### 7.5 ④ homing 弧长 vs 直线位移
 
 `traveled` 是逐帧 `hypot` 累加的**弧长**（`js/bullet.js:389`），而有效射程 `maxRange` 与再射闸门
-`refireGateDistance(fireRate)=54px`（`js/config.js:150`）都以它为尺度。静场排空后再放靶机、
+`refireGateDistance(fireRate)=54px`（实参 `fireRate=0.3`，`js/config.js:152-156`；量具读数在 `tools/perf/phase1-baseline.mjs:452`）都以它为尺度。静场排空后再放靶机、
 用 uid 锁定靶位，三种几何：
 
 | 靶位 | homing=0 基准自检 | homing=5 弧长/位移 | 终点与靶机偏差 |
@@ -231,8 +250,21 @@ node --expose-gc tools/perf/bench.mjs
   现在量具有三道防线：① 静场（玩家与敌机 `fireCd` 每帧钉 999）排空残弹 →
   ② 排空**之后**再放靶机（先放会被关卡在排空期清掉，于是测成「没拐弯」的 1.001）→
   ③ 三条自检：`traveled` 单调不减、`maxRange` 不变、homing=0 必须 ≡1.000。
-- `js/game.js:339-340` 的开发者注释目前引的是被撤回的那组数（1.163~1.264），
-  应改为 1.002 / 1.037 / 1.143（本轮我不碰 `js/**`，已报主持人）。
+- **量具自检规范（本节事故换来的固定要求，不是可选优化）**：**探针弹必须与被测弹「对象身份可区分」**。
+  弹池 `allocBullet()` 只做 `pool.pop()`（`js/bullet.js:20-21`，字段由调用方赋初值）、`freeBullet()` 会原地把
+  `traveled` 清零（`js/bullet.js:76`），所以「我手里这个对象还是不是那一发」在弹池里是**会静默失效的假设**。
+  现行量具已做到哪一步（逐条对码，`tools/perf/phase1-baseline.mjs`）：
+  ① 每帧 `game().bullets.includes(b)` 才继续采样（`:417`）→ ② `maxRange` 恒定 + `traveled` 单调不减才算有效
+  （`:419`）→ ③ `homing=0` 必须 弧长≡位移（`:444-446`）→ ④ 一旦判为复用，比值报 `null` 而不是把来路不明的数
+  写进基线（`:433`）。**残留缺口**：① 只看「在不在活弹列表」，若探针在同一帧间隙里被回收又立刻被
+  `allocBullet()` 借走，它会**带着新的 `traveled` 重新出现在列表里**，此时只有 ② 的单调性能兜住；
+  要把身份做成硬约束，需要给探针挂一个 `freeBullet` 不复位的标记字段（`_synthetic` 就是这个思路的现成先例：
+  合成弹不回真实池，`js/bullet.js:73-74`），每帧校验 `b._probeTag === 本轮标识`，
+  **不匹配就整条丢弃该 seed，而不是取平均、也不是只把一格填 null**。
+- **闭环记录**：上一版此处写「`js/game.js:339-340` 的开发者注释仍引被撤回的 1.163~1.264，应改为
+  1.002 / 1.037 / 1.143（本轮我不碰 `js/**`）」——该旧债**已在 `12aec58` 落地**：注释现在写的是干净三值
+  （`js/game.js:340-341`）并显式标注旧值作废（`js/game.js:342`「旧值 1.163~1.264 系探针弹被对象池复用污染所致，
+  已撤回，不要再引用」）。本节的 1.163~1.264 因此只在本页作为「作废读数」存在，代码侧不再有引用。
 - 口径结论：最坏几何（≈130° 反打）下弧长膨胀 ≈14%，**够不到 20%，但也不是「1% 可忽略」**。
   受影响的是以 `traveled` 为尺度的判定（再射闸门 54px、有效射程），这是口径不是缺陷。
 
@@ -240,13 +272,17 @@ node --expose-gc tools/perf/bench.mjs
 
 | 项 | 读数 | 期望/理论 | 位置 |
 |---|---|---|---|
-| regen lvl5 · 1 秒 | `_regenAccum` 0.2505 | 0.05×5 = 0.25 | `js/game.js:461`、`js/config.js:328` |
-| regen lvl5 · 每命耗时 | 4.00 s | 4 s | 同上（用 `_regenAccum` 不用 `lives`：同帧升级也 +1 命，两者分不开） |
-| overload lvl5 · hpRatio 1/3 | 间隔 0.264 → 0.165 = **×1.600** | `(1-ratio)×0.18×5` | `js/config.js:171-176` |
+| regen lvl5 · 1 秒 | `_regenAccum` 0.2505 | 0.05×5 = 0.25 | `js/game.js:463-467`、`js/config.js:331` |
+| regen lvl5 · 每命耗时 | 4.00 s | 4 s | 同上（用 `_regenAccum` 不用 `lives`：同帧升级也 +1 命，两者分不开） || overload lvl5 · hpRatio 1/3 | 间隔 0.264 → 0.165 = **×1.600** | `(1-ratio)×0.18×5` | `js/config.js:173-177` |
 | overload lvl5 · hpRatio 1/7（maxLives 7） | **×1.771** | 注释写 ×1.77 | 同上 |
-| secondWind lvl1 · 一次确定性命中 | 命 1→1、状态仍 `PLAYING`(1) | 本局免费复活 1 次 | `js/game.js:1288-1292` |
+| secondWind lvl1 · 一次确定性命中 | 命 1→1、状态仍 `PLAYING`(1) | 本局免费复活 1 次 | `js/game.js:1294-1298` |
 | 对照（无 secondWind） | 命 1→0 | — | 同上 |
-| chain | **本量具不测**（同屏自身弹幕无法与技能弹幕隔离） | — | 性质由单测覆盖：`test/skills-phase1.test.mjs:169` |
+| chain | **本量具不测**（同屏自身弹幕无法与技能弹幕隔离） | — | 性质由单测覆盖：`test/skills-phase1.test.mjs:170` |
+
+> **本表前两行是 `REGEN_RATE=0.05` 时代的读数**（0.2505 ≈ 0.05×5、每命 4.00s）。现值已降到 **0.03**
+> （`js/config.js:331`，不变量注释在 `js/config.js:329-330`），按定义应是 1 秒累计 0.15、静场每命 6.67s；
+> 且累计被 `player.invincible <= 0` 这道闸挡死（`js/game.js:463`：受击后 2.2s 无敌帧内 `_regenAccum` 不涨），
+> 所以**真实每命耗时会显著长于 6.67s，长多少只能测、不能推**。→ 列为 7.8 第 1 项，本轮不动手。
 
 ### 7.7 复现
 
@@ -264,3 +300,22 @@ node tools/perf/phase1-baseline.mjs 4                          # ④ 弧长口�
 - 已知未解项：静场 150 帧后仍有 16 发友方弹不消失（④ 表的 `发射时残余友方弹` 字段可见），
   疑与「在飞弹再射闸门」在 `screenCap=140` 满员时堵死有关。本节读数不受影响
   （三条自检全绿、命中点与给定靶位偏差 ≤49px），但**成因待查**，别把它当成「排空成功」。
+
+### 7.8 待办复测清单（**本轮只登记，不跑**）
+
+主持人 2026-11-12 派工原话：**「待 codearts 落地后再做」**、**「不要在 `js/` 未改时先跑并把旧数当结论」**。
+下面四项全部**以「被测机制的 `js/**` 已定稿」为触发条件**；在那之前跑出来的数只能算「HEAD `12aec58` 的快照」，
+不许覆盖 7.1~7.6 的表，也不许拿去回答任何平衡裁定。每项都写清**为什么要复**、**跑什么命令**、**读数落在哪一格**、
+**什么情况下仍然不下结论**。
+
+| # | 待复项 | 为什么必须复 | 命令 / 需要的量具改动 | 触发条件 |
+|---|---|---|---|---|
+| R1 | **regen @ `REGEN_RATE=0.03` 的稳态回血**：1 秒累计、静场每命耗时、**受击 2.2s 无敌帧内不累计的实际抵扣** | 7.6 前两行是 0.05 时代的读数（0.2505 / 4.00s）；现值 0.03（`js/config.js:331`）+ 无敌帧闸门（`js/game.js:463`）会让「每命耗时」显著长于推算的 6.67s。主持人对「regen 是否支配存活」的裁定要的是**受击节奏下的实测速率**，不是无伤窗的理论值 | `node tools/perf/phase1-baseline.mjs 3`（`机制点验.regen` 已用 `cfg.REGEN_RATE` 现算，无需改码）；**新增**：在同一个 arm 里并行记 `_regenAccum` 增量与 `player.invincible > 0` 的帧数占比，才能把「无敌帧吃掉多少回血」量化 | regen / 无敌帧 / `maxLives` 三者任一在本轮 `js/` 批次里再动 |
+| R2 | **nova 新星环频率（环/分钟）**：60 秒窗内满级构筑实际放出多少环 | 这是回答「**nova 会不会变成主导伤害引擎**」的**必需读数**，而 7.1~7.4 都没有直接读 `fxRings`。现有唯一相关量是等级增量（满级组 median **13 / 60s**，`docs/perf-baseline.md` 7.3），闸门保证「每帧最多 1 环」（`js/game.js:1210-1215`），所以只能得到**上界 ≈13 环/分钟**——上界不是结论，实际值取决于有多少次升级跨在同一帧内 | 需在 `runArm3` 增记 `getFxCounts().rings` 的窗内增量与「环数 / 等级增量」比值（改动落 `tools/perf/phase1-baseline.mjs:230-262`，属我的职责范围，量具改动与复测分开提交）；跑法仍是 `SWEEP=12 node tools/perf/phase1-baseline.mjs 3` | 7.3 的 12 seeds 分布一旦在新 HEAD 上重跑就顺带产出；**若只拿到环数、没有同窗的单环伤害期望（`js/game.js:1223-1227` 随主弹成长），仍不许写「主导/不主导」**，要同时给 环/分钟 × 单环伤害 与主弹 DPS 的占比 |
+| R3 | **④ 弧长比在干净口径下复跑**（现值 1.002 / 1.037 / 1.143） | 这三个数本身是在 `3557386` 上测的；`js/game.js:336-342` 的注释已经把它们写进代码，一旦 `traveled` / `refireGateDistance` / homing 转向系数（`js/game.js:343`）任何一处再改，注释就会变成**代码里的错数**——这类错最贵，因为下一个人会当权威引用 | `node tools/perf/phase1-baseline.mjs 4`；若 7.5「量具自检规范」里的身份字段已加进量具，则同时验证「同帧回收」路径不再静默通过 | `traveled`、`refireGateDistance`（`js/config.js:152-157`）、homing 转向（`js/game.js:343`）任一变更 |
+| R4 | **① 同屏友方弹峰值复跑**（现值 138 / 140，单 seed） | 7.2 只是**排除项**（单 seed、差值 < cap 抖动），且我已撤回口头报过的「143」。`screenCap` 是发射闸而非硬上限（`js/game.js:405`），分裂碎片走旁路（`js/bullet.js:224-235`）——**旁路能顶到多高从来没测过**，这才是「140 是不是真上限」的正面回答 | `node tools/perf/phase1-baseline.mjs 1`，并把读数从 `friendlyCount()` 改成同时记 `game().bullets.filter(b=>b.friendly).length` 的**同帧直读**与分裂碎片计数；建议顺手推到 `SWEEP=12` 出分布 | `BULLET.screenCap` / `waveCap` / `madHuntWaveCap` / 分裂逻辑任一变更，或主持人要「同屏压力」结论时 |
+
+- **登记纪律**：本表每项完成后，把数写回对应小节（R1→7.6、R2→新增 7.9、R3→7.5、R4→7.2），并**在本表该行标「已复 @ `<commit>`」**；
+  没标 commit 的复测数一律视为草稿。
+- **R2 需要的量具改动是 `tools/perf/` 内动作**，不需要等 `js/`；本轮我同样不动它，目的是让「加读数」和「出数」
+  分成两个可独立复核的提交，避免又一次把旧窗口的数当新结论。
