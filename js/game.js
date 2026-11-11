@@ -22,7 +22,7 @@ import {
 } from "./enemy.js";
 import { spawnPowerup, updatePowerups, drawPowerups, clearPowerups, updateGachaAnim, drawGachaAnim, getGachaAnim, clearGachaAnim, setGachaAnim, xpPackAmount } from "./powerup.js";
 import { generateSkillChoices, applySkill, getMaxLives } from "./skill.js";
-import { createPlayer, updatePlayer, getShootPattern, drawPlayer, getOrbitBullets, removeOrbitBullet, tryLifesteal } from "./player.js";
+import { createPlayer, updatePlayer, getShootPattern, drawPlayer, getOrbitBullets, removeOrbitBullet, tryLifesteal, calcPlayerBaseDmg } from "./player.js";
 import {
   getSpawnRate, updateWaves, resetWaves,
   spawnBoss, getCurrentBossPhase, BOSS_TYPES, spawnSwarm
@@ -160,7 +160,8 @@ let campaignComplete = false;
 let tutorialTimer = 0;     // 教程剩余显示时间
 let musicStarted = false;
 let reviveUsed = false;    // 本局是否已续命过（技能复活或付费复活，二选一，每局限 1 次）
-let reviveCount = 0;       // 本局实际发生过的续命次数（只读观测用：技能复活 / 付费复活各 +1）
+let secondWindRevives = 0; // 本局「绝境逢生」实际触发次数（只读观测用）
+let paidRevives = 0;       // 本局付费复活实际触发次数（只读观测用）
 // 深空背景固定渐变缓存（基色/地平线/暗角，只依赖 W/H），必须在 loop() 启动前声明，避免 TDZ
 let spaceBgCache = { key: "", base: null, hz: null, vg: null };
 
@@ -336,8 +337,9 @@ function update(dt, realDt = dt) {
       // 疯狂追击用高转向（10），追踪弹技能按等级线性提升（lvl1≈5.2 → lvl5≈10）
       // 口径注意：拐弯弹的 traveled 是「弧长」（js/bullet.js:389 逐帧 hypot 累加），
       // 而再射闸门 refireGateDistance 与有效射程 maxRange 都以 traveled 为尺度 ——
-      // 实测近直角靶位弧长/直线位移比 1.163~1.264，即这类判定在拐弯弹上会提前 16%~26% 触发；
-      // 同角度斜靶仅 1.008~1.014（原「1% 可忽略」是几何选得太客气）。此为开发者口径，不进玩家文案。
+      // 干净读数：弧长/直线位移比 1.002（斜靶）/ 1.037（直角靶）/ 1.143（130° 反打靶），
+      // 即这类判定在拐弯弹上最多提前约 14% 触发，斜靶几乎无差异。
+      // （旧值 1.163~1.264 系探针弹被对象池复用污染所致，已撤回，不要再引用。）
       const turnX = player.buffs.madHunt > 0 ? 10 : (4 + (player.skills.homing || 0) * 1.2);
       for (const b of bullets) {
         if (!b) continue;
@@ -456,8 +458,9 @@ function update(dt, realDt = dt) {
       toast = { text: "经验包 +1 级", color: "#8ad4ff", t: 1.2 };
     }
 
-    // 生命再生：累计 fractional 生命，满 1 即 +1 命（死亡动画/满血/已死时跳过）
-    if ((player.skills.regen || 0) > 0 && lives > 0 && lives < maxLives && deathTimer <= 0) {
+    // 生命再生：累计 fractional 生命，满 1 即 +1 命（死亡动画/满血/已死时跳过）。
+    // 受击后的无敌帧（2.2s）内不累计再生：否则「打了就补回来」，与 lifesteal 叠加会让会打的玩家不可杀。
+    if ((player.skills.regen || 0) > 0 && lives > 0 && lives < maxLives && deathTimer <= 0 && player.invincible <= 0) {
       player._regenAccum = (player._regenAccum || 0) + REGEN_RATE * player.skills.regen * dt;
       if (player._regenAccum >= 1) {
         const add = Math.floor(player._regenAccum);
@@ -1218,7 +1221,10 @@ export function addXp(n) {
 /** 新星爆发：每次升级释放一道新星环，对周围敌机造成范围伤害（范围/伤害随技能等级提升） */
 function emitNova(p, lvl) {
   const radius = BCFG.novaBaseRadius + BCFG.novaRadiusPerLevel * (lvl - 1);
-  const dmg = BCFG.novaBaseDmg + BCFG.novaDmgPerLevel * (lvl - 1);
+  // 伤害随玩家主弹伤害成长（与 getShootPattern 共用 calcPlayerBaseDmg 单一真源）：
+  // 无 dmg 技能时 lvl1/2/3 精确等于 2/3/4，后期随主弹伤害同比放大，不再对中大型敌机静默失效。
+  const novaMul = BCFG.novaBaseDmg + BCFG.novaDmgPerLevel * (lvl - 1);
+  const dmg = Math.round(calcPlayerBaseDmg(p) * novaMul);
   if (fxRings.length < BCFG.fxRingsCap) {
     fxRings.push({ x: p.x, y: p.y, r0: 10, rMax: radius, life: 0.45, maxLife: 0.45, color: "#a0e8ff" });
   }
@@ -1288,7 +1294,7 @@ export function hitPlayer() {
     clearBullets(true, false);
     // 本局已续命过：技能复活也关掉付费 REVIVE 通道；同时让「凤凰涅槃」成就看见这条路径
     reviveUsed = true;
-    reviveCount++;
+    secondWindRevives++;
     showAchievementToast(checkAchievements({ runScore: score, runLevel: pLevel, runCombo: combo, reviveUsed: true }));
     toast = { text: "绝境逢生！", color: "#7CFC00", t: 1.8 };
     sfx.revive();
@@ -1342,7 +1348,7 @@ function gameOver() {
 function doRevive() {
   if (!spendStardust(META.reviveCost)) { gameOver(); return; }
   reviveUsed = true;
-  reviveCount++;
+  paidRevives++;
   lives = 1;
   player.x = W / 2;
   player.y = H - player.h / 2 - 40;
@@ -1414,7 +1420,8 @@ function resetGame() {
   newBestOnce = false;
   newBestFx = 0;
 reviveUsed = false;
-  reviveCount = 0;
+  secondWindRevives = 0;
+  paidRevives = 0;
 
   const talentFx = getTalentEffects();
   const shopFx = getShopEffects();
@@ -2183,8 +2190,8 @@ window.__game = {
     : { enabled: false, round: 0, timer: 0, awaitingBoss: false }),
   getCampaignButton,
   getMaxLives: () => maxLives, getLives: () => lives,
-  // 续命观测口（只读）：reviveUsed=本局是否已续命；revives=本局实际续命次数
-  getReviveStats: () => ({ reviveUsed, revives: reviveCount }),
+  // 续命观测口（只读）：reviveUsed=本局是否已续命；两个计数分别对应技能复活与付费复活
+  getReviveStats: () => ({ reviveUsed, secondWindRevives, paidRevives }),
   getMenuPage: getMenuPage, setMenuPage,
   get enemies() { return enemies; },
   get bullets() { return bullets; },

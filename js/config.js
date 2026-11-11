@@ -71,7 +71,9 @@ export const BULLET = {
   // 故本 cap 控制「爆发粒度」而非总密度：48 把满配 140→48，削峰并降吞吐约 13~32%，保留 360° 角度覆盖。
   // 备选 32（peak 135）/ 64（吞吐略高）在种子噪声(±12%)内分不出高下，维持 48（实测见 tools/perf/madhunt-cap-probe.mjs）。
   madHuntWaveCap: 48,
-  screenCap: 140,       // 同屏友方子弹硬上限：超过则本轮不发射（性能与画面密度兜底）
+  screenCap: 140,       // 单轮发射闸：friendlyCount + 本波 patterns.length 超过则整波不发（性能与画面密度兜底）。
+  // 注意：它不是「同屏硬上限」——分裂碎片走 spawnSplitBurst → spawnSplitBullet → pushBullet，不经过此闸，
+  // 所以同屏友方弹峰值可能超过它（峰值超限的成因在本批只做注释校正，不改闸门行为）。
   hostileScreenCap: 140, // 同屏敌方子弹独立硬上限
   hostileSpawnRateCap: 140, // 敌方全局每秒发射上限；关卡可进一步收紧
   baseRadius: 4,
@@ -314,18 +316,19 @@ export const SKILLS = [
   { id: "bulletSpeed", name: "子弹加速", desc: "弹速+15%",      fullDesc: "每级子弹飞行速度 +15%，满级 +90%",            color: "#5ee6ff", max: 6 },
   { id: "orbital",   name: "天基武器",   desc: "加速递增",       fullDesc: "子弹射出后不断加速，威力递增",                color: "#5ee6ff", max: 5 },
   // ---------- 阶段1 新增：机制型技能（6 个） ----------
-  { id: "homing",     name: "追踪弹",     desc: "子弹自动追踪",   fullDesc: "所有友方子弹自动追踪最近敌机，每级转向更灵敏，满级 5 级", color: "#5ee6ff", max: 5 },
-  { id: "nova",       name: "新星爆发",   desc: "升级释放新星",   fullDesc: "每次升级释放一道新星环，对周围敌机造成范围伤害，满级 3 级（范围与伤害提升）", color: "#ff8a55", max: 3 },
-  { id: "regen",      name: "生命再生",   desc: "持续回血",       fullDesc: "每秒按等级恢复生命，满级 5 级（约每 3 秒 1 命）", color: "#7CFC00", max: 5 },
+  { id: "homing",     name: "追踪弹",     desc: "子弹自动追踪",   fullDesc: "所有友方子弹自动追踪最近的敌机（Boss 在场时会优先打小怪）；1 级解锁追踪，2~5 级逐级提升转向灵敏度，满级 5 级", color: "#5ee6ff", max: 5 },
+  { id: "nova",       name: "新星爆发",   desc: "升级释放新星",   fullDesc: "每次升级释放一道新星环，对周围敌机造成范围伤害，伤害随你的主弹伤害成长，满级 3 级", color: "#ff8a55", max: 3 },
+  { id: "regen",      name: "生命再生",   desc: "持续回血",       fullDesc: "每秒按等级恢复生命，满级 5 级（约每 6.7 秒 1 命，受击后 2.2 秒内不回血）", color: "#7CFC00", max: 5 },
   { id: "overload",   name: "过载核心",   desc: "残血加速射击",   fullDesc: "生命越低射速越快，每级提升上限，满级 5 级", color: "#ffd93b", max: 5 },
   { id: "secondWind", name: "绝境逢生",   desc: "免费复活1次",    fullDesc: "本局首次死亡时自动复活一次（仅 1 级）", color: "#7CFC00", max: 1 },
   { id: "chain",      name: "连锁闪电",   desc: "命中弹射闪电",   fullDesc: "子弹命中后向最近敌机弹射闪电，每级 +1 跳，满级 5 级", color: "#5ee6ff", max: 5 },
 ];
 
-// 再生：每秒按等级累计的 fractional 生命（lvl5 → 0.25/秒 → 约 4 秒 1 命）。
-// 旧值若给到 0.3/级会与承伤上限（hitPlayer 后 2.2s 无敌帧）造成「站着回满」的滚雪球，
-// 这里压到 0.05/级，满级稳态约 0.25 HP/s（约承伤 55%），保留走位要求。
-export const REGEN_RATE = 0.05;
+// 再生：每秒按等级累计的 fractional 生命（lvl5 → 0.15/秒 → 约 6.7 秒 1 命）。
+// 不变量：与能量吸取叠加后的稳态回血速率必须低于受击速率，否则「会打的玩家严格不可杀」。
+//   REGEN_RATE×skillMax("regen") + 1/LIFESTEAL.cooldown = 0.15 + 0.2 = 0.35 < 1/PLAYER_BASE.invincibleTime ≈ 0.4545
+// 另：受击后的无敌帧（2.2s）内不累计再生（见 game.js 再生块），直接掐掉「打了就补回来」的最坏形态。
+export const REGEN_RATE = 0.03;
 
 // 能量吸取：每级 6% 击杀回血，成功触发后 5 秒冷却。
 // 旧值 15%/级（满级 60%）在满配清屏下实测 2.3 HP/s，是承伤上限（hitPlayer 后 2.2s 无敌帧 → 0.45 HP/s）的 5 倍，

@@ -287,13 +287,18 @@ export function volleyOffsets(volleyLv, player) {
   return offs;
 }
 
+/** 玩家当前主弹基础伤害（单一真源：getShootPattern 与 nova 等成长型 AoE 共用，禁止另抄公式） */
+export function calcPlayerBaseDmg(player) {
+  const dmgLv = player.skills.dmg || 0;
+  return Math.round((BULLET.baseDmg + dmgLv + (player.talentDmg || 0)) * (player.baseDmgMul || 1));
+}
+
 /**
  * 执行一次射击（返回生成的子弹参数列表）
  */
 export function getShootPattern(player) {
   const lvl = player.power;
-  const dmgLv = player.skills.dmg || 0;
-  const baseDmg = Math.round((BULLET.baseDmg + dmgLv + (player.talentDmg || 0)) * (player.baseDmgMul || 1));
+  const baseDmg = calcPlayerBaseDmg(player);
   const dualLv = Math.min(player.skills.dual || 0, skillMax("dual"));   // 侧翼炮上限走 SKILLS 单源（原先写死 4，与 config.js 的 max 脱节）
   const rapid = player.buffs.rapid > 0;
   const scatterLv = player.skills.scatter || 0;   // 散射：每通道左右对称 ±k 展开

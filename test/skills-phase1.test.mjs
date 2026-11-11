@@ -2,8 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { makeCtx } from "./_env.mjs";
 import { STATE } from "../js/config.js";
-import { createPlayer } from "../js/player.js";
-import { calcFireRate, SKILLS, skillMax, BULLET, XP_BASE } from "../js/config.js";
+import { createPlayer, calcPlayerBaseDmg } from "../js/player.js";
+import { calcFireRate, SKILLS, skillMax, BULLET, XP_BASE, REGEN_RATE, LIFESTEAL, PLAYER_BASE } from "../js/config.js";
 import { META } from "../js/config.js";
 import { getSettings } from "../js/meta.js";
 import { createSyntheticBullet, applyPierceOrRemove, fireBullet } from "../js/bullet.js";
@@ -147,16 +147,17 @@ describe("阶段1 新技能：玩法效果", () => {
     assert.equal(game().state(), STATE.OVER, "第二次死亡应正常结算");
   });
 
-  it("生命再生：残血时随时间回复生命", () => {
+  it("生命再生：残血时随时间回复生命（受击无敌帧之外）", () => {
     game().resetGame();
     const p = game().getPlayer();
     p.skills.regen = 5;
-    p.invincible = 9999;   // 隔离敌方干扰
     setLivesForTest(1);
     const maxLives = game().getMaxLives();
     assert.ok(maxLives > 1, "测试用例需有回复空间");
-    // 逐帧推进，遇到升级选择自动选第一项继续，保证模拟不暂停、再生持续累积
-    for (let i = 0; i < 600; i++) {
+    // 逐帧推进；清空敌机/敌弹以隔离干扰（不再用 invincible 隔离——新一轮规则下无敌帧内不回血）
+    for (let i = 0; i < 1200; i++) {
+      game().enemies.splice(0);
+      game().bullets.splice(0);
       rafCb();
       if (game().state() === STATE.LEVELUP) {
         const choices = game().getSkillChoices();
@@ -228,12 +229,61 @@ describe("阶段1 新技能：池与观测口护栏", () => {
     assert.notEqual(live._chainSource, true, "真实弹出厂即带 _chainSource → 永远不触发连锁");
   });
 
-  it("续命观测口（只读）：secondWind 触发后 revives=1 且 reviveUsed=true", () => {
+  it("续命观测口（只读）：secondWind 只累加技能复活计数", () => {
     game().resetGame();
     const p = game().getPlayer();
     p.skills.secondWind = 1;
     setLivesForTest(1);
     hitPlayer();
-    assert.deepEqual(game().getReviveStats(), { reviveUsed: true, revives: 1 });
+    assert.deepEqual(game().getReviveStats(), { reviveUsed: true, secondWindRevives: 1, paidRevives: 0 });
+  });
+});
+
+describe("阶段1 平衡护栏（本轮加固）", () => {
+  it("生存轴不变量：regen+lifesteal 稳态回血 < 受击速率，且 regen 不支配 lifesteal", () => {
+    // 全部用配置真值计算，不写死数字；改动任一常量而破坏不变量会直接红
+    const regenSteady = REGEN_RATE * skillMax("regen");
+    const lifestealSteady = 1 / LIFESTEAL.cooldown;
+    const hitRate = 1 / PLAYER_BASE.invincibleTime;
+    assert.ok(regenSteady + lifestealSteady < hitRate,
+      `叠加回血 ${(regenSteady + lifestealSteady).toFixed(4)} 必须低于受击速率 ${hitRate.toFixed(4)}`);
+    assert.ok(regenSteady < lifestealSteady,
+      `regen 满级 ${regenSteady.toFixed(3)} 不应支配 lifesteal 稳态 ${lifestealSteady.toFixed(3)}`);
+  });
+
+  it("受击无敌帧内不累计再生（2.2s 不回血）", () => {
+    game().resetGame();
+    const p = game().getPlayer();
+    p.skills.regen = 5;
+    setLivesForTest(1);
+    for (let i = 0; i < 180; i++) {
+      game().enemies.splice(0);
+      game().bullets.splice(0);
+      p.invincible = 5;   // 持续处于无敌帧
+      rafCb();
+    }
+    assert.equal(game().getLives(), 1, "无敌帧内不应回血");
+    assert.ok(!(p._regenAccum > 0), `无敌帧内不应累计再生，实测 ${p._regenAccum}`);
+  });
+
+  it("新星伤害随主弹伤害缩放：无 dmg 技能 = 2/3/4，dmg +6 同比放大", () => {
+    const dealOnce = (dmgLv, novaLv) => {
+      game().resetGame();
+      const p = game().getPlayer();
+      p.skills.nova = novaLv;
+      p.skills.dmg = dmgLv;
+      const e = game().spawnEnemy(1, null, 1, p.x, p.y - 60, { type: "big" });
+      e.maxHp = 1000; e.hp = 1000; e.vy = 0; e.fireCd = 999;
+      const base = calcPlayerBaseDmg(p);
+      const hp0 = e.hp;
+      addXp(XP_BASE);            // 触发一次升级 → 一道新星
+      return { dealt: hp0 - e.hp, expected: Math.round(base * (2 + novaLv - 1)) };
+    };
+    for (const lv of [1, 2, 3]) {
+      const r = dealOnce(0, lv);
+      assert.equal(r.dealt, r.expected, `nova lvl${lv} 应造成 ${r.expected} 伤害`);
+    }
+    assert.equal(dealOnce(0, 1).dealt, 2, "无 dmg 技能时 nova lvl1 应为 2");
+    assert.equal(dealOnce(6, 1).dealt, 14, "dmg+6 时主弹伤害 7，nova lvl1 应同比放大到 14");
   });
 });
