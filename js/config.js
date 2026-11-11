@@ -171,8 +171,15 @@ export function calcCritChance(player) {
 }
 
 // ---------- 敌机 ----------
+// fireCd 不变式（批 0）：敌机只在开火窗口 10 < y < H*0.7 内递减冷却——js/enemy.js 的门禁 `continue`
+// 排在 `e.fireCd -= dt` 之前，所以"能否开火"取决于窗口停留时间：
+//   窗口时间 = 494 / (speed × (1 + level × DIFFICULTY.speedScalePerLevel) × rand(0.8,1.25) × 60)
+// 取最坏组合（落速上界 1.25、冷却上界 = 表上界、enemyLevel=1 使 fireMul=1）：
+//   level 1 → 2.63s | level 5 → 2.24s | level 6 → 2.16s | level 14(maxLevel) → 1.68s
+// 故 small 表上界取 2.0：level ≤ 6 保证每架至少一发；level→14 时 small 退化为骚扰，
+// 密度由落速更慢、窗口更长的 mid/big 供给。改本表必须同步 test/enemy.test.mjs 的跨等级用例。
 export const ENEMY_TYPES = {
-  small:  { r: 16, hp: 1,  score: 100, xp: 8,   speed: 2.4, color: "#ff6b6b", fireCd: [4, 6] },
+  small:  { r: 16, hp: 1,  score: 100, xp: 8,   speed: 2.4, color: "#ff6b6b", fireCd: [1.4, 2.0] },
   mid:    { r: 24, hp: 3,  score: 300, xp: 20,  speed: 1.6, color: "#ffa94d", fireCd: [3.2, 3.2] },
   big:    { r: 36, hp: 8,  score: 800, xp: 45,  speed: 1.0, color: "#d0bfff", fireCd: [2.2, 2.2] },
   laser:  { r: 22, hp: 4,  score: 400, xp: 25,  speed: 1.4, color: "#ff4444", fireCd: [2.5, 3.5] },
@@ -304,6 +311,61 @@ export function lifestealChance(lv) {
 export function skillMax(id) {
   const s = SKILLS.find(x => x.id === id);
   return s ? s.max : 0;
+}
+
+/**
+ * 技能/道具协同表（P3 1a）：只把**生产代码里已经成立**的组合显性化，不新增任何判定或乘算。
+ * state: "stack" 成立可宣传 | "exclusive" 互斥、不得宣称叠加 | "debuff" 净收益为负。
+ * skills/buffs/anyOf 是声明式条件（分别查 player.skills / player.buffs），
+ * 由 test/synergy.test.mjs 校验 id 是否存在于 SKILLS / POWERUP_DURATION——避免把 id 藏进闭包里漂移。
+ * anchors+probe 指向生产代码行段，probe 字符串必须仍出现在该行段内（代码搬走或改写时守护会红）。
+ * 收录门槛：未核实的组合（如 orbital × bulletSpeed）一律不入表。
+ * score 轴组合（score / double / 商店 scoreBonus）故意排除：score 是难度的唯一输入
+ * （js/game.js:454-456），把它当协同宣传等于给"涨分即涨难度"回路加油门。
+ */
+export const SYNERGY = Object.freeze([
+  {
+    id: "mobility", label: "机动 × 加速", state: "stack",
+    formula: "(1 + 0.12·move) × 1.5",
+    skills: ["move"], buffs: ["speed"],
+    anchors: [{ at: "js/player.js:102-104", probe: "0.12" }],
+    note: "满级 move(6) 时总乘算 2.58×，目前没有总上限——见 test/synergy.test.mjs 的 FIXME(1b)",
+  },
+  {
+    id: "burst", label: "侧翼炮 × 急速", state: "stack",
+    formula: "弹道条数 × 射速 0.055s",
+    skills: ["dual"], buffs: ["rapid"],
+    anchors: [{ at: "js/player.js:286", probe: 'skillMax("dual")' }, { at: "js/config.js:152", probe: "0.055" }],
+  },
+  {
+    id: "rapid_madHunt", label: "急速 / 疯狂追击", state: "exclusive",
+    formula: "calcFireRate 短路 return，急速优先于追击",
+    buffs: ["rapid", "madHunt"],
+    anchors: [{ at: "js/config.js:152-153", probe: "0.045" }],
+  },
+  {
+    id: "explosion_chain", label: "爆炸连锁", state: "stack",
+    formula: "每深一层 ×0.7，且 depth ≥ explosionMaxChainDepth 不再递归",
+    skills: ["explosion"], anyOf: ["expChance", "expDmg", "expRange"],
+    anchors: [
+      { at: "js/game.js:837", probe: "Math.pow(0.7" },
+      { at: "js/game.js:948", probe: "_deathExplosion && !isDeepChain" },
+      { at: "js/config.js:97", probe: "explosionMaxChainDepth" },
+    ],
+    note: "连锁已有双封顶（深度上限 + 逐层衰减），P3 不再另加上限",
+  },
+]);
+
+/** 当前生效的协同（HUD 读数用；exclusive 条目同样返回，由 state 决定文案） */
+export function activeSynergies(player) {
+  if (!player) return [];
+  const sk = player.skills || {};
+  const bf = player.buffs || {};
+  const hasSkill = (id) => (sk[id] || 0) > 0;
+  const hasBuff = (id) => (bf[id] || 0) > 0;
+  return SYNERGY.filter(s => (s.skills ?? []).every(hasSkill)
+    && (s.buffs ?? []).every(hasBuff)
+    && (!s.anyOf || s.anyOf.some(hasSkill)));
 }
 
 // 技能等级 → 颜色档位（选择界面按当前等级着色）

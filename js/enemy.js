@@ -85,6 +85,7 @@ export function spawnEnemy(level, diff, enemyLevel = 1, atX, atY, options = {}) 
   // 开火间隔缩放：每级 -3%，但必须钳正——scale>33.3 时原乘数会变负，
   // 新生成敌机的首射冷却 ≤0 会出生即开火（超后期数值失控）。
   const fireMul = Math.max(ENEMY_LEVEL.fireCdMinMul, 1 + scale * ENEMY_LEVEL.fireCdPerLevel);
+  e.fireMul = fireMul;   // 复射也要吃同一乘数：存到实例上，避免 :199 再抄一份公式
   e.fireCd = rand(cfg.fireCd[0], cfg.fireCd[1]) * (diff?.fireCdScale ?? 1) * fireMul;
   e.t = rand(0, TAU);
   e.hitFlash = 0;
@@ -196,8 +197,11 @@ export function getEnemyShooters(playerX, playerY, dt, fireCdScale = 1) {
     e.fireCd -= dt;
     if (e.fireCd <= 0) {
       shooters.push(e);
-      const cd = e.type === "big" ? 2.2 : e.type === "mid" ? 3.2 : e.type === "shield" ? 3.5 : rand(4, 6);
-      e.fireCd = cd * fireCdScale;
+      // 复射必须与出生首射同源：读 ENEMY_TYPES 表并乘 fireMul。
+      // 旧实现在此硬编码 big 2.2 / mid 3.2 / shield 3.5 / 其余 rand(4,6)，与配置表并行存在且已漂移
+      // （shield 表 [3,4] 却写死 3.5、split 表 [3.5,5] 落到 small 的 rand(4,6)），且漏乘 fireMul 使高等级敌机复射不加速。
+      const range = ENEMY_TYPES[e.type].fireCd;
+      e.fireCd = rand(range[0], range[1]) * fireCdScale * (e.fireMul ?? 1);
     }
   }
   return shooters;
@@ -387,6 +391,9 @@ export function spawnSplitChildren(parent) {
     e.vy = cfg.speed * 1.3;
     e.vx = Math.cos(angle) * 1.5;
     e.fireCd = rand(5, 8);
+    // 子代不经 spawnEnemy 逐字段初始化，而 freeEnemy 不重置字段（只 push 回池）——
+    // 不显式写 fireMul 就会继承上一个被回收宿主（可能是高等级敌机）的 fireMul，使子代复射被偷偷加速。
+    e.fireMul = 1;
     e.t = rand(0, TAU);
     e.hitFlash = 0;
     e.frozen = 0;

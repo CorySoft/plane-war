@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import "./_env.mjs";
-import { H, W } from "../js/config.js";
+import { H, W, ENEMY_TYPES } from "../js/config.js";
 import {
   enemies, spawnEnemy, updateEnemies, getEnemyShooters,
   clearEnemies, spawnSplitChildren, removeEnemyEx,
@@ -88,6 +88,72 @@ describe("enemy", () => {
     const list = getEnemyShooters(240, 600, 0.016, 1);
     assert.equal(list.length, 1);
     assert.ok(e.fireCd > 0);
+  });
+
+  // ===== 批 0：敌机开火计时读表 + fireMul 生命周期 =====
+  // 背景：旧实现只在出生时读 ENEMY_TYPES.fireCd，复射改用 js/enemy.js 里并行硬编码的一组数字，
+  // 既与表漂移（shield 表 [3,4] 写死 3.5、split 落到 small 的 rand(4,6)），也不乘等级乘数 fireMul。
+  // 下列用例把「复射值来自表」从"仅断言 > 0"升级为锁数值。
+  it("批 0：复射冷却来自 ENEMY_TYPES 表（锁数值，不再只断言 >0）", () => {
+    const [lo, hi] = ENEMY_TYPES.small.fireCd;
+    const small = spawnEnemy(1, diff, 1, 240, 120, { type: "small" });
+    small.fireCd = 0;
+    getEnemyShooters(240, 600, 0.016, 1);
+    assert.ok(small.fireCd <= hi + 1e-12 && small.fireCd >= lo - 0.05,
+      `small 复射 ${small.fireCd} 未落在表区间 [${lo},${hi}]`);
+
+    const mid = spawnEnemy(1, diff, 1, 240, 120, { type: "mid" });
+    mid.fireCd = 0;
+    getEnemyShooters(240, 600, 0.016, 1);
+    assert.equal(mid.fireCd, ENEMY_TYPES.mid.fireCd[0], "mid 表为定值，复射应逐字等于表值");
+  });
+
+  it("批 0：高等级敌机的复射也乘 fireMul（旧实现只有首射乘）", () => {
+    const e = spawnEnemy(1, diff, 10, 240, 120, { type: "mid" });
+    assert.ok(e.fireMul > 0 && e.fireMul < 1, `E=10 的 fireMul 应落在 (0,1)，实际 ${e.fireMul}`);
+    e.fireCd = 0;
+    getEnemyShooters(240, 600, 0.016, 1);
+    assert.ok(Math.abs(e.fireCd - ENEMY_TYPES.mid.fireCd[0] * e.fireMul) < 1e-12,
+      `复射应为 表值×fireMul，实际 ${e.fireMul} → ${e.fireCd}`);
+  });
+
+  it("批 0 不变式：level ∈ {1,6} 下 small 穿越开火窗口必开一枪（最坏组合 RNG）", () => {
+    const realRandom = Math.random;
+    try {
+      // rand(a,b) = a + Math.random()·(b-a) → 返回 1 让落速取上界 1.25（窗口最短）、
+      // 冷却取表上界（等待最久），即"最不该开火"的那一架敌机。
+      Math.random = () => 1;
+      for (const level of [1, 6]) {
+        clearEnemies();
+        const e = spawnEnemy(level, diff, 1, 240, 11, { type: "small" });
+        const dt = 1 / 60;
+        let fired = 0;
+        for (let f = 0; f < 2000 && e.y < 504; f++) {
+          updateEnemies(dt, level, 240, 600, 52);
+          if (getEnemyShooters(240, 600, dt, 1).includes(e)) fired++;
+        }
+        assert.ok(fired >= 1,
+          `level ${level}：small 在窗口 10<y<504 内未开火（vy=${e.vy.toFixed(3)} px/f，冷却上界 ${ENEMY_TYPES.small.fireCd[1]}s）`);
+      }
+    } finally {
+      Math.random = realRandom;
+      clearEnemies();
+    }
+  });
+
+  it("批 0：分裂子代不继承上一个宿主的 fireMul（对象池泄漏守护）", () => {
+    const parent = spawnEnemy(1, diff, 20, 240, 200, { type: "split" });
+    assert.ok(parent.fireMul < 1, "先造一个高倍率宿主（fireMul < 1）");
+    parent.x = 240; parent.y = 200;
+    // 用普通对象作快照传入：生产代码里父机是在 spawnSplitChildren 之后才移除的
+    // （js/game.js:723 早于 :748），不能在这里 clearEnemies，否则父对象会被子代复用而产生别名。
+    const snapshot = { splitChildren: parent.splitChildren, color: parent.color, x: parent.x, y: parent.y };
+    clearEnemies();               // 宿主（fireMul<1）回池
+    spawnSplitChildren(snapshot);
+    assert.ok(enemies.length >= 1, "应生成子代");
+    for (const k of enemies) {
+      assert.equal(k.fireMul, 1, `子代 fireMul=${k.fireMul}：从池里复用了旧宿主字段，复射会被偷偷加速`);
+    }
   });
 
   it("屏外敌机不射击", () => {

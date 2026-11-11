@@ -2,7 +2,7 @@
  * hud.js — HUD 绘制
  * =========================================================== */
 
-import { W, H, calcRangePx, POWERUP_DURATION } from "./config.js";
+import { W, H, calcRangePx, POWERUP_DURATION, activeSynergies } from "./config.js";
 import { clamp, roundRect, setf } from "./utils.js";
 import { bar, glowText, hexToRgba, pulse, C } from "./theme.js";
 
@@ -143,6 +143,17 @@ export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNee
     glowText(ctx, {
       text: behavior.label, x: 18, y: H - 72, size: 13, weight: "bold",
       color: behavior.color, blur: 7, align: "left", baseline: "top", fontFamily: "'sans-serif'",
+    });
+  }
+
+  // ===== 协同读数（P3 1a：只显性化 config.js SYNERGY 表里已核实的组合，不参与任何判定） =====
+  const synergies = activeSynergies(player);
+  for (let i = 0; i < Math.min(synergies.length, 2); i++) {
+    const s = synergies[i];
+    const exclusive = s.state === "exclusive";
+    glowText(ctx, {
+      text: (exclusive ? "互斥 " : "协同 ") + s.label, x: W - 16, y: H - 56 - i * 16, size: 12, weight: "bold",
+      color: exclusive ? "#ff8fa3" : "#7CFC00", blur: 6, align: "right", baseline: "top", fontFamily: "'sans-serif'",
     });
   }
 

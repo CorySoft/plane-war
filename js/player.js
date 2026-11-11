@@ -2,7 +2,7 @@
  * player.js — 玩家逻辑 + 渲染
  * =========================================================== */
 
-import { W, H, PLAYER_BASE, BULLET, TAU, refireGateDistance, calcFireRate, META, LIFESTEAL, lifestealChance } from "./config.js";
+import { W, H, PLAYER_BASE, BULLET, TAU, refireGateDistance, calcFireRate, META, LIFESTEAL, lifestealChance, skillMax } from "./config.js";
 import { clamp, rand, setf } from "./utils.js";
 import { pressed, getStickDir } from "./input.js";
 import { drawSpriteNose } from "./assets.js";
@@ -283,7 +283,7 @@ export function getShootPattern(player) {
   const lvl = player.power;
   const dmgLv = player.skills.dmg || 0;
   const baseDmg = Math.round((BULLET.baseDmg + dmgLv + (player.talentDmg || 0)) * (player.baseDmgMul || 1));
-  const dualLv = Math.min(player.skills.dual || 0, 4);   // 侧翼炮上限 4
+  const dualLv = Math.min(player.skills.dual || 0, skillMax("dual"));   // 侧翼炮上限走 SKILLS 单源（原先写死 4，与 config.js 的 max 脱节）
   const rapid = player.buffs.rapid > 0;
   const scatterLv = player.skills.scatter || 0;   // 散射：每通道左右对称 ±k 展开
   const volleyLv = player.skills.volley || 0;     // 连射：每通道微扇收束于主弹道
