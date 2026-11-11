@@ -49,16 +49,17 @@ describe("SYNERGY 协同表（P3 1a：显性化，不改行为）", () => {
     }
   });
 
-  it("锚点不漂移：行段内仍能读到 probe 字符串", () => {
+  it("锚点不漂移：声明名 + 全文唯一命中（line 仅作注释，不强制）", () => {
     for (const s of SYNERGY) {
       for (const a of s.anchors) {
-        const m = /^(js\/[\w/.-]+\.js):(\d+)(?:-(\d+))?$/.exec(a.at);
-        assert.ok(m, `${s.id} 锚点格式应为 js/file.js:行[-行]，实际 ${a.at}`);
-        const [, file, from, to] = m;
-        const lines = srcOf(file).slice(Number(from) - 1, Number(to ?? from));
-        assert.ok(lines.length > 0, `${s.id} 锚点 ${a.at} 越界`);
-        assert.ok(lines.join("\n").includes(a.probe),
-          `${s.id} 的锚点 ${a.at} 已找不到 "${a.probe}" —— 生产代码搬走/改写了，表与文案必须同步复核`);
+        assert.ok(a.file && a.probe, `${s.id} 锚点需含 file 与 probe`);
+        const full = srcOf(a.file).join("\n");
+        // 只在「生产代码段」里查：截掉文件末尾的 SYNERGY 表，避免 probe 字符串本身（写在锚点里）被算成命中
+        const cut = full.indexOf("export const SYNERGY");
+        const codeOnly = cut === -1 ? full : full.slice(0, cut);
+        const hits = codeOnly.split(a.probe).length - 1;
+        assert.equal(hits, 1,
+          `${s.id} 锚点 probe "${a.probe}" 在 ${a.file} 生产代码段须唯一命中，实际 ${hits} 次（注释行号 ${a.line ?? "?"}）`);
       }
     }
   });

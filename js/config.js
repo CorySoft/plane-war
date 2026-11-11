@@ -65,8 +65,11 @@ export const BULLET = {
   // 因此单波上限由 24 下调到 16，避免后期一屏上百发失去队形感。
   waveCap: 16,
   // 疯狂追击（madHunt）单波上限：madHunt 是 360° 追踪弹雨，普通波 waveCap=16 是「前向」密度，
-  // 弹雨需更密才有「雨」观感，但满配（scatter=6, volley=6）原生高达 140 发/volley 会彻底抹平敌方密度设计。
-  // 取普通波的 3 倍（48）：满配 140 → 均匀采样截到 48，约 3 圈弹雨，5s 窗口约 432 发，强但不碾压。
+  // 弹雨需更密才有「雨」观感，但满配（scatter=6, volley=6）原生高达 140 发/volley 会抹平敌方设计。
+  // 实际吞吐不由本 cap 决定：madHunt 走 calcFireRate 的 0.045s（≈22 波/秒），但发射受 screenCap=140 的
+  // all-or-nothing 闸门约束——同屏 + 本波 > 140 就整波不发；实测满配 5s 仅 ~13 波、峰值友方弹钉在 140。
+  // 故本 cap 控制「爆发粒度」而非总密度：48 把满配 140→48，削峰并降吞吐约 13~32%，保留 360° 角度覆盖。
+  // 备选 32（peak 135）/ 64（吞吐略高）在种子噪声(±12%)内分不出高下，维持 48（实测见 tools/perf/madhunt-cap-probe.mjs）。
   madHuntWaveCap: 48,
   screenCap: 140,       // 同屏友方子弹硬上限：超过则本轮不发射（性能与画面密度兜底）
   hostileScreenCap: 140, // 同屏敌方子弹独立硬上限
@@ -322,7 +325,8 @@ export function skillMax(id) {
  * state: "stack" 成立可宣传 | "exclusive" 互斥、不得宣称叠加 | "debuff" 净收益为负。
  * skills/buffs/anyOf 是声明式条件（分别查 player.skills / player.buffs），
  * 由 test/synergy.test.mjs 校验 id 是否存在于 SKILLS / POWERUP_DURATION——避免把 id 藏进闭包里漂移。
- * anchors+probe 指向生产代码行段，probe 字符串必须仍出现在该行段内（代码搬走或改写时守护会红）。
+ * anchors 用 { file, line, probe }：line 仅作阅读注释，守护只校验 probe 在 file 内「全文唯一命中」。
+ * 这样改码（含在文件上方加注释）不会因行号漂移而误红，也不会因顺手改行号而假绿。
  * 收录门槛：未核实的组合（如 orbital × bulletSpeed）一律不入表。
  * score 轴组合（score / double / 商店 scoreBonus）故意排除：score 是难度的唯一输入
  * （js/game.js:454-456），把它当协同宣传等于给"涨分即涨难度"回路加油门。
@@ -332,29 +336,29 @@ export const SYNERGY = Object.freeze([
     id: "mobility", label: "机动 × 加速", state: "stack",
     formula: "(1 + 0.12·move) × 1.5",
     skills: ["move"], buffs: ["speed"],
-    anchors: [{ at: "js/player.js:102-104", probe: "0.12" }],
+    anchors: [{ file: "js/player.js", line: 103, probe: "0.12 * (player.skills.move" }],
     note: "满级 move(6) 时总乘算 2.58×，经 1b 平衡评审确认为有意设计不变式（不封顶），由 test/synergy.test.mjs 守护不被误改",
   },
   {
     id: "burst", label: "侧翼炮 × 急速", state: "stack",
     formula: "弹道条数 × 射速 0.055s",
     skills: ["dual"], buffs: ["rapid"],
-    anchors: [{ at: "js/player.js:286", probe: 'skillMax("dual")' }, { at: "js/config.js:156", probe: "0.055" }],
+    anchors: [{ file: "js/player.js", line: 286, probe: 'skillMax("dual")' }, { file: "js/config.js", line: 156, probe: "return 0.055 * frMul" }],
   },
   {
     id: "rapid_madHunt", label: "急速 / 疯狂追击", state: "exclusive",
     formula: "calcFireRate 短路 return，急速优先于追击",
     buffs: ["rapid", "madHunt"],
-    anchors: [{ at: "js/config.js:156-157", probe: "0.045" }],
+    anchors: [{ file: "js/config.js", line: 157, probe: "return 0.045 * frMul" }],
   },
   {
     id: "explosion_chain", label: "爆炸连锁", state: "stack",
     formula: "每深一层 ×0.7，且 depth ≥ explosionMaxChainDepth 不再递归",
     skills: ["explosion"], anyOf: ["expChance", "expDmg", "expRange"],
     anchors: [
-      { at: "js/game.js:839", probe: "Math.pow(0.7" },
-      { at: "js/game.js:950", probe: "_deathExplosion && !isDeepChain" },
-      { at: "js/config.js:101", probe: "explosionMaxChainDepth" },
+      { file: "js/game.js", line: 839, probe: "Math.pow(0.7" },
+      { file: "js/game.js", line: 950, probe: "_deathExplosion && !isDeepChain" },
+      { file: "js/config.js", line: 101, probe: "explosionMaxChainDepth: 2" },
     ],
     note: "连锁已有双封顶（深度上限 + 逐层衰减），P3 不再另加上限",
   },
