@@ -6,7 +6,7 @@ import { W, H, STATE, BULLET as BCFG, TAU, DIFFICULTY_PRESETS, POWERUP_DROP, POW
 import { clamp, rand, hypot, setf, cachedRadialGradient } from "./utils.js";
 import { glowText } from "./theme.js";
 import { sfx, startMusic, stopMusic, setSfxMuted, setMusicMuted, setMusicIntensity, duckMusic } from "./audio.js";
-import { initInput, setDifficulty as setPlayerDifficulty } from "./input.js";
+import { initInput, setDifficulty as setPlayerDifficulty, clearTouchTarget } from "./input.js";
 import { spawnParticles, updateParticles, drawParticles, clearParticles } from "./particles.js";
 import { triggerShake, updateCamera, applyCamera, resetCamera, slowmo } from "./camera.js";
 import {
@@ -1168,7 +1168,7 @@ function chooseSkill(skillId) {
   const t = applySkill(skill, player);
   if (t) toast = t;
   skillChoices = null;
-  state = STATE.PLAYING;
+  enterPlaying();
 }
 
 function hitPlayer() {
@@ -1238,7 +1238,7 @@ function doRevive() {
   showAchievementToast(checkAchievements({ runScore: score, runLevel: pLevel, runCombo: combo, reviveUsed: true }));
   toast = { text: "复活成功！", color: "#ffd166", t: 1.8 };
   sfx.revive();
-  state = STATE.PLAYING;
+  enterPlaying();
   startMusic();
   musicStarted = true;
 }
@@ -1290,6 +1290,7 @@ async function startCampaignFromMenu() {
 }
 
 function resetGame() {
+  clearTouchTarget();   // 开局即清：菜单/结算界面点屏留下的悬空移动指令不应带入新局
   score = 0; lives = 3; level = 1; enemyLevel = 1; combo = 0; comboTime = 0;
   pLevel = 1; xp = 0; xpNeed = XP_BASE;
   isNewBest = false;
@@ -1357,7 +1358,7 @@ function resetGame() {
 
   const skipTutorial = !!getSettings().skipTutorial;
   if (skipTutorial) {
-    state = STATE.PLAYING;
+    enterPlaying();
     startMusic();
     musicStarted = true;
     tutorialTimer = 0;
@@ -1414,8 +1415,15 @@ function drawBlastFlashes(ctx) {
 }
 
 /** 教程界面点击/按键后正式开始游戏 */
-function startPlaying() {
+// 进入对局态的统一入口：清空触摸跟随目标，避免菜单/暂停/结算等界面点屏
+// 留下的悬空移动指令在对局开局把战机拖走（见 test/input.test.mjs 的跨状态用例）
+function enterPlaying() {
+  clearTouchTarget();
   state = STATE.PLAYING;
+}
+
+function startPlaying() {
+  enterPlaying();
   tutorialTimer = 0;
   startMusic();
   musicStarted = true;
@@ -1634,7 +1642,7 @@ window.addEventListener("keydown", e => {
   }
   if (e.code === "Escape" || e.code === "KeyP") {
     if (state === STATE.PLAYING) { state = STATE.PAUSED; sfx.click(); duckMusic(true); return; }
-    if (state === STATE.PAUSED) { state = STATE.PLAYING; sfx.click(); duckMusic(false); return; }
+    if (state === STATE.PAUSED) { enterPlaying(); sfx.click(); duckMusic(false); return; }
   }
   // GACHA 抽奖界面：键盘也可解除（与 pointerdown 逻辑一致），避免纯键盘玩家软锁
   if (e.code === "Space" || e.code === "Enter" || e.code === "Escape") {
@@ -1974,7 +1982,7 @@ canvas.addEventListener("pointerdown", e => {
     return;
   }
   if (state === STATE.PAUSED) {
-    if (hitTestButton(mx, my, getPauseResumeButton())) { state = STATE.PLAYING; sfx.click(); duckMusic(false); return; }
+    if (hitTestButton(mx, my, getPauseResumeButton())) { enterPlaying(); sfx.click(); duckMusic(false); return; }
     if (hitTestButton(mx, my, getPauseQuitButton())) {
       sfx.click();
       gameOver();

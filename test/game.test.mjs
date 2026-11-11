@@ -4,6 +4,7 @@ import { makeCtx, stubRandom } from "./_env.mjs";
 import { STATE, POWERUP_DURATION } from "../js/config.js";
 import { getSettings } from "../js/meta.js";
 import { spawnBoss } from "../js/wave.js";
+import { initInput, getTouchTarget } from "../js/input.js";
 
 const noop = () => {};
 
@@ -223,5 +224,44 @@ describe("game 集成冒烟", () => {
     assert.ok(e.frozen > POWERUP_DURATION.freeze - 0.5 && e.frozen <= POWERUP_DURATION.freeze,
       `冻结时长应为表值 ${POWERUP_DURATION.freeze}（含单帧衰减），实测 ${e.frozen.toFixed(2)}`);
     assert.ok(errors.length === 0, errors.join("\n"));
+  });
+});
+
+// ---------- 回归：跨状态触摸目标残留（Qoder 复现的缺陷）----------
+// 菜单/暂停/结算等界面点屏会经 canvas pointerdown 记录一个触摸跟随目标，
+// 若该目标在对局开局仍存活，战机会在玩家零触摸的情况下自行横移。修复后
+// resetGame / enterPlaying 必须清空它。
+describe("触摸跟随：跨状态不残留悬空移动指令", () => {
+  // 自建可捕获的画布，接管 input.js 的指针监听（game.test 原 canvas 为 noop）
+  const inLis = {};
+  const inCanvas = {
+    addEventListener: (t, fn) => { (inLis[t] ||= []).push(fn); },
+    removeEventListener: noop,
+    setPointerCapture: noop,
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 480, bottom: 720, width: 480, height: 720 }),
+  };
+  initInput(inCanvas);
+  function fireTouch(type, x) {
+    for (const fn of (inLis[type] || [])) {
+      fn({ pointerType: "touch", pointerId: 1, clientX: x, clientY: 100, preventDefault: noop, stopPropagation: noop, target: inCanvas });
+    }
+  }
+
+  it("界面点屏留下的跟随目标，resetGame 后清零，开局战机不自行位移", () => {
+    // 模拟在界面（菜单/暂停/结算等任意态）点屏留下一条悬空移动指令
+    fireTouch("pointerdown", 100);
+    assert.equal(getTouchTarget().active, true, "点屏应记录跟随目标");
+    fireTouch("pointerup", 100);
+
+    getSettings().skipTutorial = true;
+    game().resetGame();   // 新局：必须清空悬空目标，否则开局战机被拖走
+    assert.equal(getTouchTarget().active, false, "resetGame 必须清空触摸目标（修复跨状态残留）");
+    assert.equal(game().state(), STATE.PLAYING);
+
+    const x0 = game().getPlayer().x;
+    for (let i = 0; i < 60 && typeof rafCb === "function"; i++) rafCb();
+    const x1 = game().getPlayer().x;
+    assert.equal(x1 - x0, 0, `开局无触摸时战机不应自行位移（x: ${x0}→${x1}）`);
+    assert.equal(errors.length, 0, errors.join("\n"));
   });
 });
