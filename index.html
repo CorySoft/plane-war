@@ -30,30 +30,6 @@
     flex-shrink: 0;       /* 防止 flex 布局压扁 canvas，保证 cover 两侧溢出被外层裁掉 */
     max-width: none;
   }
-  .touch-ui {
-    position: fixed; bottom: 24px; left: 0; right: 0;
-    display: none; justify-content: space-between;
-    padding: 0 40px;
-    z-index: 10; pointer-events: none;
-  }
-  .touch-ui .tbtn {
-    pointer-events: auto;
-    width: 76px; height: 76px; border-radius: 50%;
-    background: rgba(16,28,52,.45);
-    border: 1px solid rgba(130,205,255,.45);
-    color: #eaf6ff; font-size: 30px;
-    display: flex; align-items: center; justify-content: center;
-    user-select: none; -webkit-user-select: none;
-    box-shadow: 0 0 16px rgba(80,180,255,.16), inset 0 1px 0 rgba(255,255,255,.14);
-    transition: transform .08s ease;
-  }
-  .touch-ui .tbtn:active {
-    transform: scale(.93);
-    background: rgba(26,40,84,.5);
-  }
-  @media (pointer: coarse) {
-    .touch-ui.show { display: flex; }
-  }
   #loader {
     position: fixed; inset: 0; z-index: 100;
     display: flex; align-items: center; justify-content: center;
@@ -155,10 +131,6 @@
 <div id="fallback" style="display:none; position:fixed; inset:0; z-index:200; background:#05070f; color:#ff6b6b; font-size:18px; line-height:1.8; text-align:center; align-items:center; justify-content:center; flex-direction:column; padding:40px; box-sizing:border-box;">
   <div style="font-size:28px; font-weight:bold; letter-spacing:4px; margin-bottom:20px;">⚠ 加载失败</div>
   <pre id="errBox" style="background:rgba(255,255,255,.08); padding:16px; border-radius:8px; font-size:14px; color:#ffd166; max-width:600px; white-space:pre-wrap; text-align:left;"></pre>
-</div>
-<div class="touch-ui">
-  <div class="tbtn" id="btnLeft">◀</div>
-  <div class="tbtn" id="btnRight">▶</div>
 </div>
 <!-- 反馈面板 -->
 <div class="fb-mask" id="fbMask">

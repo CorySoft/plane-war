@@ -4,7 +4,7 @@
 
 import { W, H, PLAYER_BASE, BULLET, TAU, refireGateDistance, calcFireRate, META, LIFESTEAL, lifestealChance, skillMax } from "./config.js";
 import { clamp, rand, setf } from "./utils.js";
-import { pressed, getStickDir } from "./input.js";
+import { pressed, getTouchTarget, clearTouchTarget } from "./input.js";
 import { drawSpriteNose } from "./assets.js";
 
 export function createPlayer(aircraftCfg, talentEffects, shopEffects) {
@@ -103,10 +103,18 @@ export function updatePlayer(dt, player, refireDist = 0, maxTraveled = 0) {
     * (1 + 0.12 * (player.skills.move || 0))
     * (player.buffs.speed > 0 ? 1.5 : 1);
 
-  // 移动：摇杆优先（触摸激活时），否则键盘
-  const stickDir = getStickDir();
-  if (stickDir !== 0) {
-    player.x += stickDir * sp * dt * 60;
+  // 移动：触摸目标优先（按战机速度朝手指落点移动），否则键盘左右
+  const tt = getTouchTarget();
+  if (tt.active) {
+    const target = clamp(tt.x, 20, W - 20);
+    const step = sp * dt * 60;
+    const dx = target - player.x;
+    if (Math.abs(dx) <= step) {
+      player.x = target;
+      clearTouchTarget();   // 到达落点，停住并释放目标（避免压制键盘）
+    } else {
+      player.x += Math.sign(dx) * step;
+    }
   } else {
     if (pressed.left)  player.x -= sp * dt * 60;
     if (pressed.right) player.x += sp * dt * 60;

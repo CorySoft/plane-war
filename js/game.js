@@ -6,7 +6,7 @@ import { W, H, STATE, BULLET as BCFG, TAU, DIFFICULTY_PRESETS, POWERUP_DROP, POW
 import { clamp, rand, hypot, setf, cachedRadialGradient } from "./utils.js";
 import { glowText } from "./theme.js";
 import { sfx, startMusic, stopMusic, setSfxMuted, setMusicMuted, setMusicIntensity, duckMusic } from "./audio.js";
-import { initInput, bindTouchButtons, getStick, isStickActive, setDifficulty as setPlayerDifficulty, isEasyMode, getEasyTouch } from "./input.js";
+import { initInput, setDifficulty as setPlayerDifficulty } from "./input.js";
 import { spawnParticles, updateParticles, drawParticles, clearParticles } from "./particles.js";
 import { triggerShake, updateCamera, applyCamera, resetCamera, slowmo } from "./camera.js";
 import {
@@ -204,10 +204,6 @@ try {
 }
 try {
   initInput(canvas);
-  bindTouchButtons(
-    document.getElementById("btnLeft"),
-    document.getElementById("btnRight")
-  );
   applyAudioSettings();
   initStars();
   resetCamera();
@@ -379,13 +375,9 @@ function update(dt, realDt = dt) {
     }
 
     // 玩家移动 + 自动射击（闸门距离由 updatePlayer 按当前射速实时推导）
+    // 触摸跟随落点已在 updatePlayer 内按战机速度处理，无需此处特殊处理
     const shouldFire = updatePlayer(dt, player, 0, maxMainBulletTraveled());
 
-    // 简单模式：仅拖动时跟随手指，不拖动时左右按钮/键盘正常生效
-    if (isEasyMode()) {
-      const t = getEasyTouch();
-      if (t.active) player.x = clamp(t.x, 20, W - 20);
-    }
     if (shouldFire) {
       // 先把当前所有尚未触发的主弹标记为「已触发」：每颗主弹只允许触发一次下一波射击，
       // 避免同一波多颗子弹依次越过 10m 时反复触发造成误连射。新发的子弹 traveled=0 仍可触发下一波。
@@ -1535,40 +1527,6 @@ function draw() {
   // restore 后震动 transform 已撤销，但 DPR 缩放也需要继续作用于 UI 层（摇杆/HUD/菜单）。
   // 重新建立基准 transform：仅 DPR 缩放，无震动偏移。
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-
-  // 虚拟摇杆（UI 层，不受震动影响）
-  if ((state === STATE.PLAYING) && isStickActive()) {
-    const s = getStick();
-    ctx.globalAlpha = 0.85;
-    // 底座
-    ctx.strokeStyle = "rgba(255,255,255,.4)";
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(s.baseX, s.baseY, 36, 0, TAU);
-    ctx.stroke();
-    ctx.fillStyle = "rgba(255,255,255,.08)";
-    ctx.beginPath();
-    ctx.arc(s.baseX, s.baseY, 36, 0, TAU);
-    ctx.fill();
-    // 中心十字
-    ctx.strokeStyle = "rgba(255,255,255,.2)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(s.baseX - 12, s.baseY); ctx.lineTo(s.baseX + 12, s.baseY);
-    ctx.moveTo(s.baseX, s.baseY - 12); ctx.lineTo(s.baseX, s.baseY + 12);
-    ctx.stroke();
-    // 摇杆头
-    ctx.fillStyle = "rgba(94,230,255,.75)";
-    ctx.beginPath();
-    ctx.arc(s.baseX + s.dx, s.baseY + s.dy, 20, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = "#5ee6ff";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(s.baseX + s.dx, s.baseY + s.dy, 20, 0, TAU);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
 
   if (player && state !== STATE.MENU && state !== STATE.REVIVE) {
     drawHUD(ctx, {
