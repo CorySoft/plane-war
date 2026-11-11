@@ -111,7 +111,7 @@ describe("阶段1 新技能：配置与数值", () => {
   it("BULLET 含连锁/新星配置项", () => {
     assert.ok(BULLET.chainRange > 0);
     assert.ok(BULLET.novaBaseRadius > 0);
-    assert.ok(BULLET.novaDmgPerLevel > 0);
+    assert.ok(BULLET.novaDmgMulBase > 0 && BULLET.novaDmgMulPerLevel > 0);
   });
 });
 
@@ -155,7 +155,13 @@ describe("阶段1 新技能：玩法效果", () => {
     const maxLives = game().getMaxLives();
     assert.ok(maxLives > 1, "测试用例需有回复空间");
     // 逐帧推进；清空敌机/敌弹以隔离干扰（不再用 invincible 隔离——新一轮规则下无敌帧内不回血）
-    for (let i = 0; i < 1200; i++) {
+    // 帧数从配置反推，避免 REGEN_RATE 被下调时用例以「应回满生命」这种看不懂的方式红：
+    // 需要 (maxLives - 1) 条命，回血速率 = REGEN_RATE × skillMax("regen")，按 60fps 折算后留 1.5× 余量 + 120 帧容错。
+    const needLives = maxLives - 1;
+    const regenPerSec = REGEN_RATE * skillMax("regen");
+    const framesNeeded = Math.ceil((needLives / regenPerSec) * 60 * 1.5) + 120;
+    assert.ok(framesNeeded > 0 && Number.isFinite(framesNeeded), "再生帧数反推失败（配置异常）");
+    for (let i = 0; i < framesNeeded; i++) {
       game().enemies.splice(0);
       game().bullets.splice(0);
       rafCb();

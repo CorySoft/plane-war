@@ -117,8 +117,10 @@ export const BULLET = {
   chainDecay: 0.7,              // 连锁伤害每层/每跳衰减（爆炸连锁与闪电链共用的单一真源）
   novaBaseRadius: 120,          // 新星环基础半径，每级 +40
   novaRadiusPerLevel: 40,
-  novaBaseDmg: 2,               // 新星基础伤害，每级 +1
-  novaDmgPerLevel: 1,
+  // 新星伤害是「乘数」不是平值：伤害 = round(calcPlayerBaseDmg(player) × 本乘数)，
+// 无 dmg 技能时 lvl1/2/3 恰为 2/3/4，后期随主弹伤害同比放大（与主弹共用单一真源）。
+  novaDmgMulBase: 2,            // 乘数基数（不是固定伤害）
+  novaDmgMulPerLevel: 1,        // 每级乘数增量
 };
 
 // ---------- 敌方等级 ----------
@@ -356,6 +358,7 @@ export function skillMax(id) {
  * skills/buffs/anyOf 是声明式条件（分别查 player.skills / player.buffs），
  * 由 test/synergy.test.mjs 校验 id 是否存在于 SKILLS / POWERUP_DURATION——避免把 id 藏进闭包里漂移。
  * anchors 用 { file, line, probe }：line 仅作阅读注释，守护只校验 probe 在 file 内「全文唯一命中」。
+ * line 是人工快照，会随改动漂移；定位以 probe 为准（不要为了对齐行号去改 probe 或守护逻辑）。
  * 这样改码（含在文件上方加注释）不会因行号漂移而误红，也不会因顺手改行号而假绿。
  * 收录门槛：未核实的组合（如 orbital × bulletSpeed）一律不入表。
  * score 轴组合（score / double / 商店 scoreBonus）故意排除：score 是难度的唯一输入
@@ -366,29 +369,29 @@ export const SYNERGY = Object.freeze([
     id: "mobility", label: "机动 × 加速", state: "stack",
     formula: "(1 + 0.12·move) × 1.5",
     skills: ["move"], buffs: ["speed"],
-    anchors: [{ file: "js/player.js", line: 103, probe: "0.12 * (player.skills.move" }],
+    anchors: [{ file: "js/player.js", line: 106, probe: "0.12 * (player.skills.move" }],
     note: "满级 move(6) 时总乘算 2.58×，经 1b 平衡评审确认为有意设计不变式（不封顶），由 test/synergy.test.mjs 守护不被误改",
   },
   {
     id: "burst", label: "侧翼炮 × 急速", state: "stack",
     formula: "弹道条数 × 射速 0.055s",
     skills: ["dual"], buffs: ["rapid"],
-    anchors: [{ file: "js/player.js", line: 286, probe: 'skillMax("dual")' }, { file: "js/config.js", line: 156, probe: "return 0.055 * frMul" }],
+    anchors: [{ file: "js/player.js", line: 302, probe: 'skillMax("dual")' }, { file: "js/config.js", line: 169, probe: "return 0.055 * frMul" }],
   },
   {
     id: "rapid_madHunt", label: "急速 / 疯狂追击", state: "exclusive",
     formula: "calcFireRate 短路 return，急速优先于追击",
     buffs: ["rapid", "madHunt"],
-    anchors: [{ file: "js/config.js", line: 157, probe: "return 0.045 * frMul" }],
+    anchors: [{ file: "js/config.js", line: 170, probe: "return 0.045 * frMul" }],
   },
   {
     id: "explosion_chain", label: "爆炸连锁", state: "stack",
     formula: "每深一层 ×BULLET.chainDecay（0.7），且 depth ≥ explosionMaxChainDepth 不再递归",
     skills: ["explosion"], anyOf: ["expChance", "expDmg", "expRange"],
     anchors: [
-      { file: "js/game.js", line: 897, probe: "Math.pow(BCFG.chainDecay" },
-      { file: "js/game.js", line: 950, probe: "_deathExplosion && !isDeepChain" },
-      { file: "js/config.js", line: 101, probe: "explosionMaxChainDepth: 2" },
+      { file: "js/game.js", line: 900, probe: "Math.pow(BCFG.chainDecay" },
+      { file: "js/game.js", line: 1011, probe: "_deathExplosion && !isDeepChain" },
+      { file: "js/config.js", line: 106, probe: "explosionMaxChainDepth: 2" },
     ],
     note: "连锁已有双封顶（深度上限 + 逐层衰减），P3 不再另加上限",
   },

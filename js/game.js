@@ -1223,7 +1223,7 @@ function emitNova(p, lvl) {
   const radius = BCFG.novaBaseRadius + BCFG.novaRadiusPerLevel * (lvl - 1);
   // 伤害随玩家主弹伤害成长（与 getShootPattern 共用 calcPlayerBaseDmg 单一真源）：
   // 无 dmg 技能时 lvl1/2/3 精确等于 2/3/4，后期随主弹伤害同比放大，不再对中大型敌机静默失效。
-  const novaMul = BCFG.novaBaseDmg + BCFG.novaDmgPerLevel * (lvl - 1);
+  const novaMul = BCFG.novaDmgMulBase + BCFG.novaDmgMulPerLevel * (lvl - 1);
   const dmg = Math.round(calcPlayerBaseDmg(p) * novaMul);
   if (fxRings.length < BCFG.fxRingsCap) {
     fxRings.push({ x: p.x, y: p.y, r0: 10, rMax: radius, life: 0.45, maxLife: 0.45, color: "#a0e8ff" });
