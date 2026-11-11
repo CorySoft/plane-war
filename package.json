@@ -3,7 +3,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test --test-concurrency=1 test/*.test.mjs",
-    "test:smoke": "node tools/dev/smoke.mjs"
+    "test:smoke": "node tools/dev/smoke.mjs",
+    "test:touch": "node tools/dev/touch.mjs"
   },
   "devDependencies": {
     "playwright": "1.62.1"
