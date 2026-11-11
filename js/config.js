@@ -112,6 +112,7 @@ export const BULLET = {
   orbitalAccelPerLevel: 0.015,  // 每级额外加速度
   orbitalMaxSpeed: 22,          // 速度上限
   chainRange: 170,              // 连锁闪电最大弹射距离（像素）
+  chainDecay: 0.7,              // 连锁伤害每层/每跳衰减（爆炸连锁与闪电链共用的单一真源）
   novaBaseRadius: 120,          // 新星环基础半径，每级 +40
   novaRadiusPerLevel: 40,
   novaBaseDmg: 2,               // 新星基础伤害，每级 +1
@@ -379,10 +380,10 @@ export const SYNERGY = Object.freeze([
   },
   {
     id: "explosion_chain", label: "爆炸连锁", state: "stack",
-    formula: "每深一层 ×0.7，且 depth ≥ explosionMaxChainDepth 不再递归",
+    formula: "每深一层 ×BULLET.chainDecay（0.7），且 depth ≥ explosionMaxChainDepth 不再递归",
     skills: ["explosion"], anyOf: ["expChance", "expDmg", "expRange"],
     anchors: [
-      { file: "js/game.js", line: 839, probe: "Math.pow(0.7" },
+      { file: "js/game.js", line: 897, probe: "Math.pow(BCFG.chainDecay" },
       { file: "js/game.js", line: 950, probe: "_deathExplosion && !isDeepChain" },
       { file: "js/config.js", line: 101, probe: "explosionMaxChainDepth: 2" },
     ],

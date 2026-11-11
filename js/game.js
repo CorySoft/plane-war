@@ -160,6 +160,7 @@ let campaignComplete = false;
 let tutorialTimer = 0;     // 教程剩余显示时间
 let musicStarted = false;
 let reviveUsed = false;    // 本局是否已续命过（技能复活或付费复活，二选一，每局限 1 次）
+let reviveCount = 0;       // 本局实际发生过的续命次数（只读观测用：技能复活 / 付费复活各 +1）
 // 深空背景固定渐变缓存（基色/地平线/暗角，只依赖 W/H），必须在 loop() 启动前声明，避免 TDZ
 let spaceBgCache = { key: "", base: null, hz: null, vg: null };
 
@@ -333,6 +334,10 @@ function update(dt, realDt = dt) {
     const homingActive = player.buffs.madHunt > 0 || (player.skills.homing || 0) > 0;
     if (homingActive && enemies.length > 0) {
       // 疯狂追击用高转向（10），追踪弹技能按等级线性提升（lvl1≈5.2 → lvl5≈10）
+      // 口径注意：拐弯弹的 traveled 是「弧长」（js/bullet.js:389 逐帧 hypot 累加），
+      // 而再射闸门 refireGateDistance 与有效射程 maxRange 都以 traveled 为尺度 ——
+      // 实测近直角靶位弧长/直线位移比 1.163~1.264，即这类判定在拐弯弹上会提前 16%~26% 触发；
+      // 同角度斜靶仅 1.008~1.014（原「1% 可忽略」是几何选得太客气）。此为开发者口径，不进玩家文案。
       const turnX = player.buffs.madHunt > 0 ? 10 : (4 + (player.skills.homing || 0) * 1.2);
       for (const b of bullets) {
         if (!b) continue;
@@ -801,7 +806,9 @@ function applyChain(fromX, fromY, srcEnemy, baseDmg, jumps) {
     dealDamageToEnemy(best, fb);
     if (best.hp > 0) hit.add(best.uid);   // 存活的记入命中集，避免同链重复弹射
     cx = best.x; cy = best.y;
-    dmg = Math.max(1, Math.round(dmg * 0.7));
+    // 同源不同式：衰减常量与爆炸连锁共用 BULLET.chainDecay，但闪电链按「跳」相乘，
+    // 且逐跳取整、下限 1（低基础伤害时比连续乘衰减略慢，属既定语义）。
+    dmg = Math.max(1, Math.round(dmg * BCFG.chainDecay));
   }
 }
 
@@ -884,9 +891,10 @@ function orbitHitEnemy(e, ob, enemyIdx) {
  * @param {object} info   { dmg, radius } 由命中子弹记下的基础爆炸参数
  * @param {number} depth  当前连锁递归深度（0 = 首发爆炸）
  */
-/** 连锁伤害倍率：每深一层 ×0.7（视觉另按 0.5^depth 衰减） */
+/** 连锁伤害倍率：每深一层 ×BULLET.chainDecay（视觉另按 0.5^depth 衰减）。
+ *  同源不同式：爆炸连锁按递归深度连续相乘；闪电链见 applyChain，按跳相乘且逐跳取整、下限 1。 */
 export function chainDamageMultiplier(depth) {
-  return Math.pow(0.7, Math.max(0, depth | 0));
+  return Math.pow(BCFG.chainDecay, Math.max(0, depth | 0));
 }
 
 /** 爆炸填充闪的绘制半径：首帧即真实伤害半径，只做 alpha 淡出（伤害瞬时结算，视觉不应滞后）。
@@ -1280,6 +1288,7 @@ export function hitPlayer() {
     clearBullets(true, false);
     // 本局已续命过：技能复活也关掉付费 REVIVE 通道；同时让「凤凰涅槃」成就看见这条路径
     reviveUsed = true;
+    reviveCount++;
     showAchievementToast(checkAchievements({ runScore: score, runLevel: pLevel, runCombo: combo, reviveUsed: true }));
     toast = { text: "绝境逢生！", color: "#7CFC00", t: 1.8 };
     sfx.revive();
@@ -1333,6 +1342,7 @@ function gameOver() {
 function doRevive() {
   if (!spendStardust(META.reviveCost)) { gameOver(); return; }
   reviveUsed = true;
+  reviveCount++;
   lives = 1;
   player.x = W / 2;
   player.y = H - player.h / 2 - 40;
@@ -1403,7 +1413,8 @@ function resetGame() {
   startBest = getBest();
   newBestOnce = false;
   newBestFx = 0;
-  reviveUsed = false;
+reviveUsed = false;
+  reviveCount = 0;
 
   const talentFx = getTalentEffects();
   const shopFx = getShopEffects();
@@ -2172,6 +2183,8 @@ window.__game = {
     : { enabled: false, round: 0, timer: 0, awaitingBoss: false }),
   getCampaignButton,
   getMaxLives: () => maxLives, getLives: () => lives,
+  // 续命观测口（只读）：reviveUsed=本局是否已续命；revives=本局实际续命次数
+  getReviveStats: () => ({ reviveUsed, revives: reviveCount }),
   getMenuPage: getMenuPage, setMenuPage,
   get enemies() { return enemies; },
   get bullets() { return bullets; },

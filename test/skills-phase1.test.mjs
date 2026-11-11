@@ -6,6 +6,7 @@ import { createPlayer } from "../js/player.js";
 import { calcFireRate, SKILLS, skillMax, BULLET, XP_BASE } from "../js/config.js";
 import { META } from "../js/config.js";
 import { getSettings } from "../js/meta.js";
+import { createSyntheticBullet, applyPierceOrRemove, fireBullet } from "../js/bullet.js";
 
 const noop = () => {};
 
@@ -212,5 +213,27 @@ describe("阶段1 新技能：回归护栏", () => {
     assert.equal(game().getLives(), 2, "只应发一次 doLevelUp 的命，而不是 2~3 次");
     assert.ok(p.level > level0, "击杀经验仍应正常累积（升级不回退）");
     assert.equal(errors.length, 0, errors.join("\n"));
+  });
+});
+
+describe("阶段1 新技能：池与观测口护栏", () => {
+  it("合成子弹不回真实子弹的池（防 _chainSource 静默残留）", () => {
+    game().resetGame();
+    const p = game().getPlayer();
+    const synth = createSyntheticBullet(1, { chainSource: true });
+    // 生产路径：dealDamageToEnemy 末尾就是 applyPierceOrRemove(b)
+    applyPierceOrRemove(synth);
+    const live = fireBullet(0, 1, p, 240, 500);
+    assert.notEqual(live, synth, "合成弹被回池：下一发真实弹复用了同一个对象");
+    assert.notEqual(live._chainSource, true, "真实弹出厂即带 _chainSource → 永远不触发连锁");
+  });
+
+  it("续命观测口（只读）：secondWind 触发后 revives=1 且 reviveUsed=true", () => {
+    game().resetGame();
+    const p = game().getPlayer();
+    p.skills.secondWind = 1;
+    setLivesForTest(1);
+    hitPlayer();
+    assert.deepEqual(game().getReviveStats(), { reviveUsed: true, revives: 1 });
   });
 });
