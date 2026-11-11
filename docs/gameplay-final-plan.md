@@ -5,7 +5,7 @@
 
 ## 0. 落地状态（2026-11-11 执行轮追加，覆盖下文与实做不一致的表述）
 
-批 0 + P3(1a) 已实施：`npm test` **410 tests / 49 suites / 0 fail**（基线 398/47，新增 12 例 / 2 套件），`npm run test:smoke` `state:1`、console error 与 pageerror 均为「无」，运行时 `js/**` 文件数 **31 不变**（未新增模块，deploy 版本化计数无需 31→32）。
+批 0 + P3(1a) 已实施（提交 `bac1dfc`，版本 `0.5.3 → 0.5.4`）：`npm test` **413 tests / 50 suites / 0 fail**（基线 398/47，新增 15 例 / 3 套件 = enemy +4、synergy +11），`npm run test:smoke` `state:1`、console error 与 pageerror 均为「无」，运行时 `js/**` 文件数 **31 不变**（未新增模块，deploy 版本化计数无需 31→32）。
 
 实施中对本文的四处更正（以代码为准）：
 
@@ -80,7 +80,7 @@
 
 | 批次 | 内容 | 成本 | 验收判据（可证伪） | 降级/回退条件 |
 |---|---|---|---|---|
-| 批 0 | **已落地（默认生效，非灰度）**：`ENEMY_TYPES.small.fireCd` `[4,6]`→`[1.4,2.0]` + `js/enemy.js:199` 复射改读表并乘 `fireMul` + 子代 `e.fireMul = 1` 堵池泄漏 | S | 实际验收：① `npm test` 410/410（新增 4 条 enemy 用例：复射锁数值、高等级复射乘 `fireMul`、level∈{1,6} 最坏组合「至少一枪」、分裂子代 `fireMul` 池泄漏守护）；② `test:smoke` `state:1`、0 console error / 0 pageerror；③ 运行期探针 `tools/perf/graze-fuel-probe.mjs`：修复前 `hostileFrames 0 / peakHostile 0` → 修复后 `hostileFrames 1668~3439 / peakHostile 8~11`、`errors []` | 遗留观察项（交 Antigravity 复核后裁定）：`framesPlayed 665 < 900` 且 `minDist 0.4` 提示仿真写轮机提前阵亡——若死亡率增幅 >1.5× 则回调表值下界，而不是回退读表修复本身 |
+| 批 0 | **已落地（默认生效，非灰度）**：`ENEMY_TYPES.small.fireCd` `[4,6]`→`[1.4,2.0]` + `js/enemy.js:199` 复射改读表并乘 `fireMul` + 子代 `e.fireMul = 1` 堵池泄漏 | S | 实际验收：① `npm test` 413/413（新增 4 条 enemy 用例：复射锁数值、高等级复射乘 `fireMul`、level∈{1,6} 最坏组合「至少一枪」、分裂子代 `fireMul` 池泄漏守护）；② `test:smoke` `state:1`、0 console error / 0 pageerror；③ 运行期探针 `tools/perf/graze-fuel-probe.mjs`：修复前 `hostileFrames 0 / peakHostile 0` → 修复后 `hostileFrames 1668~3439 / peakHostile 8~11`、`errors []` | 密度侧已复核（独立探针：level 1/6 穿窗开火率 50/50、level 14 为 45/50 且符合表注释预期；60s 满负荷 `totalFired 178~213`、`peakHostile 14~20` 远低于 140/秒硬顶、`deniedVolleys 0`；split 子代穿窗期 **0 发**，因 `fireCd=rand(5,8)` 恒大于其 2.58s 穿越时间，故 1a 的 `e.fireMul=1` 只是防池泄漏、不产生二次节奏扰动）。**仍未回答的是死亡率**：`framesPlayed 665 < 900` 且 `minDist 0.4` 提示仿真写轮机提前阵亡，无真人试玩数据；若真人反馈死亡率增幅 >1.5× 则回调表值**下界**，而不是回退读表修复本身 |
 | 批 1a | **已落地**：`SYNERGY` 三态表（4 条已核锚点，排除 score 轴）+ `js/player.js:286` → `skillMax("dual")` + `js/hud.js` 协同/互斥读数 | S | `test/synergy.test.mjs` 6 条守护：表结构、锚点 probe 不漂移、id 存在于 `SKILLS`/`POWERUP_DURATION`、dual 等值且仍钳制、rapid/madHunt 短路互斥、`activeSynergies` 双边成立才显示 | 若某条"协同"后续被证伪 → 从表中删除并入负空间清单，禁止留在表里当卖点 |
 | 批 1b | **延期**：madHunt 波内封顶（现绕过 `waveCap`，满配 140 发/波）、`move × speed` 总乘算封顶（现 2.58× 无上限） | S~M | 已留两条 `FIXME(1b)` 现状锁定用例：封顶落地时必然变红，强制经过平衡评审 | 属改手感/改清怪速度，禁止与 1a 混批（1a 是零行为，1b 不是） |
 | 批 2 | P2 计量项：`DANGER` 表 + `else if` 环 + HUD 读数 + fixture/tripwire 双测 | S | 固定单弹 `dist=27` 计 1、`grazeRadius=20` 计 0；`full` **不发奖励**，只统计 | 若批 0 未达标 → 本批只做 HUD 计量，不进入奖励设计 |
