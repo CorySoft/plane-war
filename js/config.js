@@ -111,6 +111,11 @@ export const BULLET = {
   orbitalAccel: 0.035,          // 每帧加速度基数
   orbitalAccelPerLevel: 0.015,  // 每级额外加速度
   orbitalMaxSpeed: 22,          // 速度上限
+  chainRange: 170,              // 连锁闪电最大弹射距离（像素）
+  novaBaseRadius: 120,          // 新星环基础半径，每级 +40
+  novaRadiusPerLevel: 40,
+  novaBaseDmg: 2,               // 新星基础伤害，每级 +1
+  novaDmgPerLevel: 1,
 };
 
 // ---------- 敌方等级 ----------
@@ -159,7 +164,16 @@ export function calcFireRate(player) {
   if (player.buffs.rapid > 0) return 0.055 * frMul;
   if (player.buffs.madHunt > 0) return 0.045 * frMul;
   const power = Math.max(1, player.power || 1);
-  return (PLAYER_BASE.fireInterval - (power - 1) * 0.04) * (1 - 0.08 * (player.skills.rate || 0)) * frMul;
+  let fr = (PLAYER_BASE.fireInterval - (power - 1) * 0.04) * (1 - 0.08 * (player.skills.rate || 0)) * frMul;
+  // 过载核心：生命越低射速越快（player.hpRatio 由 game.js 每帧写入，1=满血 0=濒死）。
+  // 仅在常规射击时生效（急速/疯狂追击走上方短路）；残血加成封顶，避免后期一发入魂。
+  const ov = player.skills.overload || 0;
+  if (ov > 0) {
+    const ratio = player.hpRatio ?? 1;
+    const bonus = (1 - ratio) * 0.18 * ov;        // 可达值：hpRatio 下限为 1/maxLives（maxLives=3 → ×1.6，生命强化满级 7 → ×1.77），随 maxLives 提升
+    fr *= 1 / (1 + bonus);
+  }
+  return fr;
 }
 
 /** 子弹射程(像素)：fireBullet、HUD、暂停面板共用，避免三处各写一份常量而漂移 */
@@ -298,7 +312,19 @@ export const SKILLS = [
   { id: "knockback", name: "子弹击退",   desc: "击退+30%",       fullDesc: "子弹命中击退敌机，每级 +30% 击退力",          color: "#c8a6ff", max: 6 },
   { id: "bulletSpeed", name: "子弹加速", desc: "弹速+15%",      fullDesc: "每级子弹飞行速度 +15%，满级 +90%",            color: "#5ee6ff", max: 6 },
   { id: "orbital",   name: "天基武器",   desc: "加速递增",       fullDesc: "子弹射出后不断加速，威力递增",                color: "#5ee6ff", max: 5 },
+  // ---------- 阶段1 新增：机制型技能（6 个） ----------
+  { id: "homing",     name: "追踪弹",     desc: "子弹自动追踪",   fullDesc: "所有友方子弹自动追踪最近敌机，每级转向更灵敏，满级 5 级", color: "#5ee6ff", max: 5 },
+  { id: "nova",       name: "新星爆发",   desc: "升级释放新星",   fullDesc: "每次升级释放一道新星环，对周围敌机造成范围伤害，满级 3 级（范围与伤害提升）", color: "#ff8a55", max: 3 },
+  { id: "regen",      name: "生命再生",   desc: "持续回血",       fullDesc: "每秒按等级恢复生命，满级 5 级（约每 3 秒 1 命）", color: "#7CFC00", max: 5 },
+  { id: "overload",   name: "过载核心",   desc: "残血加速射击",   fullDesc: "生命越低射速越快，每级提升上限，满级 5 级", color: "#ffd93b", max: 5 },
+  { id: "secondWind", name: "绝境逢生",   desc: "免费复活1次",    fullDesc: "本局首次死亡时自动复活一次（仅 1 级）", color: "#7CFC00", max: 1 },
+  { id: "chain",      name: "连锁闪电",   desc: "命中弹射闪电",   fullDesc: "子弹命中后向最近敌机弹射闪电，每级 +1 跳，满级 5 级", color: "#5ee6ff", max: 5 },
 ];
+
+// 再生：每秒按等级累计的 fractional 生命（lvl5 → 0.25/秒 → 约 4 秒 1 命）。
+// 旧值若给到 0.3/级会与承伤上限（hitPlayer 后 2.2s 无敌帧）造成「站着回满」的滚雪球，
+// 这里压到 0.05/级，满级稳态约 0.25 HP/s（约承伤 55%），保留走位要求。
+export const REGEN_RATE = 0.05;
 
 // 能量吸取：每级 6% 击杀回血，成功触发后 5 秒冷却。
 // 旧值 15%/级（满级 60%）在满配清屏下实测 2.3 HP/s，是承伤上限（hitPlayer 后 2.2s 无敌帧 → 0.45 HP/s）的 5 倍，

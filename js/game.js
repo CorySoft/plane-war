@@ -2,7 +2,7 @@
  * game.js — 主游戏循环 + 状态机 + 碰撞检测
  * =========================================================== */
 
-import { W, H, STATE, BULLET as BCFG, TAU, DIFFICULTY_PRESETS, POWERUP_DROP, POWERUP_DURATION, META, COMBO, XP_BASE, XP_GROWTH, PLAYER, SCORE_AXIS, levelFromScore, computeViewport, setViewport, skillMax } from "./config.js";
+import { W, H, STATE, BULLET as BCFG, TAU, DIFFICULTY_PRESETS, POWERUP_DROP, POWERUP_DURATION, META, COMBO, XP_BASE, XP_GROWTH, PLAYER, SCORE_AXIS, levelFromScore, computeViewport, setViewport, skillMax, REGEN_RATE } from "./config.js";
 import { clamp, rand, hypot, setf, cachedRadialGradient } from "./utils.js";
 import { glowText } from "./theme.js";
 import { sfx, startMusic, stopMusic, setSfxMuted, setMusicMuted, setMusicIntensity, duckMusic } from "./audio.js";
@@ -12,7 +12,7 @@ import { triggerShake, updateCamera, applyCamera, resetCamera, slowmo } from "./
 import {
   bullets, fireBullet, spawnEnemyBullet, spawnSplitBurst, spawnLaserVolley,
   spawnHostileBullets, setHostileBulletBudget,
-  applyPierceOrRemove, removeBullet,
+  applyPierceOrRemove, removeBullet, createSyntheticBullet,
   updateBullets, drawBullets, clearBullets, maxMainBulletTraveled, markMainBulletsTriggered,
   canHitEnemy, markHitEnemy, headingToBulletAngle, countFriendlyBullets
 } from "./bullet.js";
@@ -142,6 +142,7 @@ let talentFxCache = null;    // 本局天赋效果缓存（一局内不变，避
 let shopFxCache = null;      // 本局商店加成缓存
 let fxRings = [];           // 爆炸弹圆弧波纹（临时光效，随时间扩散消散）
 let fxBlasts = [];          // 爆炸瞬间填充闪（即时膨胀到真实伤害半径，让反馈同步）
+let fxChains = [];          // 连锁闪电线段（命中后弹射的视觉特效）
 let deathTimer = 0;         // 死亡慢动作倒计时
 let deathFlash = 0;         // 死亡白屏闪烁
 let startBest = 0;          // 本局开局时的最高分基准
@@ -158,7 +159,7 @@ let bossRush = null;        // Boss Rush 原型状态（null = 未启用，默�
 let campaignComplete = false;
 let tutorialTimer = 0;     // 教程剩余显示时间
 let musicStarted = false;
-let reviveUsed = false;    // 本局是否已用过复活（每局限 1 次）
+let reviveUsed = false;    // 本局是否已续命过（技能复活或付费复活，二选一，每局限 1 次）
 // 深空背景固定渐变缓存（基色/地平线/暗角，只依赖 W/H），必须在 loop() 启动前声明，避免 TDZ
 let spaceBgCache = { key: "", base: null, hz: null, vg: null };
 
@@ -325,8 +326,14 @@ function update(dt, realDt = dt) {
     updateParticles(dt);
     updateBullets(dt);
 
-    // 疯狂追击：全屏追踪弹转向最近敌机
-    if (player.buffs.madHunt > 0 && enemies.length > 0) {
+    // 过载核心用：每帧写入当前生命占比（lives/maxLives），1=满血 0=濒死
+    player.hpRatio = maxLives > 0 ? lives / maxLives : 1;
+
+    // 追踪弹转向：疯狂追击（buff）或追踪弹技能激活时，友方 homing 子弹转向最近敌机
+    const homingActive = player.buffs.madHunt > 0 || (player.skills.homing || 0) > 0;
+    if (homingActive && enemies.length > 0) {
+      // 疯狂追击用高转向（10），追踪弹技能按等级线性提升（lvl1≈5.2 → lvl5≈10）
+      const turnX = player.buffs.madHunt > 0 ? 10 : (4 + (player.skills.homing || 0) * 1.2);
       for (const b of bullets) {
         if (!b) continue;
         if (!b.friendly || !b.homing) continue;
@@ -343,7 +350,7 @@ function update(dt, realDt = dt) {
         while (da > Math.PI) da -= TAU;
         while (da < -Math.PI) da += TAU;
         const sp = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
-        const na = cur + da * Math.min(1, 10 * dt);
+        const na = cur + da * Math.min(1, turnX * dt);
         b.vx = Math.cos(na) * sp;
         b.vy = Math.sin(na) * sp;
       }
@@ -411,6 +418,13 @@ function update(dt, realDt = dt) {
       if (b.life <= 0) fxBlasts.splice(i, 1);
     }
 
+    // 连锁闪电线段更新（极短生命周期，仅作命中反馈）
+    for (let i = fxChains.length - 1; i >= 0; i--) {
+      const c = fxChains[i];
+      c.life -= dt;
+      if (c.life <= 0) fxChains.splice(i, 1);
+    }
+
     // 处理玩家事件标记
     if (player._addLife) {
       lives = Math.min(maxLives, lives + 1);
@@ -435,6 +449,17 @@ function update(dt, realDt = dt) {
       addXp(amount);
       player._xpPack = false;
       toast = { text: "经验包 +1 级", color: "#8ad4ff", t: 1.2 };
+    }
+
+    // 生命再生：累计 fractional 生命，满 1 即 +1 命（死亡动画/满血/已死时跳过）
+    if ((player.skills.regen || 0) > 0 && lives > 0 && lives < maxLives && deathTimer <= 0) {
+      player._regenAccum = (player._regenAccum || 0) + REGEN_RATE * player.skills.regen * dt;
+      if (player._regenAccum >= 1) {
+        const add = Math.floor(player._regenAccum);
+        player._regenAccum -= add;
+        lives = Math.min(maxLives, lives + add);
+        spawnDamageNumber(player.x, player.y - 28, "+" + add, "#7CFC00");
+      }
     }
 
     // 道具掉落
@@ -617,7 +642,7 @@ function checkCollisions() {
         // 穿透弹/分裂碎片命中后不销毁，必须按敌机去重，否则重叠的每一帧都会重复扣血
         if (!canHitEnemy(b, e)) continue;
         // 处理伤害
-        dealDamageToEnemy(e, b, i, j);
+        dealDamageToEnemy(e, b);
         break;
       }
     }
@@ -667,7 +692,7 @@ function checkCollisions() {
   }
 }
 
-function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
+function dealDamageToEnemy(e, b) {
   // 合并上一轮连锁改动的防重复结算：hp<=0 说明已被击杀结算过
   if (e.hp <= 0) return;
   markHitEnemy(b, e);
@@ -687,6 +712,12 @@ function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
   e.hp -= b.dmg;
   e.hitFlash = 1;
   spawnDamageNumber(e.x, e.y, b.isCrit ? b.dmg + "!" : "" + b.dmg, b.isCrit ? "#ff8fa3" : "#fff", b.isCrit);
+
+  // 连锁闪电：子弹命中后向最近敌机弹射（合成子弹带 _chainSource 防止递归触发；
+  // nova 的范围爆发属另一类伤害，不再触发连锁，避免「爆发→连锁→击杀→经验」叠加放大）
+  if ((player.skills.chain || 0) > 0 && b.friendly && !b._chainSource && !b._novaSource) {
+    applyChain(e.x, e.y, e, b.dmg, player.skills.chain);
+  }
 
   // 分裂行为：命中时触发碎片（穿透弹也可叠加分裂）
   // 方向必须用 headingToBulletAngle 换算，否则碎片会横向飞而不是沿主弹前进方向
@@ -744,6 +775,33 @@ function dealDamageToEnemy(e, b, enemyIdx, bulletIdx) {
     applyPierceOrRemove(b);
   } else {
     applyPierceOrRemove(b);
+  }
+}
+
+/**
+ * 连锁闪电：从 (fromX,fromY) 起，向最近未命中的敌机弹射最多 jumps 跳，
+ * 每跳伤害衰减（×0.7），超出 chainRange 则停止。视觉用 fxChains 线段表现。
+ * 合成子弹标记 _chainSource，避免 dealDamageToEnemy 内再次触发连锁（防递归）。
+ */
+function applyChain(fromX, fromY, srcEnemy, baseDmg, jumps) {
+  if (jumps <= 0) return;
+  let cx = fromX, cy = fromY;
+  const hit = new Set(srcEnemy && srcEnemy.uid != null ? [srcEnemy.uid] : []);
+  let dmg = Math.max(1, Math.round(baseDmg * 0.5));
+  for (let j = 0; j < jumps; j++) {
+    let best = null, bd = Infinity;
+    for (const e of enemies) {
+      if (e.hp <= 0 || hit.has(e.uid)) continue;
+      const d = hypot(e.x, e.y, cx, cy);
+      if (d < bd) { bd = d; best = e; }
+    }
+    if (!best || bd > BCFG.chainRange) break;
+    fxChains.push({ x1: cx, y1: cy, x2: best.x, y2: best.y, life: 0.18, maxLife: 0.18, color: "#9be7ff" });
+    const fb = createSyntheticBullet(dmg, { x: best.x, y: best.y, r: 4, chainSource: true });
+    dealDamageToEnemy(best, fb);
+    if (best.hp > 0) hit.add(best.uid);   // 存活的记入命中集，避免同链重复弹射
+    cx = best.x; cy = best.y;
+    dmg = Math.max(1, Math.round(dmg * 0.7));
   }
 }
 
@@ -1126,7 +1184,7 @@ function getDropBonus() {
   return b;
 }
 
-function addXp(n) {
+export function addXp(n) {
   let v = n;
   if (player.skills.xpboost) v *= (1 + 0.15 * player.skills.xpboost);
   v *= (1 + (talentFxCache.xpGain || 0) + (shopFxCache?.xpGain || 0));
@@ -1140,9 +1198,31 @@ function addXp(n) {
     // （否则一次连锁清怪会凭空多给多条生命且三选一被反复重roll）
     if (levelledThisFrame) break;
     levelledThisFrame = true;
+    // 新星爆发：每次升级释放一道新星环（技能满级时范围/伤害提升）。
+    // 必须放在闸门之后：nova 击杀会经 addXp 重入，若在闸门前触发会形成
+    // 升级 → nova → 击杀 → 经验 → 升级 的自催化环（实测一次升级被放大成 4~5 次）。
+    if ((player.skills.nova || 0) > 0) emitNova(player, player.skills.nova);
     doLevelUp();
     if (state !== STATE.PLAYING) break;
   }
+}
+
+/** 新星爆发：每次升级释放一道新星环，对周围敌机造成范围伤害（范围/伤害随技能等级提升） */
+function emitNova(p, lvl) {
+  const radius = BCFG.novaBaseRadius + BCFG.novaRadiusPerLevel * (lvl - 1);
+  const dmg = BCFG.novaBaseDmg + BCFG.novaDmgPerLevel * (lvl - 1);
+  if (fxRings.length < BCFG.fxRingsCap) {
+    fxRings.push({ x: p.x, y: p.y, r0: 10, rMax: radius, life: 0.45, maxLife: 0.45, color: "#a0e8ff" });
+  }
+  triggerShake(0.6);
+  for (const e of [...enemies]) {
+    if (e.hp <= 0) continue;
+    if (hypot(e.x, e.y, p.x, p.y) >= radius) continue;
+    // 护盾与伤害结算统一走 dealDamageToEnemy 的权威分支（含「护盾」飘字与穿透清理），
+    // 不在新星里另写一份，否则同语义双实现必然「改一漏二」。
+    dealDamageToEnemy(e, createSyntheticBullet(dmg, { x: e.x, y: e.y, r: 4, novaSource: true }));
+  }
+  sfx.power();
 }
 
 function doLevelUp() {
@@ -1160,7 +1240,7 @@ function doLevelUp() {
   state = STATE.LEVELUP;
 }
 
-function chooseSkill(skillId) {
+export function chooseSkill(skillId) {
   if (!skillChoices) return;
   const skill = skillChoices.find(s => s.id === skillId);
   if (!skill) return;
@@ -1171,7 +1251,12 @@ function chooseSkill(skillId) {
   enterPlaying();
 }
 
-function hitPlayer() {
+/** 仅测试/调参用：直接设置本局剩余生命（不经过死亡/复活路径） */
+export function setLivesForTest(n) {
+  lives = n;
+}
+
+export function hitPlayer() {
   // 玩家已死就不再结算：否则死亡动画（2s）一结束，还压在身上的敌机会立刻
   // 再打中一次，deathTimer 又被重置成 2s，进入「死了却永远不结算」的死循环，
   // lives 一路扣成负数。正常对局靠 2.2s 无敌帧掩盖了它（动画 2s < 无敌 2.2s），
@@ -1179,6 +1264,27 @@ function hitPlayer() {
   if (lives <= 0) return;
   lives--;
   player.invincible = player.invincibleTime || 2.2;
+  // 绝境逢生：本局首次致死时自动复活一次（仅 1 级），跳过死亡结算
+  if (lives <= 0 && (player.skills.secondWind || 0) > 0 && !player.secondWindUsed) {
+    player.secondWindUsed = true;
+    lives = 1;
+    player.shield = 0;
+    combo = 0;
+    player.power = Math.max(1, player.power - 1);
+    player.powerTime = 0;
+    for (const k of Object.keys(player.buffs)) player.buffs[k] = 0;
+    spawnParticles(player.x, player.y, "#7CFC00", 24, 6);
+    triggerShake(1.5);
+    // 只清敌弹，不重置敌弹配额/拒绝计数（默认 clearBullets(true) 会灌满 tokens、清零
+    // deniedVolleys —— 等于给敌人补满弹药再「解围」，方向反了）
+    clearBullets(true, false);
+    // 本局已续命过：技能复活也关掉付费 REVIVE 通道；同时让「凤凰涅槃」成就看见这条路径
+    reviveUsed = true;
+    showAchievementToast(checkAchievements({ runScore: score, runLevel: pLevel, runCombo: combo, reviveUsed: true }));
+    toast = { text: "绝境逢生！", color: "#7CFC00", t: 1.8 };
+    sfx.revive();
+    return;
+  }
   triggerShake(1);
   combo = 0;
   player.shield = 0;
@@ -1329,6 +1435,7 @@ function resetGame() {
   clearBullets(); clearEnemies(); clearParticles(); clearPowerups(); clearDamageNumbers();
   fxRings = [];
   fxBlasts = [];
+  fxChains = [];
   resetCamera();
   duckMusic(false);   // 复位上一局暂停时压低的 BGM 增益
   resetWaves();
@@ -1409,6 +1516,24 @@ function drawBlastFlashes(ctx) {
     ctx.fill();
     ctx.strokeStyle = `rgba(255,180,50,${0.9 * t})`;
     ctx.lineWidth = 3 * t + 1;
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+/** 绘制连锁闪电线段（命中后弹射的视觉反馈） */
+function drawChainLightning(ctx) {
+  for (const c of fxChains) {
+    const t = c.life / c.maxLife;
+    ctx.save();
+    ctx.globalAlpha = t;
+    ctx.strokeStyle = c.color;
+    ctx.lineWidth = 2.5 * t + 0.5;
+    ctx.shadowColor = c.color;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(c.x1, c.y1);
+    ctx.lineTo(c.x2, c.y2);
     ctx.stroke();
     ctx.restore();
   }
@@ -1504,6 +1629,7 @@ function draw() {
     drawParticles(ctx);
     drawExplosionRings(ctx);
     drawBlastFlashes(ctx);
+    drawChainLightning(ctx);
     drawDamageNumbers(ctx);
 
     // 死亡白屏闪烁
@@ -2068,4 +2194,8 @@ window.__game = {
   getFxBlasts: () => fxBlasts.map(b => ({
     x: b.x, y: b.y, rMax: b.rMax, life: b.life, maxLife: b.maxLife, delay: b.delay,
   })),
+  // 连锁闪电线段明细（审计/测试用）
+  getFxChains: () => fxChains.map(c => ({ x1: c.x1, y1: c.y1, x2: c.x2, y2: c.y2, life: c.life, maxLife: c.maxLife })),
+  // 调试钩子（仅测试/调参用，不影响正常玩法）
+  getSkillChoices: () => skillChoices,
 };

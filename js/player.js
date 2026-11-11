@@ -94,6 +94,9 @@ export function createPlayer(aircraftCfg, talentEffects, shopEffects) {
     _heal: 0,
     _toast: null,
     lifestealCd: 0,   // 能量吸取触发冷却（秒），由 updatePlayer 递减
+    _regenAccum: 0,   // 生命再生：累计 fractional 生命，满 1 即 +1 命
+    secondWindUsed: false, // 绝境逢生：本局是否已触发过免费复活
+    hpRatio: 1,       // 过载核心用：当前生命占比（lives/maxLives），由 game.js 每帧写入
   };
 }
 
@@ -431,6 +434,11 @@ export function getShootPattern(player) {
     if (patterns.length + 2 > cap) break;
     addBullet(pair[0]);
     addBullet(pair[1]);
+  }
+
+  // 追踪弹技能：非疯狂追击路径下，所有友方子弹标记 homing（madHunt 路径已在上方单独置 true）
+  if ((player.skills.homing || 0) > 0) {
+    for (const p of patterns) p.homing = true;
   }
   return patterns;
 }

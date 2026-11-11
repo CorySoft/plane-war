@@ -48,8 +48,30 @@ export function markHitEnemy(b, e) {
   b.hitUids.add(e.uid);
 }
 
-/** 释放子弹回池（重置动态字段） */
+/**
+ * 合成子弹：范围伤害（nova）/连锁闪电（chain）等系统使用。
+ * 形状与 allocBullet 的默认字段对齐，但不入对象池——合成弹一旦被真实子弹复用，
+ * 残留的 _chainSource/_novaSource 会让后续真实子弹静默永不触发对应效果。
+ */
+export function createSyntheticBullet(dmg, opts = {}) {
+  return {
+    behaviors: new Set(),
+    x: opts.x ?? 0, y: opts.y ?? 0, vx: 0, vy: 0, baseSpd: 0, accel: 0,
+    dmg, r: opts.r ?? 4, baseR: opts.r ?? 4, friendly: true, color: opts.color || "#a0e8ff",
+    traveled: 0, maxRange: 0, pierceCount: 0, maxPierce: 0,
+    splitCount: 0, explosionRadius: 0, expChance: 0, expDmgRatio: 0,
+    isScatter: false, isCrit: false,
+    _refire: false, life: 0, homing: 0, knockback: 0, nextSplitDist: 0, splitRange: 0,
+    hitUids: new Set(),
+    _synthetic: true,
+    _chainSource: !!opts.chainSource,
+    _novaSource: !!opts.novaSource,
+  };
+}
+
+/** 释放子弹回池（重置动态字段；合成子弹不入池） */
 function freeBullet(b) {
+  const synthetic = b._synthetic === true;
   b.behaviors.clear();
   b.traveled = 0;
   b.pierceCount = 0;
@@ -62,7 +84,10 @@ function freeBullet(b) {
   b._refire = false; b.life = 0; b.homing = 0; b.knockback = 0;
   b.nextSplitDist = 0; b.splitRange = 0;
   b.hitUids.clear();
-  if (pool.length < 400) pool.push(b); // 防爆量：池上限
+  b._synthetic = false;
+  b._chainSource = false;
+  b._novaSource = false;
+  if (!synthetic && pool.length < 400) pool.push(b); // 防爆量：池上限；合成弹不入池
 }
 
 function pushBullet(b) { bullets.push(b); }
