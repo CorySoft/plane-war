@@ -103,8 +103,8 @@ describe("madHunt screenCap 预判", () => {
   it("满屏时预判为 false（update 不会进入 getShootPattern 分支）", () => {
     const p = fullMadHuntPlayer();
     const expected = expectedMadHuntPatterns(p);
-    assert.equal(expected, 140);
-    assert.equal(canBuildShootPattern(p, 140, BULLET.screenCap), false);
+    assert.equal(expected, BULLET.madHuntWaveCap, "madHunt 单波预判应与 madHuntWaveCap 一致");
+    assert.equal(canBuildShootPattern(p, BULLET.screenCap, BULLET.screenCap), false, "满屏（friendly=screenCap）时应跳过构建");
     assert.equal(canBuildShootPattern(p, BULLET.screenCap - expected + 1, BULLET.screenCap), false);
   });
 
@@ -140,7 +140,7 @@ describe("madHunt screenCap 预判", () => {
     assert.equal(errors.length, 0, errors.join("\n"));
   });
 
-  it("集成：屏上空时，同一配置一帧内正常发射满一波 140 发", () => {
+  it("集成：屏上空时，同一配置一帧内正常发射满一波（受 madHuntWaveCap 约束）", () => {
     getSettings().skipTutorial = true;
     game().resetGame();
     assert.equal(game().state(), STATE.PLAYING);
@@ -153,7 +153,7 @@ describe("madHunt screenCap 预判", () => {
     assert.equal(maxFriendlyBullets(), 0);
     rafCb();
     const after = maxFriendlyBullets();
-    assert.equal(after, 140, `非满屏时应正常发出整波（实际 ${after}）`);
+    assert.equal(after, BULLET.madHuntWaveCap, `非满屏时应正常发出整波（实际 ${after}）`);
     assert.equal(errors.length, 0, errors.join("\n"));
   });
 });

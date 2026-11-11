@@ -64,6 +64,10 @@ export const BULLET = {
   // 注：射击模型改为「按间隔驱动」后同屏波数约为此前的 4 倍，
   // 因此单波上限由 24 下调到 16，避免后期一屏上百发失去队形感。
   waveCap: 16,
+  // 疯狂追击（madHunt）单波上限：madHunt 是 360° 追踪弹雨，普通波 waveCap=16 是「前向」密度，
+  // 弹雨需更密才有「雨」观感，但满配（scatter=6, volley=6）原生高达 140 发/volley 会彻底抹平敌方密度设计。
+  // 取普通波的 3 倍（48）：满配 140 → 均匀采样截到 48，约 3 圈弹雨，5s 窗口约 432 发，强但不碾压。
+  madHuntWaveCap: 48,
   screenCap: 140,       // 同屏友方子弹硬上限：超过则本轮不发射（性能与画面密度兜底）
   hostileScreenCap: 140, // 同屏敌方子弹独立硬上限
   hostileSpawnRateCap: 140, // 敌方全局每秒发射上限；关卡可进一步收紧
@@ -329,28 +333,28 @@ export const SYNERGY = Object.freeze([
     formula: "(1 + 0.12·move) × 1.5",
     skills: ["move"], buffs: ["speed"],
     anchors: [{ at: "js/player.js:102-104", probe: "0.12" }],
-    note: "满级 move(6) 时总乘算 2.58×，目前没有总上限——见 test/synergy.test.mjs 的 FIXME(1b)",
+    note: "满级 move(6) 时总乘算 2.58×，经 1b 平衡评审确认为有意设计不变式（不封顶），由 test/synergy.test.mjs 守护不被误改",
   },
   {
     id: "burst", label: "侧翼炮 × 急速", state: "stack",
     formula: "弹道条数 × 射速 0.055s",
     skills: ["dual"], buffs: ["rapid"],
-    anchors: [{ at: "js/player.js:286", probe: 'skillMax("dual")' }, { at: "js/config.js:152", probe: "0.055" }],
+    anchors: [{ at: "js/player.js:286", probe: 'skillMax("dual")' }, { at: "js/config.js:156", probe: "0.055" }],
   },
   {
     id: "rapid_madHunt", label: "急速 / 疯狂追击", state: "exclusive",
     formula: "calcFireRate 短路 return，急速优先于追击",
     buffs: ["rapid", "madHunt"],
-    anchors: [{ at: "js/config.js:152-153", probe: "0.045" }],
+    anchors: [{ at: "js/config.js:156-157", probe: "0.045" }],
   },
   {
     id: "explosion_chain", label: "爆炸连锁", state: "stack",
     formula: "每深一层 ×0.7，且 depth ≥ explosionMaxChainDepth 不再递归",
     skills: ["explosion"], anyOf: ["expChance", "expDmg", "expRange"],
     anchors: [
-      { at: "js/game.js:837", probe: "Math.pow(0.7" },
-      { at: "js/game.js:948", probe: "_deathExplosion && !isDeepChain" },
-      { at: "js/config.js:97", probe: "explosionMaxChainDepth" },
+      { at: "js/game.js:839", probe: "Math.pow(0.7" },
+      { at: "js/game.js:950", probe: "_deathExplosion && !isDeepChain" },
+      { at: "js/config.js:101", probe: "explosionMaxChainDepth" },
     ],
     note: "连锁已有双封顶（深度上限 + 逐层衰减），P3 不再另加上限",
   },

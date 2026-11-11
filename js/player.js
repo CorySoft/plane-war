@@ -287,9 +287,9 @@ export function getShootPattern(player) {
   const rapid = player.buffs.rapid > 0;
   const scatterLv = player.skills.scatter || 0;   // 散射：每通道左右对称 ±k 展开
   const volleyLv = player.skills.volley || 0;     // 连射：每通道微扇收束于主弹道
-  const patterns = [];
+  let patterns = [];
 
-  // 疯狂追击：保持现状——全屏 360° 追踪雨（时限道具）
+  // 疯狂追击：全屏 360° 追踪雨（时限道具），单 volley 经 madHuntWaveCap 均匀采样封顶（见下方）
   if (player.buffs.madHunt > 0) {
     const baseDirs = 8 + scatterLv * 2;
     const volleyCount = volleyLv;
@@ -305,6 +305,18 @@ export function getShootPattern(player) {
           homing: true,
         });
       }
+    }
+    // 波内封顶（1b）：madHunt 原生可达 140 发/volley，抹平敌方密度设计。
+    // 均匀跨采样截断到 BULLET.madHuntWaveCap，保留 360° 角度覆盖、约束单 volley。
+    const mhCap = BULLET.madHuntWaveCap;
+    if (patterns.length > mhCap) {
+      const step = patterns.length / mhCap;
+      const kept = [];
+      let next = 0;
+      for (let i = 0; i < patterns.length; i++) {
+        if (i >= next) { kept.push(patterns[i]); next += step; }
+      }
+      patterns = kept;
     }
     return patterns;
   }

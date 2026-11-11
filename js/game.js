@@ -171,7 +171,9 @@ export function expectedMadHuntPatterns(player) {
   if (!player || !(player.buffs?.madHunt > 0)) return 0;
   const scatterLv = player.skills?.scatter || 0;
   const volleyLv = player.skills?.volley || 0;
-  return (8 + scatterLv * 2) * (1 + volleyLv);
+  const native = (8 + scatterLv * 2) * (1 + volleyLv);
+  // 1b：与 getShootPattern 的 madHuntWaveCap 均匀采样封顶保持一致，预判才精确
+  return Math.min(native, BCFG.madHuntWaveCap);
 }
 
 /**

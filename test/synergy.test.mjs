@@ -8,8 +8,8 @@
  *   ① 表结构与锚点不漂移（锚点行段内必须仍能读到 probe 字符串）；
  *   ② dual 上限由硬编码 4 改读 skillMax("dual") 前后**等值**；
  *   ③ exclusive 条目不得被当成叠加协同（calcFireRate 是短路 return）。
- * 另附两条 FIXME(1b) 现状锁定：1b（波内封顶 / 总乘算封顶）刻意延期，
- * 这两条会在封顶落地时变红，逼改动经过平衡评审而不是悄悄发生。
+ * 另附 1b 落地后的守护：madHunt 波内封顶（madHuntWaveCap）已落地；
+ * move×speed 总乘算 2.58× 经平衡评审确认为有意设计不变式（不封顶），本文件守护其不被误改。
  * =========================================================== */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -131,25 +131,24 @@ describe("HUD 协同读数（1a 唯一的新增绘制，纯显示不参与判定
   });
 });
 
-describe("FIXME(1b)：延期项的现状锁定（封顶落地时这两条必须变红并被更新）", () => {
-  it("madHunt 满配单波 140 发，完全绕过 BULLET.waveCap", () => {
-    // js/player.js 的 madHunt 分支在读取 waveCap（:327）之前就 return，
-    // 所以 baseDirs(8 + 2·scatter) × (1 + volley) 不受 16 发/波约束，只被 screenCap=140 整批丢弃兜住。
+describe("1b：封顶已落地（madHunt 波内封顶 + move×speed 设计不变式）", () => {
+  it("madHunt 满配单波经均匀采样截到 madHuntWaveCap", () => {
     const p = playerWith({
       skills: { scatter: skillMax("scatter"), volley: skillMax("volley") },
       buffs: { madHunt: POWERUP_DURATION.madHunt },
     });
+    const native = (8 + 2 * skillMax("scatter")) * (1 + skillMax("volley"));
     const n = getShootPattern(p).length;
-    assert.equal(n, (8 + 2 * skillMax("scatter")) * (1 + skillMax("volley")), "madHunt 单波波数变了：先复核公式再改本断言");
-    assert.ok(n > BULLET.waveCap, `本用例的意义在于锁定"波内无封顶"这一现状：${n} 应大于 waveCap=${BULLET.waveCap}`);
-    // 1b 落地时应改为：assert.ok(n <= BULLET.waveCap) 并同步 docs/gameplay-final-plan.md 的批 3 验收。
+    assert.ok(native > BULLET.madHuntWaveCap, `原生=${native} 应大于 cap=${BULLET.madHuntWaveCap}，否则采样未生效`);
+    assert.equal(n, BULLET.madHuntWaveCap, "madHunt 单波应恰好截到 madHuntWaveCap");
+    assert.ok(n <= BULLET.waveCap * 4, `madHuntWaveCap=${BULLET.madHuntWaveCap} 不得超过 waveCap*4 太多`);
   });
 
-  it("move × speed 总乘算 2.58× 且 player.js 无总封顶", () => {
+  it("move × speed 总乘算锁定 2.58× 为设计不变式（经平衡评审不封顶）", () => {
     const total = (1 + 0.12 * skillMax("move")) * 1.5;
-    assert.ok(Math.abs(total - 2.58) < 1e-12, `当前满配移动总乘算应为 2.58×，实际 ${total}`);
+    assert.ok(Math.abs(total - 2.58) < 1e-12, `机动满配总乘算应为 2.58×，实际 ${total}`);
     const seg = srcOf("js/player.js").slice(101, 104).join("\n");   // js/player.js:102-104
     assert.doesNotMatch(seg, /Math\.min/,
-      "js/player.js:102-104 出现了总封顶 → 1b 已落地：请同步 SYNERGY.mobility.note、1b 平衡评审记录与本断言");
+      "若在此处新增总封顶，须同步 SYNERGY.mobility 与 1b 平衡评审结论：move×speed 不封顶是有意设计");
   });
 });
