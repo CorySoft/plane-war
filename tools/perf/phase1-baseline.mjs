@@ -9,14 +9,24 @@
  *
  * 用法：node tools/perf/phase1-baseline.mjs [组号]     SEED=… 可换种子
  *   例：node tools/perf/phase1-baseline.mjs 2
+ *   ③ 的 seed 分布：SWEEP=12 node tools/perf/phase1-baseline.mjs sweep
+ *     （sweep = 3s 分布 + 3w 长窗撞墙探针；WALL=9000 可改长窗秒数）
  * 只读，不改代码。
  * =========================================================== */
 
 import { makeCtx } from "../../test/_env.mjs";
 
 const SEED = Number(process.env.SEED || 20261108);
-{ let s = SEED >>> 0; Math.random = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; }
+let seedState = SEED >>> 0;
+/** LCG：可重播种（SWEEP 模式要在同一进程里换种子重复跑，重播种比多进程更省启动成本） */
+function reseed(s) { seedState = (s >>> 0) || 1; }
+Math.random = () => { seedState = (Math.imul(seedState, 1664525) + 1013904223) >>> 0; return seedState / 4294967296; };
 const ONLY = process.argv[2] || "all";
+// ③ 是「组间差异 < seed 内方差」的那一组：单跑 3 seed 不支持任何数值结论，
+// SWEEP=N 用 N 个可复现 seed 取分布。无 seed 不出数值判决。
+const SWEEP = Number(process.env.SWEEP || 1);
+const WALL_FRAMES = Number(process.env.WALL || 9000);
+const sweepSeeds = (n) => Array.from({ length: n }, (_, i) => (SEED + i * 7919) >>> 0);
 
 const noop = () => {};
 let rafCb = null, clockMs = 0;
@@ -191,8 +201,8 @@ function group2() {
       生命增量_全程: after.lives - before.lives,
       处理过的升级事件: r.levelUps,
       得分增量_全程: dScore,
-      本体分_击杀: kills * cfg.ENEMY_TYPES.small.score,        // small 本体分（js/config.js:203）
-      连击分_击杀: kills >= 10 ? Math.max(0, kills - 9) * cfg.COMBO.bonus : 0,  // combo>=10 每杀 +500，js/game.js:736-738
+      本体分_击杀: kills * cfg.ENEMY_TYPES.small.score,        // small 本体分（js/config.js:204）
+      连击分_击杀: kills >= 10 ? Math.max(0, kills - 9) * cfg.COMBO.bonus : 0,  // combo>=10 每杀 +500，js/game.js:741-743
       每杀得分: kills ? +(dScore / kills).toFixed(1) : null,
     };
     arms.push(rec);
@@ -214,36 +224,46 @@ function group2() {
 }
 
 /* ───────────── ③ 60 秒存活：升级次数与得分 ───────────── */
+const ARMS3 = [["基线构筑（Phase-1 六技能全 0）", {}], ["Phase-1 满级构筑", MAXED]];
+
+/** 单臂跑 frames 帧的存活测量。不锁无敌：这一组要测的就是「60 秒存活」 */
+function runArm3(name, skills, frames) {
+  const p = reset(skills);
+  const scoreAt = game().getScore();
+  const lvlAt = p.level;
+  // 锁了无敌，regen / overload / secondWind 三条依赖掉血的机制永远不会触发，
+  // 测出来的数字再漂亮也与被测量项无关。
+  let deaths = 0, revives = 0, prevLives = game().getLives(), peak = 0, minHpRatio = 1;
+  const r = play(frames, p, skills, () => {
+    const l = game().getLives();
+    if (l < prevLives) deaths++;
+    // 只认 0→1：升级也会 +1 命（doLevelUp），用「任意增加」会把升级数记成复活数
+    if (prevLives === 0 && l > 0) revives++;
+    prevLives = l;
+    peak = Math.max(peak, friendlyCount());
+    const ratio = p.hpRatio ?? 1;
+    if (ratio < minHpRatio) minHpRatio = ratio;
+  }, false);
+  const g = game().getPlayer();
+  // 逐帧只看得见 lives 的变化：secondWind 的续命发生在 hitPlayer 内部（命 1→1），
+  // lives 根本不落地再回来 —— 所以逐帧计数是「下界」，真值走只读观测口 getReviveStats（js/game.js:2187）。
+  // 反过来，逐帧那条 0→1 也可能把 doLevelUp 的升级送命误记成复活。两个口径都留着，别混用。
+  const rv = typeof game().getReviveStats === "function" ? game().getReviveStats() : {};
+  return {
+    arm: name, framesPlayed: r.frames, seconds: +(r.frames / 60).toFixed(1), 满窗: r.frames >= frames,
+    breakState: r.breakState, 阵亡次数: deaths,
+    复活次数_逐帧下界: revives, 续命次数_api: rv.revives ?? null, 续命已用标记: rv.reviveUsed ?? null,
+    livesEnd: game().getLives(), 最低hpRatio: +minHpRatio.toFixed(3),
+    等级增量: g.level - lvlAt, levelUpsHandled: r.levelUps,
+    得分增量: game().getScore() - scoreAt,
+    enemyLevelEnd: game().getEnemyLevel(),
+    peakFriendly: peak,
+  };
+}
+
 function group3() {
   const out = [];
-  for (const [name, skills] of [["基线构筑（Phase-1 六技能全 0）", {}], ["Phase-1 满级构筑", MAXED]]) {
-    const p = reset(skills);
-    const scoreAt = game().getScore();
-    const lvlAt = p.level;
-    // 不锁无敌：这一组要测的就是「60 秒存活」。锁了无敌，regen / overload / secondWind
-    // 三条依赖掉血的机制永远不会触发，测出来的数字再漂亮也与被测量项无关。
-    let deaths = 0, revives = 0, prevLives = game().getLives(), peak = 0, minHpRatio = 1;
-    const r = play(3600, p, skills, () => {
-      const l = game().getLives();
-      if (l < prevLives) deaths++;
-      // 只认 0→1：升级也会 +1 命（doLevelUp），用「任意增加」会把升级数记成复活数
-      if (prevLives === 0 && l > 0) revives++;
-      prevLives = l;
-      peak = Math.max(peak, friendlyCount());
-      const ratio = p.hpRatio ?? 1;
-      if (ratio < minHpRatio) minHpRatio = ratio;
-    }, false);
-    const g = game().getPlayer();
-    out.push({
-      arm: name, framesPlayed: r.frames, seconds: +(r.frames / 60).toFixed(1),
-      breakState: r.breakState, 阵亡次数: deaths, 复活次数: revives,
-      livesEnd: game().getLives(), 最低hpRatio: +minHpRatio.toFixed(3),
-      等级增量: g.level - lvlAt, levelUpsHandled: r.levelUps,
-      得分增量: game().getScore() - scoreAt,
-      enemyLevelEnd: game().getEnemyLevel(),
-      peakFriendly: peak,
-    });
-  }
+  for (const [name, skills] of ARMS3) out.push(runArm3(name, skills, 3600));
   const spot = {};
   // regen：无伤、无怪，只测回血速率（js/game.js:454-462，0.05/级/秒 → 满级 0.25 命/秒）
   {
@@ -289,45 +309,136 @@ function group3() {
   // chain：一发命中后弹射几跳、伤害怎么衰减（chainRange=170，js/config.js:114）
   // chain 的「逐跳伤害梯度」不在这里测：fxChains 是全局缓冲、敌机对象又走对象池，
   // 集成环境里无法把「我打的那一发」和关卡自身火力分开（试过静音+排空残弹仍不可信）。
-  // 该性质由确定性单测覆盖：test/skills-phase1.test.mjs:168「连锁闪电：命中后向邻近敌机弹射并生成视觉线段」。
-  spot.chain = "本量具不测（无法隔离同屏自身弹幕）；见 test/skills-phase1.test.mjs:168";
+  // 该性质由确定性单测覆盖：test/skills-phase1.test.mjs:169「连锁闪电：命中后向邻近敌机弹射并生成视觉线段」。
+  spot.chain = "本量具不测（无法隔离同屏自身弹幕）；见 test/skills-phase1.test.mjs:169";
   return { arms: out, 机制点验: spot, 说明: "存活组不锁无敌（锁了就测不到依赖掉血的三条机制）；无输入写轮，玩家不躲避" };
+}
+
+/* ───────────── ③-b seed 扫描：组间差 vs seed 内方差 ───────────── */
+function stats(arr) {
+  const s = [...arr].sort((a, b) => a - b);
+  const median = s.length % 2
+    ? s[(s.length - 1) / 2]
+    : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+  const r2 = (v) => +v.toFixed(1);
+  return { n: s.length, min: r2(s[0]), median: r2(median), max: r2(s[s.length - 1]),
+    mean: r2(arr.reduce((a, b) => a + b, 0) / arr.length) };
+}
+
+/**
+ * 同一构筑在同一 seed 上是确定性的，跨 seed 才显出方差。
+ * 「满级组比基线组多 X 级」这类结论只有在 seed 内方差不覆盖组间差时才成立 ——
+ * 所以这里报的是分布（min/median/max/mean），不是单点。
+ */
+function sweep3(frames = 3600, seeds = sweepSeeds(SWEEP)) {
+  const rows = [];
+  for (const sd of seeds) {
+    reseed(sd);                    // 每个 seed 独立重播种：上一 seed 消耗了多少随机数不影响本 seed 的形状
+    for (const [name, skills] of ARMS3) rows.push({ seed: sd, ...runArm3(name, skills, frames) });
+  }
+  const 分布 = ARMS3.map(([name]) => {
+    const rs = rows.filter((r) => r.arm === name);
+    const num = (k) => stats(rs.map((r) => r[k]));
+    const st = {};
+    for (const r of rs) { const key = r.breakState ?? "满窗"; st[key] = (st[key] || 0) + 1; }
+    return {
+      arm: name,
+      存活满窗: `${rs.filter((r) => r.满窗).length}/${rs.length}`,
+      等级增量: num("等级增量"), 得分增量: num("得分增量"),
+      阵亡次数: num("阵亡次数"),
+      复活次数_逐帧下界: num("复活次数_逐帧下界"), 续命次数_api: num("续命次数_api"),
+      最低hpRatio: num("最低hpRatio"), peakFriendly: num("peakFriendly"),
+      结束原因: st,
+    };
+  });
+  return { frames, windowSeconds: +(frames / 60).toFixed(1), seeds, 逐seed: rows, 分布 };
+}
+
+/** 撞墙探针：满级构筑在长窗口里第几秒/第几级撞墙（60 秒窗内看不出墙在哪） */
+function wallProbe(seeds = sweepSeeds(Math.max(3, Math.min(SWEEP, 5)))) {
+  const rows = [];
+  for (const sd of seeds) {
+    reseed(sd);
+    rows.push({ seed: sd, ...runArm3("Phase-1 满级构筑（长窗）", MAXED, WALL_FRAMES) });
+  }
+  const 到达长窗 = rows.filter((r) => r.满窗).length;
+  return {
+    windowSeconds: +(WALL_FRAMES / 60).toFixed(1), seeds,
+    满级构筑到长窗: `${到达长窗}/${rows.length}`,
+    等级增量: stats(rows.map((r) => r.等级增量)),
+    得分增量: stats(rows.map((r) => r.得分增量)),
+    阵亡次数: stats(rows.map((r) => r.阵亡次数)),
+    逐seed: rows,
+  };
 }
 
 /* ───────────── ④ homing 弧长 vs 直线位移（只报数） ───────────── */
 function group4() {
   const out = [];
-  // 两种靶位：斜 30° 偏轴（实战常见）与近乎直角（最坏情形 —— 弹先上行再横向追，弧长膨胀最多）
-  for (const tgt of [{ name: "斜靶", x: 80, y: 200 }, { name: "直角靶", x: 40, y: 480 }]) {
+  // 三种靶位：斜靶（22° 偏轴）、近靶（要绕 ~130°， pursuit 曲线最费弧长）、以及直线基准
+  for (const tgt of [{ name: "斜靶", x: 80, y: 200 }, { name: "直角靶", x: 40, y: 480 }, { name: "反打靶", x: 360, y: 680 }]) {
   for (const hv of [0, 5]) {
     const p = reset({ homing: hv });
+    // 顺序很重要：先静场排空，再放靶机。
+    // 上一版先放靶机再静场 150 帧，靶机在排空期被关卡清理掉，探针只能追着刷怪弹道笔直上行，
+    // 读出 1.001 的比值 —— 那是「没拐弯」的比值，不是「拐弯但不膨胀」的比值。
+    // 静场：把玩家与所有敌机的开火按住（fireCd 每帧钉回 999），等开场残弹飞出屏幕。
+    // 不静场会踩对象池的坑：探针弹一走 removeBullet → freeBullet，下一发谁开火就把它
+    // 从 pool 里 pop 走当自己的弹用（js/bullet.js:20 allocBullet 不新建），
+    // traveled 当场归零、角度换成别的弹 —— 第一版斜靶 homing=0 读到的 4.017 就是这么来的
+    // （靠「homing=0 必须 弧长≡位移」这条自检才发现，那次的比值不可信）。
+    const hush = () => {
+      p.fireCd = 999;
+      for (const e of game().enemies) if (e && e.hp > 0) { e.fireCd = 999; e.vx = 0; e.vy = 0; }
+    };
+    play(150, p, { homing: hv }, hush);
+    const residual = friendlyCount();
+    const beforeUid = new Set(game().enemies.filter((e) => e && e.hp > 0).map((e) => e.uid));
     game().spawnEnemy(1, { hpScale: 1 }, 1, tgt.x, tgt.y, { type: "mid" });
+    // spawnEnemy 没有返回值，敌机对象又走对象池（事后再读 target.x/hp 可能已是另一架机）
+    // —— 用 uid 差集把新生成的那架锁定，和 ② 同一招
+    const fresh = game().enemies.filter((e) => e && e.hp > 0 && !beforeUid.has(e.uid));
+    const t0 = fresh.length ? [Math.round(fresh[fresh.length - 1].x), Math.round(fresh[fresh.length - 1].y)] : [tgt.x, tgt.y];
+    const e0 = game().enemies.filter((e) => e && e.hp > 0).length;
+    hush();
     const x0 = p.x, y0 = p.y;
     // 注意角度约定：vx = sin(angle)、vy = -cos(angle)（js/bullet.js:148-149），
     // 所以 0 才是正上方；-π/2 是水平向左 —— 第一版误用 -π/2，测成了横着飞的弹
     const b = game().fireBullet(0, 1, p, x0, y0, undefined, undefined, hv > 0);
-    if (!b) { out.push({ arm: `homing=${hv}`, error: "fireBullet 返回空" }); continue; }
-    const seen = { traveled: 0, disp: 0, lastX: b.x, lastY: b.y, frames: 0, hitOrGone: null };
+    if (!b) { out.push({ arm: `${tgt.name} homing=${hv}`, error: "fireBullet 返回空" }); continue; }
+    const maxRange0 = b.maxRange;
+    const seen = { traveled: 0, disp: 0, lastX: b.x, lastY: b.y, frames: 0, hitOrGone: null, reused: false };
+    let prevTraveled = 0;
     for (let f = 0; f < 240; f++) {
       if (game().state() === STATE.LEVELUP) { dispatch("keydown", { code: "Digit1", preventDefault: noop, repeat: false }); continue; }
       if (game().state() !== STATE.PLAYING) break;
       // 必须在推进帧「之前」采样：子弹一旦走 removeBullet → freeBullet，
       // traveled 会被重置为 0（js/bullet.js:76），事后再读必然得到 0 —— 第一版就是这么错的
-      if (!game().bullets.includes(b)) { seen.hitOrGone = seen.traveled >= b.maxRange - 2 ? "射程耗尽" : "命中/被清屏"; break; }
+      if (!game().bullets.includes(b)) { seen.hitOrGone = seen.traveled >= maxRange0 - 2 ? "射程耗尽" : "命中/被清屏"; break; }
+      // 复用检测：弧长在单发生命周期内单调不减、maxRange 不变。任一被打破 = 这个对象已经不是探针弹
+      if (b.maxRange !== maxRange0 || b.traveled < prevTraveled - 0.01) { seen.reused = true; break; }
+      prevTraveled = b.traveled;
       seen.traveled = Math.max(seen.traveled, b.traveled);
       seen.disp = Math.hypot(b.x - x0, b.y - y0);
       seen.lastX = b.x; seen.lastY = b.y;
       seen.frames = f;
+      hush();
       step();
     }
     out.push({
       arm: `${tgt.name} homing=${hv}`,
       traveled_弧长: +seen.traveled.toFixed(1),
       直线位移: +seen.disp.toFixed(1),
-      分离比_弧长除位移: seen.disp > 1 ? +(seen.traveled / seen.disp).toFixed(3) : null,
+      // 复用命中时比值作废，报 null 而不是把一个来路不明的数写进基线
+      分离比_弧长除位移: (!seen.reused && seen.disp > 1) ? +(seen.traveled / seen.disp).toFixed(3) : null,
       存活帧: seen.frames, 终点: [Math.round(seen.lastX), Math.round(seen.lastY)],
-      结束原因: seen.hitOrGone,
-      maxRange: Math.round(b.maxRange),
+      结束原因: seen.reused ? "对象被池复用（读数作废）" : seen.hitOrGone,
+      发射时残余友方弹: residual, 发射时同屏敌机: e0, maxRange: Math.round(maxRange0),
+      // 靶机核对：homing=5 若打到的不是我给定的靶位，比值就失去口径意义
+      靶机发射时位置: t0,
+      终点与靶机偏差: t0 ? Math.round(Math.hypot(seen.lastX - t0[0], seen.lastY - t0[1])) : null,
+      拐弯确认: hv === 0 ? "不适用(直线基准)"
+        : (Math.abs(seen.lastX - x0) > 8 ? `横向偏移 ${Math.round(seen.lastX - x0)}px` : "未见拐弯：比值不可信"),
       // 自检：直线飞行（homing=0）时弧长必须等于位移，比值恒为 1。
       // 这一条不成立就说明度量口径本身错了 —— 第一版正是靠它暴露了角度约定用反
       口径自检: hv === 0
@@ -344,7 +455,10 @@ function group4() {
 }
 
 const groups = { "1": ["① 同屏友方子弹峰值", group1], "2": ["② nova 自催化环", group2], "3": ["③ 60 秒存活", group3], "4": ["④ homing 弧长分离", group4] };
-const wanted = ONLY === "all" ? ["1", "2", "3", "4"] : [ONLY];
+if (SWEEP > 1) { groups["3s"] = [`③-b ${SWEEP} seeds 存活分布`, () => sweep3()]; groups["3w"] = ["③-c 撞墙长窗探针", () => wallProbe()]; }
+const wanted = ONLY === "all"
+  ? (SWEEP > 1 ? ["1", "2", "3", "4", "3s", "3w"] : ["1", "2", "3", "4"])
+  : ONLY === "sweep" ? ["3s", "3w"] : [ONLY];
 const result = { tool: "phase1-baseline", seed: SEED, nova: { max: SKILLS.find(s => s.id === "nova")?.max, radius: BULLET.novaBaseRadius, perLevel: BULLET.novaRadiusPerLevel } };
 for (const k of wanted) {
   const [title, fn] = groups[k];
