@@ -100,6 +100,9 @@ const { addXp, setLivesForTest, hitPlayer } = await import("../../js/game.js");
 // 但 ⑤ 的主读数仍是**实测扣血**而非公式：字段再被改名时公式行降级为「不适用」，
 // 不会因为别人的重命名而静默产出 NaN。
 const playerMod = await import("../../js/player.js");
+// B14：受击节奏臂的理论列要按世界 dt 折算，而 dt = rawDt × slowmo（js/game.js:268）。
+// slowmo 是 camera.js 的 `export let` ⇒ 命名空间对象上是实时值，不是快照。
+const camMod = await import("../../js/camera.js");
 
 const game = () => globalThis.window.__game;
 getSettings().skipTutorial = true;
@@ -550,30 +553,59 @@ function group3() {
     play(30, p, { regen: 5 }, null, null);
     const gain = { accum: 0 };
     p._regenAccum = 0;
+    // B14 修正：理论列不再用「帧数 / 60」。世界 dt = rawDt × slowmo（js/game.js:268），
+    // slowmo 由连击驱动（camera.js 的 targetSlowmo = clamp(1 − combo×0.02, 0.55, 1)），
+    // 而本臂每 4 秒受击会把 combo 清零 ⇒ slowmo 是锯齿，恒定 1/60 把这段缩放整个吃掉，
+    // 缺口因此读成**负**数（旧读数 −0.0338）。帧内 dt 用的是**本帧开始前**的 slowmo：
+    // game 先算 dt、后在 update() 里推 updateCamera，而探针跑在 step() 之后
+    // ⇒ 探针末存下的值是下一帧的系数，本帧用上一帧存下的那个。
+    const RAW_DT = 16.7 / 1000;
+    let slowmoForNextFrame = camMod.slowmo;
+    const acc = { sumOpen: 0, nOpen: 0, minOpen: 1, sumAll: 0, nAll: 0 };
     const rr = play(N, p, { regen: 5 }, (f) => {
       // 先收当帧增量，再把命钉回 maxLives-1：让 lives<maxLives 恒成立，满命闸不参与本臂
       gain.accum += p._regenAccum || 0;
       p._regenAccum = 0;
+      const used = slowmoForNextFrame;
+      if (!(p.invincible > 0)) {
+        acc.sumOpen += RAW_DT * used; acc.nOpen++;
+        if (used < acc.minOpen) acc.minOpen = used;
+      }
+      acc.sumAll += RAW_DT * used; acc.nAll++;
       if (p.invincible > 0) invF++;
       if (game().getLives() >= game().getMaxLives()) maxedF++;
       setLivesForTest(Math.max(1, game().getMaxLives() - 1));
       if (f % 240 === 0) { p.invincible = 0; hitPlayer(); hits++; }   // 每 4 秒一次确定性命中
+      slowmoForNextFrame = camMod.slowmo;
     }, null);
     const secs = rr.frames / 60;
     const want = cfg.REGEN_RATE * 5 * secs;
     const wantNoInv = cfg.REGEN_RATE * 5 * (rr.frames - invF) / 60;
+    // 同一套帧判据，只是将「帧数 / 60」换成逐帧 Σdt ⇒ 两列的差就是 slowmo 缩放的份额
+    const wantDt = cfg.REGEN_RATE * 5 * acc.sumAll;
+    const wantNoInvDt = cfg.REGEN_RATE * 5 * acc.sumOpen;
     spot.regen_受击节奏 = {
       窗秒: +secs.toFixed(2), 注入命中: hits, 无敌帧数: invF, 满命帧数: maxedF,
       实测累计: +gain.accum.toFixed(4),
       理论累计_无闸: +want.toFixed(4), 理论累计_只扣无敌帧: +wantNoInv.toFixed(4),
+      Σdt_全窗秒: +acc.sumAll.toFixed(4), Σdt_开闸非无敌秒: +acc.sumOpen.toFixed(4),
+      理论累计_无闸_按Σdt: +wantDt.toFixed(4), 理论累计_只扣无敌帧_按Σdt: +wantNoInvDt.toFixed(4),
       实测每秒: +(gain.accum / Math.max(secs, 1e-9)).toFixed(4),
       无敌帧吃掉的份额: want > 0 ? +(1 - gain.accum / want).toFixed(3) : null,
+      无敌帧吃掉的份额_按Σdt: wantDt > 0 ? +(1 - gain.accum / wantDt).toFixed(3) : null,
       与只扣无敌帧的差: +(gain.accum - wantNoInv).toFixed(4),
+      与只扣无敌帧的差_按Σdt: +(gain.accum - wantNoInvDt).toFixed(4),
+      // 两列理论值之差 = 被旧口径漏掉的 slowmo 缩放份额（B14 的直接自证）
+      旧口径少算的slowmo份额: +(wantNoInv - wantNoInvDt).toFixed(4),
+      平均slowmo_开闸非无敌帧: acc.nOpen > 0 ? +(acc.sumOpen / (acc.nOpen * RAW_DT)).toFixed(4) : null,
+      最低slowmo_开闸非无敌帧: +acc.minOpen.toFixed(4),
       每命耗时秒_受击节奏: gain.accum > 0 ? +(secs / gain.accum).toFixed(2) : null,
       中断状态: rr.breakState,
-      读数纪律: "本臂把满命闸钉成恒开（每帧 lives=maxLives-1），所以缺口只归无敌帧；"
-        + "「与只扣无敌帧的差」若 |·|>0.02，说明还有第三个闸门（deathTimer / 漏怪 / 量具）在吃，"
-        + "此时不许把缺口全记给无敌帧。每命耗时受击节奏 ≠ 无伤窗的 6.67s，两者不许混用",
+      读数纪律: "本臂把满命闸钉成恒开（每帧 lives=maxLives-1），所以缺口只归无敌帧。"
+        + "理论列自 B14 起按逐帧 Σdt 折算（旧「帧数/60」列仍保留做对照）："
+        + "**判定看 `与只扣无敌帧的差_按Σdt`**，若它仍 |·|>0.02 才允许怀疑第三道闸门 "
+        + "（deathTimer / 漏怪 / 量具）；旧列 `与只扣无敌帧的差` 为负不是机制，是恒定 dt 口径造成的。"
+        + "每命耗时受击节奏 ≠ 无伤窗的 6.67s，两者不许混用",
     };
   }
   // overload：直接调 calcFireRate，测可达射速增益（依赖 hpRatio，而 hpRatio = lives/maxLives）
