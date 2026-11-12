@@ -121,6 +121,7 @@ export const BULLET = {
 // 无 dmg 技能时 lvl1/2/3 恰为 2/3/4，后期随主弹伤害同比放大（与主弹共用单一真源）。
   novaDmgMulBase: 2,            // 乘数基数（不是固定伤害）
   novaDmgMulPerLevel: 1,        // 每级乘数增量
+  bulletTimeScale: 0.6,         // 子弹时间：只缩放敌方侧 dt（敌机移动/开火、敌弹位移与寿命、敌弹令牌回复）
 };
 
 // ---------- 敌方等级 ----------
@@ -230,6 +231,11 @@ export const POWERUP_DEFS = {
   critboost: { icon: "C", color: "#ff8fa3", name: "致命暴击" },
   knockback: { icon: "K", color: "#5ee6ff", name: "子弹击退" },
   randomSkill: { icon: "?", color: "#d0a6ff", name: "技能随机获取", unique: true },
+  // ---------- Phase 2 新增（4 个） ----------
+  nuke:       { icon: "N", color: "#ff6b6b", name: "全屏清场" },
+  invuln:     { icon: "I", color: "#9be8ff", name: "无敌力场" },
+  bulletTime: { icon: "T", color: "#c0a6ff", name: "子弹时间" },
+  shieldFull: { icon: "S", color: "#66e0ff", name: "护盾全满" },
 };
 
 // 道具时长单一来源（秒）：powerup.js 赋值、hud.js 进度条分母、codex 文案、
@@ -245,6 +251,8 @@ export const POWERUP_DURATION = {
   critboost: 8,
   knockback: 8,
   freeze: 8,     // 全场冻结时长（game.js freezeAll → e.frozen）
+  invuln: 4,     // 无敌力场时长（player.buffs.invuln，只读不写 player.invincible）
+  bulletTime: 5, // 子弹时间时长（只慢敌方侧，见 BULLET.bulletTimeScale）
 };
 
 // ---------- 道具掉落率 ----------
@@ -262,11 +270,13 @@ export const POWERUP_WEIGHTS_EARLY = [
   ["power", 16], ["rapid", 7], ["shield", 14], ["life", 30],
   ["speed", 5], ["double", 5], ["freeze", 3], ["magnet", 12], ["madHunt", 3],
   ["xppack", 12], ["skillup", 4], ["drop", 7], ["critboost", 5], ["knockback", 6],
+  ["nuke", 3], ["invuln", 5], ["bulletTime", 4], ["shieldFull", 7],
 ];
 export const POWERUP_WEIGHTS_LATE = [
   ["power", 20], ["rapid", 9], ["shield", 14], ["life", 16],
   ["speed", 6], ["double", 6], ["freeze", 3], ["magnet", 11], ["madHunt", 4],
   ["xppack", 10], ["skillup", 6], ["drop", 6], ["critboost", 7], ["knockback", 6],
+  ["nuke", 3], ["invuln", 5], ["bulletTime", 4], ["shieldFull", 7],
 ];
 
 // ---------- 系统商城：星尘兑换永久加成（500起，每级翻倍） ----------

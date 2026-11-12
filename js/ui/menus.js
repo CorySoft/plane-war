@@ -441,7 +441,7 @@ function drawHangarPreview(ctx) {
   setf(ctx, "12px 'sans-serif'");
   ctx.fillText(`速度 ${cfg.speed}`, tx, py + 64);
   ctx.fillText(`伤害 ×${cfg.baseDmg}`, tx + 82, py + 64);
-  ctx.fillText(`射速 ×${cfg.fireRate}`, tx, py + 84);
+  ctx.fillText(`射击间隔 ×${cfg.fireRate}`, tx, py + 84);
   ctx.fillText(`生命 ${cfg.startHp}`, tx + 82, py + 84);
 
   ctx.fillStyle = unlocked ? "rgba(255,255,255,.55)" : C.gold;
@@ -499,7 +499,7 @@ function drawHangar(ctx) {
     ctx.fillStyle = "rgba(255,255,255,.55)";
     setf(ctx, "11px 'sans-serif'");
     ctx.fillText(cfg.desc, x + cardW / 2, y + 34);
-    ctx.fillText("速" + cfg.speed + " 伤×" + cfg.baseDmg + " 射×" + cfg.fireRate, x + cardW / 2, y + 54);
+    ctx.fillText("速" + cfg.speed + " 伤×" + cfg.baseDmg + " 间×" + cfg.fireRate, x + cardW / 2, y + 54);
     ctx.fillText("生命 " + cfg.startHp, x + cardW / 2, y + 72);
     ctx.fillStyle = unlocked ? (on ? C.green : C.gold) : C.lilacDark;
     setf(ctx, "bold 13px 'sans-serif'");

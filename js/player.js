@@ -78,7 +78,7 @@ export function createPlayer(aircraftCfg, talentEffects, shopEffects) {
     talentDmg,
     talentCrit,
     fireRateMul,
-    buffs: { rapid: 0, speed: 0, freeze: 0, magnet: 0, double: 0, madHunt: 0, drop: 0, critboost: 0, knockback: 0 },
+    buffs: { rapid: 0, speed: 0, freeze: 0, magnet: 0, double: 0, madHunt: 0, drop: 0, critboost: 0, knockback: 0, invuln: 0, bulletTime: 0 },
     skills: { ...startSkills },
     orbit: [],   // 护体弹：围绕玩家旋转的特殊子弹
 

@@ -102,8 +102,8 @@ describe("powerup", () => {
 
   it("计时 buff 时长单一来源：applyPowerup 赋值 === POWERUP_DURATION 表", () => {
     // 锁「改一漏二」复发：powerup.js 赋值、hud.js 分母、codex 文案必须同源于此表
-    const timed = ["madHunt", "rapid", "speed", "magnet", "double", "drop", "critboost", "knockback"];
-    const expect = { power: 15, madHunt: 5, rapid: 8, speed: 8, magnet: 8, double: 8, drop: 8, critboost: 8, knockback: 8, freeze: 8 };
+    const timed = ["madHunt", "rapid", "speed", "magnet", "double", "drop", "critboost", "knockback", "invuln", "bulletTime"];
+    const expect = { power: 15, madHunt: 5, rapid: 8, speed: 8, magnet: 8, double: 8, drop: 8, critboost: 8, knockback: 8, freeze: 8, invuln: 4, bulletTime: 5 };
     for (const type of Object.keys(POWERUP_DURATION)) {
       assert.equal(POWERUP_DURATION[type], expect[type], `POWERUP_DURATION.${type} 被改动，需同步 hud/codex/game`);
     }

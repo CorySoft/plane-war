@@ -326,7 +326,9 @@ function update(dt, realDt = dt) {
   updateDamageNumbers(dt);
   if (player) {
     updateParticles(dt);
-    updateBullets(dt);
+    // 子弹时间：只缩放敌方侧步进（玩家移动/射速/主弹/追踪/连击/fx 仍用真实 dt）
+    const enemyDt = (player.buffs.bulletTime || 0) > 0 ? dt * BCFG.bulletTimeScale : dt;
+    updateBullets(dt, enemyDt);
 
     // 过载核心用：每帧写入当前生命占比（lives/maxLives），1=满血 0=濒死
     player.hpRatio = maxLives > 0 ? lives / maxLives : 1;
@@ -362,7 +364,7 @@ function update(dt, realDt = dt) {
         b.vy = Math.sin(na) * sp;
       }
     }
-    updateEnemies(dt, level, player.x, player.y, player.h);
+    updateEnemies(dt, level, player.x, player.y, player.h, enemyDt);
 
     // 死亡动画期间跳过玩家输入/射击
     if (deathTimer > 0 && lives <= 0) {
@@ -440,6 +442,21 @@ function update(dt, realDt = dt) {
     if (player._freeze) {
       freezeAll();
       player._freeze = false;
+    }
+    if (player._nuke) {
+      player._nuke = false;
+      // 只清敌弹，不重置敌弹配额/拒绝计数（沿用 secondWind 教训）
+      clearBullets(true, false);
+      // 倒序移除普通敌机：removeEnemy 只做 splice + 回池，不走击杀路径，
+      // 因此不给分/经验/掉落/击杀计数/吸血/分裂（Phase-2 硬约束：nuke 零分）。
+      for (let i = enemies.length - 1; i >= 0; i--) {
+        const e = enemies[i];
+        if (!e || e.isBoss) continue;   // Boss 免疫：不破坏波次推进与 Boss 奖励
+        removeEnemy(i);
+      }
+      player.buffs.invuln = Math.max(player.buffs.invuln || 0, 1.0);   // 起手保护
+      triggerShake(1.2);
+      toast = { text: "全屏清场！", color: "#ff6b6b", t: 1.4 };
     }
     if (player._heal) {
       maxLives = getMaxLives(player.baseHp, player.skills.maxhp || 0);
@@ -576,7 +593,7 @@ function update(dt, realDt = dt) {
     }
 
     // 敌机开火
-    const shooters = getEnemyShooters(player.x, player.y, dt, difficulty.fireCdScale);
+    const shooters = getEnemyShooters(player.x, player.y, enemyDt, difficulty.fireCdScale);
     for (const e of shooters) {
       if (e.type === "boss") {
         bossFire(e, rank);
@@ -599,7 +616,7 @@ function update(dt, realDt = dt) {
 
     // Boss AI
     for (const e of enemies) {
-      if (e.isBoss) updateBossAI(e, dt, level, difficulty);
+      if (e.isBoss) updateBossAI(e, enemyDt, level, difficulty);
     }
 
     // 碰撞检测
@@ -608,6 +625,11 @@ function update(dt, realDt = dt) {
 }
 
 // ---------- 碰撞检测 ----------
+/** 无敌判定：受击无敌帧 或 无敌力场 buff（只读两者，不互写） */
+function isPlayerInvincible(p) {
+  return (p.invincible > 0) || ((p.buffs && p.buffs.invuln) > 0);
+}
+
 function checkCollisions() {
   // 玩家已死（死亡慢动作阶段）就不再做任何涉及玩家的碰撞：
   // 此刻玩家已从画面移除，敌机/敌弹不该还能打中它
@@ -621,7 +643,7 @@ function checkCollisions() {
     const i = cur;
 
     // 玩家 vs 敌机（冰冻中的敌机冻结不动、不造成伤害，但仍可被击毁）
-    if (playerAlive && e.frozen <= 0 && player.invincible <= 0) {
+    if (playerAlive && e.frozen <= 0 && !isPlayerInvincible(player)) {
       const dist = hypot(player.x, player.y, e.x, e.y);
       if (dist < e.r + player.radius) {
         if (player.shield > 0) {
@@ -685,7 +707,7 @@ function checkCollisions() {
     if (!b) continue;
     if (b.friendly) continue;
     if (!playerAlive) continue;
-    if (player.invincible > 0) continue;
+    if (isPlayerInvincible(player)) continue;
     const dist = hypot(player.x, player.y, b.x, b.y);
     if (dist < PLAYER.hitRadius) {
       removeBullet(b);

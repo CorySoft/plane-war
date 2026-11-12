@@ -358,10 +358,15 @@ export function applyPierceOrRemove(b) {
   return true;
 }
 
-export function updateBullets(dt) {
+/**
+ * 更新子弹位置/寿命与敌弹令牌。
+ * @param {number} dt        玩家侧步进（友方子弹、加速、玩家相关判定）
+ * @param {number} hostileDt 敌方侧步进（子弹时间只慢敌弹；默认与 dt 相同）
+ */
+export function updateBullets(dt, hostileDt = dt) {
   hostileBudget.tokens = Math.min(
     hostileBudget.maxPerSecond,
-    hostileBudget.tokens + hostileBudget.maxPerSecond * Math.max(0, dt),
+    hostileBudget.tokens + hostileBudget.maxPerSecond * Math.max(0, hostileDt),
   );
   // 原地更新 + filter 重建，避免逐次 splice 的 O(n) 元素移动
   // （碰撞检测中按对象引用 indexOf，不依赖索引，此处重排安全）
@@ -382,8 +387,9 @@ export function updateBullets(dt) {
       }
     }
 
-    const dx = b.vx * dt * 60;
-    const dy = b.vy * dt * 60;
+    const bdt = b.friendly ? dt : hostileDt;
+    const dx = b.vx * bdt * 60;
+    const dy = b.vy * bdt * 60;
     b.x += dx;
     b.y += dy;
     b.traveled += Math.hypot(dx, dy);
@@ -391,7 +397,7 @@ export function updateBullets(dt) {
     if (b.friendly) {
       if (b.traveled >= b.maxRange || b.y < -30 || b.y > H + 30 || b.x < -30 || b.x > W + 30) dead = true;
     } else {
-      b.life = (b.life || 6) - dt;
+      b.life = (b.life || 6) - bdt;
       if (b.life <= 0 || b.y < -30 || b.y > H + 30 || b.x < -30 || b.x > W + 30) dead = true;
     }
     if (dead) { freeBullet(b); continue; }

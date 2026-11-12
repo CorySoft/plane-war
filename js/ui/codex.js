@@ -233,6 +233,10 @@ export function powerupDesc(k) {
     critboost: `${POWERUP_DURATION.critboost}秒必暴击`,
     knockback: `${POWERUP_DURATION.knockback}秒子弹击退`,
     randomSkill: "随机获取技能",
+    nuke: "清屏 + 清杂兵",
+    invuln: `${POWERUP_DURATION.invuln}秒无敌`,
+    bulletTime: `${POWERUP_DURATION.bulletTime}秒敌弹减速`,
+    shieldFull: "护盾直接回满",
   }[k] || "";
 }
 
@@ -244,7 +248,7 @@ export function powerupDescFull(k) {
     madHunt: `${POWERUP_DURATION.madHunt} 秒内子弹向四周 360° 散发并追踪敌机`,
     rapid: `${POWERUP_DURATION.rapid} 秒内射击间隔大幅缩短`,
     speed: `${POWERUP_DURATION.speed} 秒内移动速度提升 30%`,
-    freeze: "冻结全场敌机与敌方子弹",
+    freeze: "冻结全场敌机（敌方子弹仍会飞行）",
     magnet: `${POWERUP_DURATION.magnet} 秒内自动吸引附近道具`,
     double: `${POWERUP_DURATION.double} 秒内得分翻倍`,
     xppack: "立即提升 1 级",
@@ -253,5 +257,9 @@ export function powerupDescFull(k) {
     drop: `${POWERUP_DURATION.drop} 秒内道具掉落率大幅提升`,
     critboost: `${POWERUP_DURATION.critboost} 秒内必定暴击且暴击倍率提升`,
     knockback: `${POWERUP_DURATION.knockback} 秒内子弹附带击退效果`,
+    nuke: "立即清除全屏敌弹与普通敌机（Boss 免疫；不计分、不给经验、不计击杀）",
+    invuln: `${POWERUP_DURATION.invuln} 秒内免疫敌机与敌弹伤害`,
+    bulletTime: `${POWERUP_DURATION.bulletTime} 秒内敌机移动/开火与敌弹速度降至 60%（玩家不受影响）`,
+    shieldFull: "护盾立刻回满；若已满则转为 2 秒无敌",
   }[k] || "";
 }

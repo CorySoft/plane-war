@@ -104,7 +104,11 @@ export function spawnEnemy(level, diff, enemyLevel = 1, atX, atY, options = {}) 
   return e;
 }
 
-export function updateEnemies(dt, level, playerX, playerY, playerH) {
+/**
+ * @param {number} dt      真实步进（frozen 计时、受击白闪等视觉/状态衰减）
+ * @param {number} enemyDt 敌方侧步进（子弹时间只慢敌机移动/开火；默认与 dt 相同）
+ */
+export function updateEnemies(dt, level, playerX, playerY, playerH, enemyDt = dt) {
   for (let i = enemies.length - 1; i >= 0; i--) {
     const e = enemies[i];
     if (!e) continue;
@@ -112,32 +116,32 @@ export function updateEnemies(dt, level, playerX, playerY, playerH) {
     // Boss 的移动/部署由 game.js 的 updateBossAI 负责，这里只累计时间，
     // 避免普通敌机推进逻辑（如原生 vy 下坠）把 Boss 一路带出屏幕。
     if (e.isBoss) {
-      if (e.frozen > 0) e.frozen -= dt;
+      if (e.frozen > 0) e.frozen -= dt;   // 冰冻时长必须用真实 dt，不能被子弹时间拉长
       e.hitFlash = Math.max(0, e.hitFlash - dt * 8);   // Boss 分支同样衰减，否则受击后永久白闪
-      e.t += dt;
+      e.t += enemyDt;
       continue;
     }
 
     if (e.frozen > 0) {
-      e.frozen -= dt;
-      e.t += dt;
+      e.frozen -= dt;   // 同上：真实 dt
+      e.t += enemyDt;
     } else {
       // 击退生效：叠加击退位移
       if (e.kbTimer > 0) {
-        e.kbTimer -= dt;
-        e.x += e.kx * dt * 60;
-        e.y += e.ky * dt * 60;
+        e.kbTimer -= enemyDt;
+        e.x += e.kx * enemyDt * 60;
+        e.y += e.ky * enemyDt * 60;
       }
-      e.y += e.vy * dt * 60;
-      e.x += e.vx * dt * 60 + Math.sin(e.t * 1.5) * 0.4;
-      e.t += dt;
+      e.y += e.vy * enemyDt * 60;
+      e.x += e.vx * enemyDt * 60 + Math.sin(e.t * 1.5) * 0.4;
+      e.t += enemyDt;
       e.hitFlash = Math.max(0, e.hitFlash - dt * 8);
 
       // 墙壁弹射
       if (e.x < e.r) { e.x = e.r; e.vx = Math.abs(e.vx); }
       if (e.x > W - e.r) { e.x = W - e.r; e.vx = -Math.abs(e.vx); }
 
-      if (e.type === "laser" && e.laserTimer > 0) e.laserTimer -= dt;
+      if (e.type === "laser" && e.laserTimer > 0) e.laserTimer -= enemyDt;
     }
 
     // 飞出屏幕

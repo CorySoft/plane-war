@@ -169,6 +169,8 @@ export function drawHUD(ctx, { score, best, level, enemyLevel, pLevel, xp, xpNee
   if (player.buffs.drop > 0) activeBuffs.push(["drop", "☘爆率", "#7CFC00", POWERUP_DURATION.drop, player.buffs.drop]);
   if (player.buffs.critboost > 0) activeBuffs.push(["critboost", "致命", "#ff8fa3", POWERUP_DURATION.critboost, player.buffs.critboost]);
   if (player.buffs.knockback > 0) activeBuffs.push(["knockback", "»击退", "#ff8fa3", POWERUP_DURATION.knockback, player.buffs.knockback]);
+  if (player.buffs.invuln > 0) activeBuffs.push(["invuln", "无敌", "#9be8ff", POWERUP_DURATION.invuln, player.buffs.invuln]);
+  if (player.buffs.bulletTime > 0) activeBuffs.push(["bulletTime", "子弹时间", "#c0a6ff", POWERUP_DURATION.bulletTime, player.buffs.bulletTime]);
 
   let bx = 16;
   let by = H - 98;

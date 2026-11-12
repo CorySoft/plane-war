@@ -148,6 +148,15 @@ ASSETS: list[dict] = [
          subject="expanding shockwave ring with three outward arrows, color #5ee6ff"),
     dict(id="powerup_randomSkill", kind="icon", out=128,
          subject="six-sided dice cube with round pips, color #d0a6ff"),
+    # —— Phase 2 道具图标（当前为离线 PIL 占位图，真图走 gen_skin.py --only）——
+    dict(id="powerup_nuke", kind="icon", out=128,
+         subject="screen-clearing shockwave blast with expanding rings, luminous red #ff6b6b, very high contrast"),
+    dict(id="powerup_invuln", kind="icon", out=128,
+         subject="hexagonal energy shield with a glowing core, ice blue #9be8ff"),
+    dict(id="powerup_bulletTime", kind="icon", out=128,
+         subject="clock face with slowing concentric rings, violet #c0a6ff"),
+    dict(id="powerup_shieldFull", kind="icon", out=128,
+         subject="three stacked full shield layers glowing cyan #66e0ff"),
     # —— 技能图标（抽奖动画 / 技能图鉴）——
     dict(id="skill_dmg", kind="icon", out=128,
          subject="single bold bullet with a bright star impact burst, glowing cyan #5ee6ff, very high contrast"),

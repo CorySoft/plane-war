@@ -102,6 +102,19 @@ export function applyPowerup(p, player) {
     player.buffs.critboost = POWERUP_DURATION.critboost;
   } else if (type === "knockback") {
     player.buffs.knockback = POWERUP_DURATION.knockback;
+  } else if (type === "nuke") {
+    player._nuke = true;     // 由 game.js 消费：清敌弹 + 清非 Boss 敌机（零分/零经验/不计击杀）
+  } else if (type === "invuln") {
+    player.buffs.invuln = POWERUP_DURATION.invuln;
+  } else if (type === "bulletTime") {
+    player.buffs.bulletTime = POWERUP_DURATION.bulletTime;
+  } else if (type === "shieldFull") {
+    // 护盾直接回满；若已经满盾，转 2 秒无敌，避免空拾取
+    if (player.shield >= player.maxShield) {
+      player.buffs.invuln = Math.max(player.buffs.invuln || 0, 2);
+    } else {
+      player.shield = player.maxShield;
+    }
   } else if (type === "skillup") {
     const sk = pickUpgradableSkill(player.skills);
     if (!sk) {

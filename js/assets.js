@@ -51,6 +51,10 @@ const MANIFEST = {
   powerup_critboost: "powerup_critboost.png",
   powerup_knockback: "powerup_knockback.png",
   powerup_randomSkill: "powerup_randomSkill.png",
+  powerup_nuke: "powerup_nuke.png",
+  powerup_invuln: "powerup_invuln.png",
+  powerup_bulletTime: "powerup_bulletTime.png",
+  powerup_shieldFull: "powerup_shieldFull.png",
   // 技能图标（抽奖滚动 / 揭晓）
   skill_dmg: "skill_dmg.png",
   skill_rate: "skill_rate.png",
