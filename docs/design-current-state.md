@@ -397,25 +397,31 @@
 > 本表 2026-11-07 版有**两行是假的**（`fireInterval`、`baseDmg`），已由主持人复核并删除，理由见附 A-1；
 > 另有「`power` 上限 4 硬编码」一行也随 `PLAYER.maxPower` 的引入失效。
 > 其余行的独立复核由 OpenCode 负责，本节只陈述我逐条 grep 到的消费点。
+>
+> **2026-11-12 按 OpenCode 逐行审计 + 裁定 C 修订**：判定口径拆成两类——「字段无消费点」与「分支运行时不可达 / 名实不符」；
+> 本表原把后两类也记成「非孤岛」，是口径混淆。**本轮只改结论文字，不重锚行号**（裁定 D：`js/` 马上要因 Phase 2 增行，
+> 现在锚了立刻又漂；一次性机械全量重锚留到 v0.5.7 部署前、`js/` 冻结后做）。
 
 | 字段 | 位置 | 证据 |
 |---|---|---|
 | ~~`BULLET.baseDmg`~~ | `config.js:81` | **不是孤岛**：`js/player.js:293` 的 `calcPlayerBaseDmg` 读它，是玩家伤害与 nova 伤害的共同起点 |
 | ~~`PLAYER_BASE.fireInterval`~~ | `config.js:49` | **不是孤岛**：值就是 0.56，`calcFireRate` 在 `config.js:172` 直接读它 |
 | ~~`power` 道具上限 4~~ | `config.js:524` | **不再是硬编码**：`powerup.js:79` 改为 `Math.min(PLAYER.maxPower, …)` |
-| `ENEMY_LEVEL.softCapLevel/softCapFactor` 的外部键 | `config.js:133-134` | 仅 `config.js:142-147` 内部使用，属内部实现，非孤岛（列此说明已核对） |
-| `Boss.phases[].shieldGens` | `js/wave.js:95-97` | 有消费点两处：`js/wave.js:137`（首阶段 → `shieldHp`）与 `game.js:1041`（切相位重赋值）；缺的是「独立护盾发生器实体」，不是字段本身死掉 |
-| `player.js` 的 `ORBIT_GROW_INTERVAL=30` | `js/player.js:190` | **成立**：`maxOrbit = (guard>0?1:0) + guard`（`js/player.js:224`），无护体技能时恒为 0，`js/player.js:231-241` 的增长分支永不进入；注释「有护体技能时每 30 秒增长一颗」与实际「30 - guard×4」的动态间隔（`js/player.js:233`）合写在一起，容易读成「无技能也长」 |
+| `ENEMY_LEVEL.softCapLevel/softCapFactor` 的外部键 | `config.js:133-134` | **字段非孤岛成立，但「活代码」不成立 ⇒ 改判「预留保险，当前不可达」**：读点在 `calcEnemyLevel` 的软上限分支内，而 `SCORE_AXIS` 把 enemyLevel 封顶在 **18**，30 级那道软上限任何模式都走不到；战役的 `difficulty.scoreAxis` 又被 `js/level/schema.js` **逐点强制等于** `SCORE_AXIS`，连「自定义轴绕过封顶」这条路也是关的。**本节原写「非孤岛」只答对了字段有读点，没答可达性**
+| `Boss.phases[].shieldGens` | `js/wave.js:95-97` | **名实不符（本轮改判）**：消费点确实有两处（`js/wave.js` 首阶段 → `shieldHp`、`game.js` 切相位重赋值），但**值被直接当护盾层数用**（每次命中扣 1 层），名字说的却是「发生器数量」。缺的不是消费点，是**名字与语义对齐**：建议改名 `shieldLayers` 或在定义处注释写死「= 层数，不生成实体」。**属代码改名，本轮不做**（裁定 C：§9.1 只做文档语义订正） |
+| ~~`player.js` 的 `ORBIT_GROW_INTERVAL=30`~~ | `js/player.js:190` | **不属于本表（本轮撤销该行）**：`ORBIT_GROW_INTERVAL` 有真实读点（增长间隔按 `guard` 缩紧），`maxOrbit` 在无护体时为 0 是**设计行为**而不是死代码 ⇒ 两半都不构成「数值孤岛」。另：本表旧版提到的 **`ORBIT_MAX_BASE` 在当前代码里不存在**（`docs/revamp-numbers.md` 已记录它被删除、只留 `ORBIT_GROW_INTERVAL` 并修正注释），本节此前却把它当「成立」的孤岛 ⇒ **doc-vs-doc 矛盾，以 `revamp-numbers.md` 为准**。真正的缺陷是「固定 30s」与「30 − guard×4」写进同一段注释 ⇒ **移到 §9.2「注释漂移」** |
 
 ### 9.2 配置与实现漂移
 
 | 问题 | 状态 | 位置 |
 |---|---|---|
-| 飞机 `fireRate` 语义与描述相反 | **已修**：blaze「高射速」现为 `fireRate: 0.8`（间隔 ×0.8 = 更快），ironwall 为 `1.2`（更慢） | `config.js:537-538`、倍率入口 `js/player.js:24` |
+| 飞机 `fireRate` 语义与描述相反 | **机制已修、文案仍反**：`fireRate` 是**射击间隔倍率**（`calcFireRate` 把它乘在间隔上），blaze `0.8` 确实更快、ironwall `1.2` 确实更慢；**但 UI 直接印 `射速 ×0.8` / `射×1.2`，玩家读成「射速只有 0.8 倍 = 更慢」，方向与事实相反**。本轮由 codearts 改文案（`射速 +25%/−17%` 或 `射击间隔 ×0.8`），零平衡改动 | `config.js:537-538`、倍率入口 `js/player.js:24`、文案在 `js/ui/menus.js` 的机型详情/列表两处 |
 | 敌机 `fireCd` 三型被硬编码覆盖 | **主体已修**：复射与首射同源读表（`enemy.js:203-204`，附修复理由注释 `enemy.js:201-202`）。**残留**：laser 复射仍走独立字面量 `rand(2.4, 3.6)`，与表值 `[2.5, 3.5]` 不一致 | `enemy.js:193` vs `config.js:211` |
 | 暴击基础倍率注释与配置不符 | **仍在**：`bullet.js:124` 注释写「基础 1.5 + 每级 0.5 + buff 0.5」已与 `critMulti: 1.5` 一致；旧版「注释写 2.5」的错配在早期提交中被顺手改掉，本文按当前文本记录 | `config.js:83`、`bullet.js:124-127` |
 | 敌方等级注释过时 | **已随 `SCORE_AXIS` 重写**：`ENEMY_LEVEL.maxLevel=99` 现明确标注为「理论上限，运行时由得分轴封顶 18」 | `config.js:132`、`config.js:436-438` |
 | `screenCap` 注释称「同屏硬上限」 | **已修**：改为「单轮发射闸」，并写明分裂碎片不经此闸、峰值可能超过它 | `config.js:74-76`、闸门 `game.js:405`、旁路 `bullet.js:224-235` |
+| `freeze` 图鉴文案是玩家可见的假话 | **本轮同批订正（纯文本）**：文案写「冻结全场敌机**与敌方子弹**」，而 `freezeAll()` 只给敌机设 `e.frozen`，`updateBullets` 里没有任何 freeze 分支 ⇒ **敌弹照常飞**。改成「冻结全场敌机（敌方子弹仍会飞行）」。**不去真冻子弹**（那是平衡改动）。另：`js/player.js` 的 `buffs.freeze` 是死 key（freeze 走 `_freeze`/`e.frozen`），本轮不碰，记为债 | `js/ui/codex.js` 的 `powerupDesc.freeze`、`freezeAll` 在 `js/game.js` |
+| `ORBIT_GROW_INTERVAL` 注释与实现不同式（自 §9.1 移入） | 注释写「每 30 秒增长一颗」，实现是 `30 − guard×4` 的动态间隔（下限 4s）⇒ 两个式子同段并存会读成「固定 30s」。本轮只记，不改注释文本 | `js/player.js` 的 `ORBIT_GROW_INTERVAL` 定义处与增长分支 |
 
 ---
 
