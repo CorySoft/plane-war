@@ -110,6 +110,13 @@ ASSETS: list[dict] = [
          subject="azure diamond-shaped fighter with a translucent blue energy shield dome", out=256),
     dict(id="enemy_split", kind="sprite", facing="nose pointing down",
          subject="lime-green segmented drone orb with visible seam cracks, mechanical beetle shape", out=256),
+    # —— Phase 3 敌机（当前为离线 PIL 占位图，真图走 gen_skin.py --only）——
+    dict(id="enemy_weaver", kind="sprite", facing="nose pointing down",
+         subject="golden zigzag interceptor with swept wings and a narrow fuselage, evasive posture", out=256),
+    dict(id="enemy_tank", kind="sprite", facing="nose pointing down",
+         subject="violet heavy armored cruiser, thick hexagonal hull with layered plating and twin turrets", out=256),
+    dict(id="enemy_swarm", kind="sprite", facing="nose pointing down",
+         subject="small mint-green dart drone with minimal wings, built for swarming speed", out=256),
     # —— Boss（机头朝下）——
     dict(id="boss_mothership", kind="sprite", facing="nose pointing down",
          subject="huge crimson-pink alien carrier mothership with hangar bays and a command tower, menacing", out=512),

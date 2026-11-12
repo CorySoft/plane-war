@@ -212,6 +212,10 @@ export const ENEMY_TYPES = {
   laser:  { r: 22, hp: 4,  score: 400, xp: 25,  speed: 1.4, color: "#ff4444", fireCd: [2.5, 3.5] },
   shield: { r: 28, hp: 6,  score: 500, xp: 30,  speed: 1.2, color: "#44aaff", fireCd: [3, 4] },
   split:  { r: 20, hp: 3,  score: 250, xp: 15,  speed: 1.8, color: "#66dd66", fireCd: [3.5, 5] },
+  // ---------- Phase 3 新增敌种（3 个，占位贴图，真图走 gen_skin.py --only） ----------
+  weaver: { r: 18, hp: 2,  score: 200,  xp: 12, speed: 2.1,  color: "#ffd166", fireCd: [2.2, 3.0], zigzag: { amp: 2.2, freq: 2.2 } },
+  tank:   { r: 42, hp: 16, score: 1400, xp: 70, speed: 0.55, color: "#b197fc", fireCd: [2.0, 2.6] },
+  swarm:  { r: 12, hp: 1,  score: 60,   xp: 5,  speed: 3.4,  color: "#8ce99a", fireCd: [2.6, 3.6] },
 };
 
 // ---------- 道具 ----------

@@ -28,6 +28,9 @@ const MANIFEST = {
   enemy_laser: "enemy_laser.png",
   enemy_shield: "enemy_shield.png",
   enemy_split: "enemy_split.png",
+  enemy_weaver: "enemy_weaver.png",
+  enemy_tank: "enemy_tank.png",
+  enemy_swarm: "enemy_swarm.png",
   // Boss
   boss_mothership: "boss_mothership.png",
   boss_fortress: "boss_fortress.png",

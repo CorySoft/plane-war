@@ -42,7 +42,7 @@ export function removeEnemyEx(idx) {
  * 注意：局部变量名不能叫 pool——模块级已经有敌机对象池 const pool = []，
  * 同名遮蔽会让「往对象池归还敌机」的误写变成往类型数组里塞对象。
  */
-function getEnemyTypePool(level) {
+export function getEnemyTypePool(level) {
   const types = ["small"];
   if (level >= 2) types.push("small", "mid");
   if (level >= 3) types.push("mid", "mid");
@@ -51,6 +51,12 @@ function getEnemyTypePool(level) {
   if (level >= 6) types.push("split");
   if (level >= 7) types.push("big");
   if (level >= 8) types.push("shield", "laser");
+  // Phase 3：新敌种分级解锁（只影响随机刷怪/精英波；战役 beat 由 JSON 显式指定）
+  if (level >= 3) types.push("weaver");
+  if (level >= 6) types.push("tank");
+  if (level >= 7) types.push("weaver");
+  if (level >= 9) types.push("swarm", "swarm");
+  if (level >= 10) types.push("tank");
   return types;
 }
 
@@ -133,7 +139,10 @@ export function updateEnemies(dt, level, playerX, playerY, playerH, enemyDt = dt
         e.y += e.ky * enemyDt * 60;
       }
       e.y += e.vy * enemyDt * 60;
-      e.x += e.vx * enemyDt * 60 + Math.sin(e.t * 1.5) * 0.4;
+      // weaver：横向正弦机动（zigzag 来自 ENEMY_TYPES 配置，不放实例字段，避免池残留）
+      const zig = ENEMY_TYPES[e.type].zigzag;
+      e.x += e.vx * enemyDt * 60 + Math.sin(e.t * 1.5) * 0.4
+        + (zig ? Math.cos(e.t * zig.freq) * zig.amp * enemyDt * 60 : 0);
       e.t += enemyDt;
       e.hitFlash = Math.max(0, e.hitFlash - dt * 8);
 
@@ -232,6 +241,9 @@ export const ENEMY_TEXTURE_ROT = {
   laser: -Math.PI / 2, // 朝左
   shield: Math.PI,     // 朝上
   split: 0,            // 近球对称，按朝下
+  weaver: 0,           // 占位图机鼻朝下
+  tank: 0,             // 占位图机鼻朝下
+  swarm: Math.PI,      // 占位图机鼻朝上 → 翻成朝下
 };
 export const BOSS_TEXTURE_ROT = {
   mothership: 0,       // 朝下
@@ -310,6 +322,13 @@ export function drawEnemies(ctx, frame) {
         ctx.lineTo(r * 0.6, r);
         ctx.lineTo(-r * 0.6, r);
         ctx.lineTo(-r, 0);
+      } else if (e.type === "tank") {
+        // 重甲：厚六边形（与 big 的圆形、盾机的菱形区分）
+        ctx.moveTo(0, -r);
+        ctx.lineTo(r * 0.9, -r * 0.25);
+        ctx.lineTo(r * 0.7, r * 0.8);
+        ctx.lineTo(-r * 0.7, r * 0.8);
+        ctx.lineTo(-r * 0.9, -r * 0.25);
       } else if (e.type === "shield") {
         // 菱形
         ctx.moveTo(0, -r);
@@ -405,7 +424,9 @@ export function spawnSplitChildren(parent) {
     e.splitChildren = 0;
     e.laserTimer = 0;
     e.isBoss = false;
-    e._deathExplosion = null;
+e._deathExplosion = null;
+    e.patternRef = null;
+    e.patternParams = null;
     e._laserShot = false;
     e.enemyLevel = 1;
     e.kx = 0; e.ky = 0; e.kbTimer = 0;
