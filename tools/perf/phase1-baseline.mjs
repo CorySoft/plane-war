@@ -146,6 +146,11 @@ const fxRingCount = () => (typeof game().getFxCounts === "function" ? game().get
  *  - 探针弹 = 带 `_qprobe` 的那发（本量具自有字段，生产码不认识）。
  *  - 主弹 = 其余 friendly 弹（含暴击弹、天基加速弹、连射弹）。**卫星弹不在此列**：
  *    `getOrbitBullets` 挂在 player 上、不进 `bullets`（`js/player.js:256`），所以不计入同屏弹道。
+ *  - **B11 排查结论：合成弹不构成第四类。**`createSyntheticBullet`（js/bullet.js:56-70）只 return 对象、
+ *    不调 `pushBullet`（全仓唯一入池口是 js/bullet.js:93，调用点只有 :180 主弹 / :205 碎片 / :290 敌弹），
+ *    `freeBullet` 也写明「合成弹不入池」（:91）。chain(`js/game.js:808`) 与 nova(`js/game.js:1237`) 的合成弹
+ *    因此**根本不在 `game().bullets` 里**，同屏普查无从计到 —— 「142 是合成弹顶上来的」这个假设已被实码否证。
+ *    真上限的口径差另有其源，改由 ③ 臂的 `峰值分解_峰值帧` + `帧末计数超screenCap的帧数` 直读判定。
  * 「主弹在飞」假设（主持人提出：maxRange 800px ÷ 180px/s ≈ 4.4s > 2.5s 窗）的**可证伪读数**
  * 是 residualBreakdown 里的 `还需秒`：它是逐弹实算的，不是拿常量推的。
  */
@@ -395,16 +400,26 @@ function runArm3(name, skills, frames, inv = false) {
   // levelledThisFrame 在 update() 开头复位 js/game.js:322），且 p.level 只在 addXp 里涨
   // （doLevelUp 不动等级，js/game.js:1242-1255）→「本帧等级涨过」与「本帧放出过一环」一一对应。
   // 视觉增量与触顶帧只作对照/证伪：两者显著背离就说明上面那条不变量塌了，此时不报环频。
+  // B7 断点修正：`lv > prevLevel` 只说明「本帧升过级」，它和「本帧放出过一环」的等价关系
+  // 前提是 nova 技能等级 > 0（js/game.js:1210-1215 的 emitNova 在 skills.nova<=0 时不走）。
+  // 旧版对 nova=0 的基线臂照样计数并印成 14 环，那是把「升级」当「新星」——已作废，
+  // nova=0 时环频一律报 null（测不到 = 没有这个机制），不给 0 也不给 14。
+  const novaOn = (skills.nova ?? 0) > 0;
   let prevLevel = game().getPlayer().level, ringEdgeFrames = 0, levelRiseCells = 0;
   let prevRings = fxRingCount(), ringVisualAdds = 0, ringCapFrames = 0;
   let invFrames = 0, maxedFrames = 0;
+  let peakCensus = null, overCapFrames = 0, overCapMax = 0;
   const r = play(frames, p, skills, () => {
     const l = game().getLives();
     if (l < prevLives) deaths++;
     // 只认 0→1：升级也会 +1 命（doLevelUp），用「任意增加」会把升级数记成复活数
     if (prevLives === 0 && l > 0) revives++;
     prevLives = l;
-    peak = Math.max(peak, friendlyCount());
+    const cens = friendlyCensus();
+    if (cens.total > peak) { peak = cens.total; peakCensus = cens; }
+    // B11：帧末（step 之后）计数 vs js/game.js:405 的发射闸（step 之内、开火之前）不是同一时刻，
+    // 所以 peak 有可能 > screenCap。超没超、超多少、由哪类弹组成，全部直读记下来，不靠猜。
+    if (cens.total > BULLET.screenCap) { overCapFrames++; overCapMax = Math.max(overCapMax, cens.total - BULLET.screenCap); }
     if (p.invincible > 0) invFrames++;
     if (l >= game().getMaxLives()) maxedFrames++;
     const ratio = p.hpRatio ?? 1;
@@ -438,7 +453,15 @@ function runArm3(name, skills, frames, inv = false) {
     续命次数_api: "已废弃（12aec58 拆分为 技能/付费 两计数）",
     livesEnd: game().getLives(), 最低hpRatio: +minHpRatio.toFixed(3),
     maxLivesEnd: game().getMaxLives(),
-    无敌帧数: invFrames, 无敌帧占比: +(invFrames / Math.max(r.frames, 1)).toFixed(3),
+    // B8 断点修正：inv=false 时 lock() 每帧开头把 p.invincible 强制写回 0（见 :131-133 的三态注释），
+    // 引擎自己的 2.2s 受击无敌在下一帧就被抹掉，所以这里的计数**每一次受击只落 1 帧**——
+    // 它是「受击事件数下界」，不是「窗内无敌帧数」，与 inv=null 臂（R1 真值，实测 385/600 帧）不同口径。
+    // 旧版把两者都印成 `无敌帧数`，导致 ③ 臂读出的 10/15 被当成「存活窗里只有 0.25s 无敌」。已作废。
+    无敌帧数: inv === false ? null : invFrames,
+    无敌帧数_不可用原因: inv === false
+      ? "lock(inv=false) 每帧清零 invincible，窗内帧数不可测；R1 的无敌帧占用只看 regen_受击节奏 / regen_存活窗_R1（inv=null）" : null,
+    受击事件数_逐帧下界: inv === false ? invFrames : null,
+    无敌帧占比: inv === false ? null : +(invFrames / Math.max(r.frames, 1)).toFixed(3),
     满命帧数: maxedFrames,
     再生累计末值: +(g._regenAccum ?? 0).toFixed(4),
     // 存活窗里「回血给了几条命」测不出来：`lives = min(maxLives, lives + 1)` 是五类来源、六个写入点 ——
@@ -448,19 +471,33 @@ function runArm3(name, skills, frames, inv = false) {
     // 本臂只报两道闸的占用帧数（无敌帧 / 满命帧），不许拿去当回血速率。
     回血命数_本窗不可归因: "lives+1 是五类来源六个写入点（js/game.js:437,446,468,1184,1246,1250），存活窗内分不开",
     等级增量: g.level - lvlAt, levelUpsHandled: r.levelUps,
+    // 构筑漂移：lock() 只写 skills 参数里出现的键（:131-133），而升级抽奖
+    // （js/powerup.js:244-247 的 GACHA_SKILL_POOL_IDS 含 split/volley/scatter…）会给出**不在本臂清单里**的技能。
+    // 不记这一格，「满级构筑」的读数就会把抽奖白送的分裂碎片算到 Phase-1 六技能头上（本轮 142 发的真因）。
+    窗末技能快照: Object.fromEntries(Object.entries(g.skills || {}).filter(([, v]) => v > 0)),
+    本臂指定技能: Object.fromEntries(Object.entries(skills)),
     得分增量: game().getScore() - scoreAt,
     enemyLevelEnd: game().getEnemyLevel(),
     peakFriendly: peak,
+    // B11：峰值那一帧的同帧普查（分类依据见 friendlyCensus），用于回答「140 是不是真上限」
+    峰值分解_峰值帧: peakCensus,
+    帧末计数超screenCap的帧数: overCapFrames,
+    帧末超出上限的最大幅度: overCapMax,
+    峰值采样时刻: "step() 之后（帧末）；发射闸在 step() 之内、开火之前（js/game.js:399-405）→ 两个时刻不同，不可直接互证",
     // R2 环频：主读数 = 等级上升沿帧数（见上方不变量），对照 = 视觉正增量和
-    新星环数_等级上升沿帧: ringEdgeFrames,
+    // B7：nova=0 的臂没有新星机制，环频读数字段一律为 null（不是 0、不是 14）
+    新星环数_等级上升沿帧: novaOn ? ringEdgeFrames : null,
     等级上升沿总格数: levelRiseCells,
-    环数_视觉正增量和: ringVisualAdds,
-    环缓冲触顶帧: ringCapFrames,
+    环数_视觉正增量和: novaOn ? ringVisualAdds : null,
+    环缓冲触顶帧: novaOn ? ringCapFrames : null,
+    本臂nova等级: skills.nova ?? 0,
     // 分钟 = 3600 帧：环数 × 3600 / 实际帧数（写成 ÷秒数是每秒读数，会把占比整体压低 60 倍）
-    环每分钟: +(ringEdgeFrames * 3600 / Math.max(r.frames, 1)).toFixed(2),
-    环频口径告警: ringVisualAdds > ringEdgeFrames
+    环每分钟: novaOn ? +(ringEdgeFrames * 3600 / Math.max(r.frames, 1)).toFixed(2) : null,
+    环频口径告警: !novaOn
+      ? "n/a：nova=0，本臂不存在新星环，等级上升沿不产出环（B7 修正）"
+      : (ringVisualAdds > ringEdgeFrames
       ? "视觉增量 > 上升沿帧数：爆炸环混入（js/game.js:970-971）或同帧多来源，只作对照不作环频"
-      : (ringCapFrames > 0 ? "触顶过 48：视觉计数会少报，主读数仍取上升沿" : "ok"),
+      : (ringCapFrames > 0 ? "触顶过 48：视觉计数会少报，主读数仍取上升沿" : "ok")),
   };
 }
 
@@ -586,7 +623,13 @@ function stats(arr) {
   const median = !s.length ? null
     : s.length % 2 ? s[(s.length - 1) / 2]
     : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
-  const r2 = (v) => +v.toFixed(1);
+  // B9 断点修正：旧版 toFixed(1) 把「斜靶 h5 = 1.005」和「反打靶 h5 = 1.171」压成同一个 1.0/1.1，
+  // 比值分布因此看不出分离度差异，占比类 <1% 的读数更是直接被抹平。改为有效数字 4 位。
+  const r2 = (v) => {
+    if (!Number.isFinite(v) || v === 0) return v;
+    const d = Math.max(0, 4 - Math.ceil(Math.log10(Math.abs(v) + Number.EPSILON)));
+    return +v.toFixed(d);
+  };
   return { n: s.length, 缺失读数: dropped || undefined,
     min: s.length ? r2(s[0]) : null, median: median === null ? null : r2(median),
     max: s.length ? r2(s[s.length - 1]) : null,
@@ -618,6 +661,11 @@ function sweep3(frames = 3600, seeds = sweepSeeds(SWEEP)) {
       等级增量: num("等级增量"), 得分增量: num("得分增量"),
       新星环数_等级上升沿帧: num("新星环数_等级上升沿帧"), 环每分钟: num("环每分钟"),
       阵亡次数: num("阵亡次数"),
+      // R1 需要「满命闸 vs 无敌闸谁在掐回血」的跨 seed 证据，光看单 seed 的两格不够
+      满命帧数: num("满命帧数"),
+      受击事件数_逐帧下界: num("受击事件数_逐帧下界"),
+      再生累计末值: num("再生累计末值"),
+      帧末计数超screenCap的帧数: num("帧末计数超screenCap的帧数"),
       复活次数_逐帧下界: num("复活次数_逐帧下界"),
       技能复活次数_api: num("技能复活次数_api"), 付费复活次数_api: num("付费复活次数_api"),
       最低hpRatio: num("最低hpRatio"), peakFriendly: num("peakFriendly"),
@@ -767,10 +815,12 @@ function residualSummary(row) {
  */
 function sweep4(seeds = sweepSeeds(SWEEP)) {
   const kept = [], dropped = [];
+  let armTotal = 0;
   for (const sd of seeds) {
     reseed(sd);
     const g = group4();
     const bad = g.arms.filter((a) => a.臂合格 === false);
+    armTotal += g.arms.length;
     if (bad.length) dropped.push({ seed: sd, 不合格臂: bad.map((a) => `${a.arm}: ${a.身份校验}`) });
     else kept.push({ seed: sd, arms: g.arms });
   }
@@ -781,6 +831,11 @@ function sweep4(seeds = sweepSeeds(SWEEP)) {
   });
   return {
     seeds, 采用seed数: kept.length, 丢弃seed数: dropped.length,
+    // B10 断点修正：旧版 sweep4 不输出 `全部臂合格`，而 7.8 的 R3 报告项点名要它，
+    // 于是那一格只能靠人肉数 36 条 身份校验 填 —— 现在直接出数。
+    全部臂合格: kept.length > 0 && dropped.length === 0 && kept.every((k) => k.arms.every((a) => a.臂合格 !== false)),
+    臂总数: kept.length * names.length + dropped.reduce((n, d) => n + d.不合格臂.length, 0),
+    不合格臂数: dropped.reduce((n, d) => n + d.不合格臂.length, 0),
     丢弃原因: dropped,
     静场后残留分解: kept.length ? kept.flatMap((k) => k.arms.map(residualSummary)) : [],
     残留合计分布: kept.length ? stats(kept.flatMap((k) => k.arms.map((a) => residualSummary(a).残留合计))) : null,
