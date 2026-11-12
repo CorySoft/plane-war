@@ -310,7 +310,7 @@ export function drawEnemies(ctx, frame) {
       ctx.rotate(Math.PI);   // 程序化形状按机鼻朝上绘制，翻成朝下
       ctx.fillStyle = e.hitFlash > 0 ? "#ffffff" : e.color;
       ctx.beginPath();
-      if (e.type === "small" || e.type === "split") {
+      if (e.type === "small" || e.type === "split" || e.type === "weaver" || e.type === "swarm") {
         ctx.moveTo(0, -r);
         ctx.lineTo(r * 0.85, r * 0.3);
         ctx.lineTo(r * 0.5, r);
@@ -424,7 +424,7 @@ export function spawnSplitChildren(parent) {
     e.splitChildren = 0;
     e.laserTimer = 0;
     e.isBoss = false;
-e._deathExplosion = null;
+    e._deathExplosion = null;
     e.patternRef = null;
     e.patternParams = null;
     e._laserShot = false;
