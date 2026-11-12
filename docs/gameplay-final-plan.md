@@ -2,6 +2,7 @@
 
 > 收敛依据：`docs/gameplay-catalog.md`（63 项总目录）→ 两份独立提案（`proposal-qoder-cn.md` / `proposal-codearts.md`）→ 两份交叉评审（`review-proposal-qoder-cn.md` / `review-proposal-codearts.md`）→ **决定性实证 `docs/graze-feasibility.md`**。
 > 基线 HEAD `a54eeed` / v0.5.3 / 398 测试 / 产物计数 31。本文只写文档，未改 `js/**`；`tools/perf/` 下 3 个测量脚本为只读探针。
+> **归档标记（2026-11-12 追加）**：本文是特定时点的收敛快照；正文 `file:line` 按写作时版本有效。以下四份历史评审快照**不得作为现行行号依据**：`existing-systems-inventory.md`、`review-proposal-codearts.md`、`graze-feasibility.md`、`proposal-codearts.md`；现行代码锚点以 `docs/design-current-state.md` 为准。
 
 ## 0. 落地状态（2026-11-11 执行轮追加，覆盖下文与实做不一致的表述）
 

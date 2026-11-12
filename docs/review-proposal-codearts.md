@@ -2,6 +2,7 @@
 
 > 评审对象：`docs/proposal-qoder-cn.md`（121 行）。基线 `HEAD a54eeed` / v0.5.3 / 398 测试。
 > 本文只写评审，不改 `js/**`、不 commit、不联网。所有锚点均为本次读码复核。
+> **归档标记（2026-11-12 追加）**：本文是特定时点（HEAD `a54eeed` / v0.5.3）的评审快照；正文 `file:line` 按写作时版本有效，**不得作为现行行号依据**；现行代码锚点以 `docs/design-current-state.md` 为准。
 
 ## 0. 结论
 
