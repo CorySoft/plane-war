@@ -489,15 +489,24 @@ function runArm3(name, skills, frames, inv = false) {
     新星环数_等级上升沿帧: novaOn ? ringEdgeFrames : null,
     等级上升沿总格数: levelRiseCells,
     环数_视觉正增量和: novaOn ? ringVisualAdds : null,
+    视觉增量_超出上升沿的部分: novaOn ? ringVisualAdds - ringEdgeFrames : null,
     环缓冲触顶帧: novaOn ? ringCapFrames : null,
     本臂nova等级: skills.nova ?? 0,
     // 分钟 = 3600 帧：环数 × 3600 / 实际帧数（写成 ÷秒数是每秒读数，会把占比整体压低 60 倍）
     环每分钟: novaOn ? +(ringEdgeFrames * 3600 / Math.max(r.frames, 1)).toFixed(2) : null,
+    环每分钟_窗满60秒: novaOn && r.frames >= frames ? +(ringEdgeFrames * 3600 / Math.max(r.frames, 1)).toFixed(2) : null,
     环频口径告警: !novaOn
       ? "n/a：nova=0，本臂不存在新星环，等级上升沿不产出环（B7 修正）"
-      : (ringVisualAdds > ringEdgeFrames
-      ? "视觉增量 > 上升沿帧数：爆炸环混入（js/game.js:970-971）或同帧多来源，只作对照不作环频"
-      : (ringCapFrames > 0 ? "触顶过 48：视觉计数会少报，主读数仍取上升沿" : "ok")),
+      : (ringVisualAdds < ringEdgeFrames
+        ? "红：视觉增量 < 上升沿帧数。每个上升沿本该至少留一环（js/game.js:1228 只在触顶时才拒收），"
+          + "对照腿反而更少 ⇒ 计数口径塌了，本臂环频不可用"
+        : (ringCapFrames > 0
+          ? "触顶过 48：视觉计数会少报（js/config.js:108 + js/game.js:1228 的 if），主读数仍取上升沿"
+          : (ringVisualAdds > ringEdgeFrames
+            ? "黄：视觉增量 > 上升沿帧数 = 爆炸环与新星环共用同一缓冲（js/game.js:967-971 每爆 1~3 环 vs :1228-1229 每环 1 环）。"
+              + "这是**通道是超集**、不是不变量塌——上升沿主读数不受影响，对照腿在本臂不可证伪，"
+              + "要判「环频是否被高估」得另加一条能区分爆炸环的计数（B13 待办）"
+            : "ok"))),
   };
 }
 
@@ -938,10 +947,13 @@ function group5() {
     单环伤害: probes,
     主弹DPS: dps,
     环频窗: {
-      窗秒: win.seconds, 新星环数_等级上升沿帧: win.新星环数_等级上升沿帧,
+      窗秒: win.seconds, 窗满60秒: win.满窗, 新星环数_等级上升沿帧: win.新星环数_等级上升沿帧,
       等级上升沿总格数: win.等级上升沿总格数, 环每分钟: win.环每分钟,
-      环数每等级: lvlPerRing, 视觉环增量和: win.环数_视觉正增量和, 触顶帧: win.环缓冲触顶帧,
-      口径告警: win.环频口径告警,
+      环每分钟_窗满60秒: win.环每分钟_窗满60秒,
+      环数每等级: lvlPerRing, 视觉环增量和: win.环数_视觉正增量和,
+      视觉增量_超出上升沿的部分: win.视觉增量_超出上升沿的部分, 触顶帧: win.环缓冲触顶帧,
+      口径告警: win.环频口径告警, 本臂nova等级: win.本臂nova等级,
+      窗末技能快照: win.窗末技能快照, 本臂指定技能: win.本臂指定技能,
       上界对照: "7.3 的等级增量 median 13/60s 只是**上界**；本节给的是实测上升沿帧数",
     },
     占比_单目标口径pct: share(perRingTarget),
