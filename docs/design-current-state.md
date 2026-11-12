@@ -409,7 +409,7 @@
 | ~~`power` 道具上限 4~~ | `config.js:524` | **不再是硬编码**：`powerup.js:79` 改为 `Math.min(PLAYER.maxPower, …)` |
 | `ENEMY_LEVEL.softCapLevel/softCapFactor` 的外部键 | `config.js:133-134` | **字段非孤岛成立，但「活代码」不成立 ⇒ 改判「预留保险，当前不可达」**：读点在 `calcEnemyLevel` 的软上限分支内，而 `SCORE_AXIS` 把 enemyLevel 封顶在 **18**，30 级那道软上限任何模式都走不到；战役的 `difficulty.scoreAxis` 又被 `js/level/schema.js` **逐点强制等于** `SCORE_AXIS`，连「自定义轴绕过封顶」这条路也是关的。**本节原写「非孤岛」只答对了字段有读点，没答可达性**
 | `Boss.phases[].shieldGens` | `js/wave.js:95-97` | **名实不符（本轮改判）**：消费点确实有两处（`js/wave.js` 首阶段 → `shieldHp`、`game.js` 切相位重赋值），但**值被直接当护盾层数用**（每次命中扣 1 层），名字说的却是「发生器数量」。缺的不是消费点，是**名字与语义对齐**：建议改名 `shieldLayers` 或在定义处注释写死「= 层数，不生成实体」。**属代码改名，本轮不做**（裁定 C：§9.1 只做文档语义订正） |
-| ~~`player.js` 的 `ORBIT_GROW_INTERVAL=30`~~ | `js/player.js:190` | **不属于本表（本轮撤销该行）**：`ORBIT_GROW_INTERVAL` 有真实读点（增长间隔按 `guard` 缩紧），`maxOrbit` 在无护体时为 0 是**设计行为**而不是死代码 ⇒ 两半都不构成「数值孤岛」。另：本表旧版提到的 **`ORBIT_MAX_BASE` 在当前代码里不存在**（`docs/revamp-numbers.md` 已记录它被删除、只留 `ORBIT_GROW_INTERVAL` 并修正注释），本节此前却把它当「成立」的孤岛 ⇒ **doc-vs-doc 矛盾，以 `revamp-numbers.md` 为准**。真正的缺陷是「固定 30s」与「30 − guard×4」写进同一段注释 ⇒ **移到 §9.2「注释漂移」** |
+| ~~`player.js` 的 `ORBIT_GROW_INTERVAL=30`~~ | `js/player.js:190` | **不属于本表（本轮撤销该行）**：`ORBIT_GROW_INTERVAL` 有真实读点（增长间隔按 `guard` 缩紧），`maxOrbit` 在无护体时为 0 是**设计行为**而不是死代码 ⇒ 两半都不构成「数值孤岛」。另：本表旧版提到的 **`ORBIT_MAX_BASE` 在当前代码里不存在**（`docs/revamp-numbers.md` 已记录它被删除、只留 `ORBIT_GROW_INTERVAL` 并修正注释），本节此前却把它当「成立」的孤岛 ⇒ **doc-vs-doc 矛盾已消解：以 `revamp-numbers.md` 为准**（本轮复核 `js/config.js` 与 `js/player.js` 里 `ORBIT_MAX_BASE` 均已无字样）。曾经的真实缺陷「固定 30s 与 `30 − guard×4` 写进同一段注释」**已在 Phase-2 代码提交里修掉**，§9.2 那行随之转为已关闭项，本行只保留撤销理由 |
 
 ### 9.2 配置与实现漂移
 
@@ -421,7 +421,7 @@
 | 敌方等级注释过时 | **已随 `SCORE_AXIS` 重写**：`ENEMY_LEVEL.maxLevel=99` 现明确标注为「理论上限，运行时由得分轴封顶 18」 | `config.js:132`、`config.js:436-438` |
 | `screenCap` 注释称「同屏硬上限」 | **已修**：改为「单轮发射闸」，并写明分裂碎片不经此闸、峰值可能超过它 | `config.js:74-76`、闸门 `game.js:405`、旁路 `bullet.js:224-235` |
 | `freeze` 图鉴文案是玩家可见的假话 | **本轮同批订正（纯文本）**：文案写「冻结全场敌机**与敌方子弹**」，而 `freezeAll()` 只给敌机设 `e.frozen`，`updateBullets` 里没有任何 freeze 分支 ⇒ **敌弹照常飞**。改成「冻结全场敌机（敌方子弹仍会飞行）」。**不去真冻子弹**（那是平衡改动）。另：`js/player.js` 的 `buffs.freeze` 是死 key（freeze 走 `_freeze`/`e.frozen`），本轮不碰，记为债 | `js/ui/codex.js` 的 `powerupDesc.freeze`、`freezeAll` 在 `js/game.js` |
-| `ORBIT_GROW_INTERVAL` 注释与实现不同式（自 §9.1 移入） | 注释写「每 30 秒增长一颗」，实现是 `30 − guard×4` 的动态间隔（下限 4s）⇒ 两个式子同段并存会读成「固定 30s」。本轮只记，不改注释文本 | `js/player.js` 的 `ORBIT_GROW_INTERVAL` 定义处与增长分支 |
+| `ORBIT_GROW_INTERVAL` 注释与实现不同式（自 §9.1 移入） | **已修（Phase-2 代码提交里，非本轮）**：注释现写「有护体技能时每 30 秒增长一颗（每级 -4s，下限 4s）」，与增长分支的 `Math.max(4, ORBIT_GROW_INTERVAL - guard * 4)` 同式，另有一行「下限保护」注释说明为何不能压到 0；§9.1 旧版并列的 `ORBIT_MAX_BASE` **在 `js/config.js` 与 `js/player.js` 里都已无字样**（`grep -c` 双零，本轮复核）。本行保留为**已关闭项**，供 v0.5.7 重锚时核销 | `js/player.js` 的 `ORBIT_GROW_INTERVAL` 定义处与增长分支 |
 
 ---
 
