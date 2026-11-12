@@ -9,6 +9,9 @@ const PATTERN_DEFAULTS = Object.freeze({
   stack: { count: 5 },
   laserGrid: { count: 3 },
   aimed: { count: 1 },
+  wall: { count: 11 },
+  cross: { count: 8 },
+  pincerWave: { count: 8 },
 });
 
 const PATTERN_ALIASES = Object.freeze({
@@ -25,6 +28,9 @@ const PATTERN_PARAMS = Object.freeze({
   stack: ["count", "baseAngleDeg", "speedStep", "speed", "color", "radius", "maxRange", "life"],
   laserGrid: ["count", "spacing", "speed", "color", "radius", "maxRange", "life"],
   aimed: ["speed", "color", "radius", "maxRange", "life"],
+  wall: ["count", "span", "gapAt", "angleDeg", "speed", "color", "radius", "maxRange", "life"],
+  cross: ["count", "baseAngleDeg", "spacing", "speed", "color", "radius", "maxRange", "life"],
+  pincerWave: ["count", "spreadDeg", "lobeOffset", "speed", "color", "radius", "maxRange", "life"],
 });
 
 function fail(path, message) {
@@ -83,12 +89,22 @@ export function validatePatternParams(ref, params = {}) {
   }
 
   if (params.count !== undefined) {
-    const [min, max] = canonicalRef === "ring" || canonicalRef === "spiral" || canonicalRef === "stack"
-      ? [2, canonicalRef === "stack" ? 16 : 32]
-      : canonicalRef === "laserGrid" ? [2, 12]
-        : canonicalRef === "petal" ? [3, 32]
-          : canonicalRef === "rain" ? [1, 24] : [1, 16];
-    requireInteger(params.count, "params.count", min, max);
+    if (canonicalRef === "cross") {
+      requireInteger(params.count, "params.count", 4, 16);
+      if (params.count % 4 !== 0) fail("params.count", "cross count must be a multiple of 4");
+    } else if (canonicalRef === "pincerWave") {
+      requireInteger(params.count, "params.count", 2, 16);
+      if (params.count % 2 !== 0) fail("params.count", "pincerWave count must be even");
+    } else if (canonicalRef === "wall") {
+      requireInteger(params.count, "params.count", 3, 24);
+    } else {
+      const [min, max] = canonicalRef === "ring" || canonicalRef === "spiral" || canonicalRef === "stack"
+        ? [2, canonicalRef === "stack" ? 16 : 32]
+        : canonicalRef === "laserGrid" ? [2, 12]
+          : canonicalRef === "petal" ? [3, 32]
+            : canonicalRef === "rain" ? [1, 24] : [1, 16];
+      requireInteger(params.count, "params.count", min, max);
+    }
   }
   if (params.speed !== undefined) validateSpeed(params.speed, "params.speed");
 
@@ -100,6 +116,11 @@ export function validatePatternParams(ref, params = {}) {
   if (params.amplitude !== undefined) requireNumber(params.amplitude, "params.amplitude", 0, 0.75);
   if (params.span !== undefined) requireNumber(params.span, "params.span", 0, 600);
   if (params.spacing !== undefined) requireNumber(params.spacing, "params.spacing", 0, 80);
+  if (params.gapAt !== undefined) {
+    const lanes = params.count ?? PATTERN_DEFAULTS.wall.count;
+    requireInteger(params.gapAt, "params.gapAt", -1, lanes - 1);
+  }
+  if (params.lobeOffset !== undefined) requireNumber(params.lobeOffset, "params.lobeOffset", 0, 80);
   if (params.speedStep !== undefined) requireNumber(params.speedStep, "params.speedStep", 0, 2);
   if (canonicalRef === "stack") {
     const count = params.count ?? PATTERN_DEFAULTS.stack.count;
@@ -267,7 +288,7 @@ export function buildPatternSpecs(ref, params = {}, context = {}) {
   const origin = getOrigin(normalizedContext, 0.5);
   const opts = bulletOptions(params, { r: 5, color: "#ff8fa3", maxRange: 600, life: 6 });
   const speed = resolveSpeed(params, 3, rank, fireScale);
-  const defaultBaseAngle = ref === "fan" || ref === "rain" ? 90 : 0;
+  const defaultBaseAngle = ref === "fan" || ref === "rain" || ref === "wall" ? 90 : 0;
   const baseAngle = (params.baseAngleDeg ?? defaultBaseAngle) * Math.PI / 180;
   const count = params.count ?? PATTERN_DEFAULTS[ref].count;
   switch (ref) {
@@ -309,6 +330,70 @@ export function buildPatternSpecs(ref, params = {}, context = {}) {
         const layer = 1 + ((count - 1) / 2 - i) * step;
         return makeSpec(origin.x, origin.y, baseAngle, speed * layer, opts);
       });
+    }
+    case "wall": {
+      // 等距横排；gapAt>=0 时多留一条空道，形成可穿行的闪避缺口。
+      // lanes 比 count 多 1，跳过 gapAt 后仍恰好产出 count 发，
+      // 保证 patternBulletCount() 与实际产出相等（关卡密度预算的分母）。
+      const span = params.span ?? 360;
+      const gapAt = params.gapAt ?? -1;
+      const lanes = gapAt >= 0 ? count + 1 : count;
+      const step = span / Math.max(1, lanes - 1);
+      const specs = [];
+      for (let i = 0; i < lanes; i++) {
+        if (i === gapAt) continue;
+        specs.push(makeSpec(
+          origin.x + (i - (lanes - 1) / 2) * step,
+          origin.y,
+          baseAngle,
+          speed,
+          opts,
+        ));
+      }
+      return specs;
+    }
+    case "cross": {
+      // 四向等分：每臂 count/4 发，沿臂方向按 spacing 错位。
+      const per = count / 4;
+      const spacing = params.spacing ?? 0;
+      const specs = [];
+      for (let arm = 0; arm < 4; arm++) {
+        const angle = baseAngle + arm * Math.PI / 2;
+        for (let k = 0; k < per; k++) {
+          specs.push(makeSpec(
+            origin.x + Math.cos(angle) * k * spacing,
+            origin.y + Math.sin(angle) * k * spacing,
+            angle,
+            speed,
+            opts,
+          ));
+        }
+      }
+      return specs;
+    }
+    case "pincerWave": {
+      // 左右两瓣夹击：以瞄准角为中线，各偏 ±spreadDeg/2，发射点向两侧错开 lobeOffset。
+      const half = count / 2;
+      const spread = (params.spreadDeg ?? 60) * Math.PI / 180;
+      const lobe = params.lobeOffset ?? 24;
+      const target = getTarget(normalizedContext, origin);
+      const base = Math.atan2(target.y - origin.y, target.x - origin.x);
+      const px = -Math.sin(base);
+      const py = Math.cos(base);
+      const specs = [];
+      for (const side of [-1, 1]) {
+        for (let k = 0; k < half; k++) {
+          const t = half === 1 ? 0.5 : k / (half - 1);
+          specs.push(makeSpec(
+            origin.x + px * side * lobe,
+            origin.y + py * side * lobe,
+            base + side * (t - 0.5) * spread,
+            speed,
+            opts,
+          ));
+        }
+      }
+      return specs;
     }
     default:
       throw new TypeError(`Unknown pattern "${ref}"`);

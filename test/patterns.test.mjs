@@ -85,7 +85,7 @@ describe("enemy pattern registry", () => {
     clearBullets();
   });
 
-  it("八种图案均产生确定、有限且有界的 spec", () => {
+  it("十一种图案均产生确定、有限且有界的 spec", () => {
     const cases = [
       ["fan", {}, 5],
       ["ring", {}, 12],
@@ -95,6 +95,9 @@ describe("enemy pattern registry", () => {
       ["stack", {}, 5],
       ["laserGrid", {}, 3],
       ["aimed", {}, 1],
+      ["wall", {}, 11],
+      ["cross", {}, 8],
+      ["pincerWave", {}, 8],
     ];
     for (const [ref, params, count] of cases) {
       const first = buildPatternSpecs(ref, params, context);
@@ -134,6 +137,12 @@ describe("enemy pattern registry", () => {
     assert.throws(() => validatePatternParams("fan", { surprise: true }), /params.surprise/);
     assert.throws(() => validatePatternParams("stack", { count: 16, speedStep: 1 }), /non-positive/);
     assert.throws(() => buildPatternSpecs("ring", {}, { ...context, rank: 1.1 }), /rank/);
+    // 新图案的整除/步长约束：产出数必须恒等于 patternBulletCount()，否则密度预算分母失真
+    assert.throws(() => buildPatternSpecs("cross", { count: 6 }), /multiple of 4/);
+    assert.throws(() => buildPatternSpecs("pincerWave", { count: 5 }), /even/);
+    assert.throws(() => buildPatternSpecs("wall", { count: 11, gapAt: 11 }), /gapAt/);
+    // 守门：新分支不得吃掉既有图案的 min/max（ring 下限仍为 2）
+    assert.throws(() => validatePatternParams("ring", { count: 1 }), /params.count/);
   });
 
   it("注册表输出通过原子敌弹预算，超限 volley 不生成部分弹", () => {
