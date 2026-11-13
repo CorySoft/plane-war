@@ -5,6 +5,7 @@ import {
 } from "./schema.js";
 
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
+const MANIFEST_FILE_PATTERN = /^[a-z0-9][a-z0-9.-]{0,60}$/;
 const FETCH_TIMEOUT_MS = 8000;
 
 // beat.role 是关卡内部标识（teach/test/twist/rest/boss），不能直接展示给玩家。
@@ -45,14 +46,20 @@ async function fetchJson(fetchImpl, url) {
 export async function loadCampaign(id, {
   fetchImpl = globalThis.fetch,
   version = "dev",
+  // 清单文件名可独立于战役 id（默认同名）：用于绕过 Byethost 的按路径缓存。
+  // 注意：清单内 "id" 仍必须是 id（validateCampaignManifest 会逐字校验）。
+  manifestFile = id,
 } = {}) {
   if (typeof id !== "string" || !ID_PATTERN.test(id)) {
     throw new TypeError("campaign id must use lowercase letters, digits, or hyphens");
   }
+  if (typeof manifestFile !== "string" || !MANIFEST_FILE_PATTERN.test(manifestFile)) {
+    throw new TypeError("manifest file name must use lowercase letters, digits, dots, or hyphens");
+  }
   if (typeof fetchImpl !== "function") throw new Error("Fetch is not available");
 
   const versionQuery = `?v=${encodeURIComponent(version)}`;
-  const manifestUrl = `assets/levels/${id}.json${versionQuery}`;
+  const manifestUrl = `assets/levels/${manifestFile}.json${versionQuery}`;
   const manifest = validateCampaignManifest(await fetchJson(fetchImpl, manifestUrl), id);
   const stageRefs = manifest.chapters.flatMap(chapter =>
     chapter.stages.map(stageId => ({ chapterId: chapter.id, stageId })),

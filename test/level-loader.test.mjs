@@ -33,6 +33,28 @@ describe("campaign loader", () => {
     assert.ok(requested.every(url => url.endsWith(`?v=${APP_VERSION}`)));
   });
 
+  it("manifestFile 可切换清单文件而战役 id 不变（缓存破除用）", async () => {
+    const requested = [];
+    const fetchImpl = async url => {
+      requested.push(url);
+      const name = url.split("/").at(-1).split("?")[0].replace(".json", "");
+      return { ok: true, json: async () => readJson(name) };
+    };
+    const campaign = await loadCampaign("campaign-01", {
+      fetchImpl, version: APP_VERSION, manifestFile: "campaign-01.v2",
+    });
+    assert.equal(campaign.id, "campaign-01", "清单内的 id 必须仍是 campaign-01（存档键不变）");
+    const total = campaign.chapters.reduce((n, c) => n + c.stages.length, 0);
+    assert.equal(total, 12, "v2 清单应含 12 关");
+    assert.ok(requested.some(url => url.includes("campaign-01.v2.json?v=")), "应请求 v2 清单路径");
+    assert.equal(campaign.chapters[1].stages[0].id, "level-07");
+    assert.equal(campaign.chapters[1].stages[0].chapterId, "chapter-2");
+    await assert.rejects(
+      () => loadCampaign("campaign-01", { fetchImpl, manifestFile: "../evil" }),
+      /manifest file name/,
+    );
+  });
+
   it("无 campaign 参数保持默认模式，非法 campaign 显式返回加载错误", async () => {
     assert.equal(getCampaignId(""), null);
     assert.equal(getCampaignId("?mode=classic&campaign=campaign-01"), "campaign-01");

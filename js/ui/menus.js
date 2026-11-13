@@ -245,7 +245,7 @@ export function drawMenu(ctx, best, difficultyKey, presets, discovered = [], pla
   ctx.fillStyle = "rgba(255,255,255,.55)";
   setf(ctx, "10px 'sans-serif'");
   ctx.textAlign = "center"; ctx.textBaseline = "top";
-  ctx.fillText(`已通关 ${campaignProgress.completedStageIds.length}/6 · 点击继续`, W / 2, subY);
+  ctx.fillText(`已通关 ${campaignProgress.completedStageIds.length} 关 · 点击继续`, W / 2, subY);
   uiState.btnCampaignRect = campaignButton;
   uiState.campaignSubRect = { x: W / 2 - 80, y: subY, w: 160, h: 10 };
 

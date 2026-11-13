@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "id": "level-08",
+  "chapterId": "chapter-2",
+  "title": "蜂群走廊",
+  "difficulty": {
+    "scoreAxis": [
+      { "at": 0, "playerLevel": 1, "enemyLevel": 1 },
+      { "at": 8000, "playerLevel": 3, "enemyLevel": 3 },
+      { "at": 20000, "playerLevel": 6, "enemyLevel": 6 },
+      { "at": 35000, "playerLevel": 10, "enemyLevel": 11 },
+      { "at": 58500, "playerLevel": 14, "enemyLevel": 14 },
+      { "at": 100000, "playerLevel": 14, "enemyLevel": 16 },
+      { "at": 180000, "playerLevel": 14, "enemyLevel": 18 }
+    ]
+  },
+  "densityBudget": { "maxHostileActive": 110, "maxHostileBulletsPerSec": 44 },
+  "patterns": ["aimed", "cross", "ring"],
+  "formations": {
+    "line": { "type": "line", "spacing": 42 },
+    "v": { "type": "v", "spacing": 42 },
+    "column": { "type": "column", "spacing": 36 },
+    "pincer": { "type": "pincer", "spacing": 48 }
+  },
+  "beats": [
+    {
+      "id": "teach-aimed",
+      "role": "teach",
+      "telegraphSec": 1,
+      "densityBudget": { "maxHostileActive": 48, "maxHostileBulletsPerSec": 16 },
+      "advance": { "type": "allCleared", "timeoutSec": 22 },
+      "waves": [
+        {
+          "delaySec": 0,
+          "spawns": [
+            { "type": "swarm", "count": 4, "formation": "line", "centerX": 0.5, "spawnY": -30, "intervalSec": 0.55, "patternRef": "aimed" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "test-cross",
+      "role": "test",
+      "telegraphSec": 0.8,
+      "densityBudget": { "maxHostileActive": 64, "maxHostileBulletsPerSec": 24 },
+      "advance": { "type": "hybrid", "atSec": 3, "timeoutSec": 26 },
+      "waves": [
+        {
+          "delaySec": 0,
+          "spawns": [
+            { "type": "swarm", "count": 3, "formation": "v", "centerX": 0.5, "spawnY": -35, "intervalSec": 0.5, "patternRef": "cross", "params": { "count": 8, "baseAngleDeg": 0, "spacing": 0, "speed": 2.2 } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "twist-swarm",
+      "role": "twist",
+      "telegraphSec": 1,
+      "densityBudget": { "maxHostileActive": 80, "maxHostileBulletsPerSec": 32 },
+      "advance": { "type": "allCleared", "timeoutSec": 32 },
+      "waves": [
+        {
+          "delaySec": 0,
+          "spawns": [
+            { "type": "swarm", "count": 6, "formation": "column", "centerX": 0.5, "spawnY": -35, "intervalSec": 0.45, "patternRef": "ring", "params": { "count": 4, "speed": 2.2 } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rest",
+      "role": "rest",
+      "telegraphSec": 0,
+      "densityBudget": { "maxHostileActive": 16, "maxHostileBulletsPerSec": 4 },
+      "advance": { "type": "time", "atSec": 4 },
+      "waves": []
+    },
+    {
+      "id": "boss-phantom",
+      "role": "boss",
+      "telegraphSec": 3,
+      "densityBudget": { "maxHostileActive": 110, "maxHostileBulletsPerSec": 44 },
+      "advance": { "type": "allCleared", "timeoutSec": 90 },
+      "waves": [{ "delaySec": 0, "bossType": "phantom", "spawns": [] }]
+    }
+  ]
+}

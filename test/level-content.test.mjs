@@ -10,12 +10,13 @@ async function readJson(path) {
 }
 
 describe("campaign chapter content", () => {
-  it("validates all six stages, five-beat arcs, registered patterns, and beat budgets", async () => {
-    const manifest = validateCampaignManifest(await readJson("campaign-01.json"), "campaign-01");
+  it("validates all twelve stages, five-beat arcs, registered patterns, and beat budgets", async () => {
+    const manifest = validateCampaignManifest(await readJson("campaign-01.v2.json"), "campaign-01");
     const refs = manifest.chapters.flatMap(chapter =>
       chapter.stages.map(stageId => ({ chapterId: chapter.id, stageId })),
     );
-    assert.equal(refs.length, 6);
+    assert.equal(refs.length, manifest.chapters.reduce((n, c) => n + c.stages.length, 0));
+    assert.equal(refs.length, 12);
 
     const usedPatterns = new Set();
     for (const { chapterId, stageId } of refs) {
@@ -46,13 +47,13 @@ describe("campaign chapter content", () => {
     }
 
     assert.deepEqual([...usedPatterns].sort(), [
-      "aimed", "fan", "laser", "laserGrid", "petal", "rain", "ring", "spiral", "stack",
+      "aimed", "cross", "fan", "laser", "laserGrid", "petal", "pincerWave", "rain", "ring", "spiral", "stack", "wall",
     ]);
   });
 
   it("beat 角色均有玩家可读中文映射，内部 role 不会弹给玩家", async () => {
     const { beatLabel } = await import("../js/level/loader.js");
-    const manifest = validateCampaignManifest(await readJson("campaign-01.json"), "campaign-01");
+    const manifest = validateCampaignManifest(await readJson("campaign-01.v2.json"), "campaign-01");
     const roles = new Set();
     for (const chapter of manifest.chapters) {
       for (const stageId of chapter.stages) {

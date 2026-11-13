@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "campaign-01",
+  "title": "空域远征",
+  "chapters": [
+    {
+      "id": "chapter-1",
+      "title": "初入空域",
+      "stages": ["level-01", "level-02", "level-03", "level-04", "level-05", "level-06"]
+    },
+    {
+      "id": "chapter-2",
+      "title": "深空回廊",
+      "stages": ["level-07", "level-08", "level-09", "level-10", "level-11", "level-12"]
+    }
+  ]
+}

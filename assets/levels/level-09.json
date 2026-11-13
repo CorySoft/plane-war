@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "id": "level-09",
+  "chapterId": "chapter-2",
+  "title": "铁壁",
+  "difficulty": {
+    "scoreAxis": [
+      { "at": 0, "playerLevel": 1, "enemyLevel": 1 },
+      { "at": 8000, "playerLevel": 3, "enemyLevel": 3 },
+      { "at": 20000, "playerLevel": 6, "enemyLevel": 6 },
+      { "at": 35000, "playerLevel": 10, "enemyLevel": 11 },
+      { "at": 58500, "playerLevel": 14, "enemyLevel": 14 },
+      { "at": 100000, "playerLevel": 14, "enemyLevel": 16 },
+      { "at": 180000, "playerLevel": 14, "enemyLevel": 18 }
+    ]
+  },
+  "densityBudget": { "maxHostileActive": 120, "maxHostileBulletsPerSec": 48 },
+  "patterns": ["aimed", "laser", "pincerWave"],
+  "formations": {
+    "line": { "type": "line", "spacing": 42 },
+    "v": { "type": "v", "spacing": 42 },
+    "column": { "type": "column", "spacing": 36 },
+    "pincer": { "type": "pincer", "spacing": 48 }
+  },
+  "beats": [
+    {
+      "id": "teach-aimed",
+      "role": "teach",
+      "telegraphSec": 1,
+      "densityBudget": { "maxHostileActive": 48, "maxHostileBulletsPerSec": 16 },
+      "advance": { "type": "allCleared", "timeoutSec": 26 },
+      "waves": [
+        {
+          "delaySec": 0,
+          "spawns": [
+            { "type": "tank", "count": 1, "formation": "line", "centerX": 0.5, "spawnY": -45, "intervalSec": 0.7, "patternRef": "aimed" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "test-pincer",
+      "role": "test",
+      "telegraphSec": 0.8,
+      "densityBudget": { "maxHostileActive": 64, "maxHostileBulletsPerSec": 24 },
+      "advance": { "type": "hybrid", "atSec": 4, "timeoutSec": 30 },
+      "waves": [
+        {
+          "delaySec": 0,
+          "spawns": [
+            { "type": "tank", "count": 1, "formation": "v", "centerX": 0.5, "spawnY": -45, "intervalSec": 0.7, "patternRef": "pincerWave", "params": { "count": 8, "spreadDeg": 70, "lobeOffset": 24, "speed": 2.4 } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "twist-tank",
+      "role": "twist",
+      "telegraphSec": 1,
+      "densityBudget": { "maxHostileActive": 80, "maxHostileBulletsPerSec": 32 },
+      "advance": { "type": "allCleared", "timeoutSec": 36 },
+      "waves": [
+        {
+          "delaySec": 0,
+          "spawns": [
+            { "type": "tank", "count": 2, "formation": "pincer", "centerX": 0.5, "spawnY": -45, "intervalSec": 0.9, "patternRef": "laser", "params": { "count": 3, "spacing": 12, "speed": 8.5 } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rest",
+      "role": "rest",
+      "telegraphSec": 0,
+      "densityBudget": { "maxHostileActive": 16, "maxHostileBulletsPerSec": 4 },
+      "advance": { "type": "time", "atSec": 4 },
+      "waves": []
+    },
+    {
+      "id": "boss-mothership",
+      "role": "boss",
+      "telegraphSec": 3,
+      "densityBudget": { "maxHostileActive": 120, "maxHostileBulletsPerSec": 48 },
+      "advance": { "type": "allCleared", "timeoutSec": 105 },
+      "waves": [{ "delaySec": 0, "bossType": "mothership", "spawns": [] }]
+    }
+  ]
+}

@@ -75,7 +75,10 @@ const requestedCampaign = getCampaignId(globalThis.location?.search || "");
 // Boss Rush 原型：显式 URL 开关（?bossrush=1），与战役互斥；缺省时全程走原路径。
 // 开在模块加载期只算一次，不参与默认模式的任何分支。
 const bossRushRequested = !requestedCampaign && isBossRushRequested(globalThis.location?.search || "");
-const campaignLoad = await loadCampaignSafely(requestedCampaign, { version: APP_VERSION });
+const campaignLoad = await loadCampaignSafely(requestedCampaign, {
+  version: APP_VERSION,
+  manifestFile: requestedCampaign === "campaign-01" ? "campaign-01.v2" : undefined,
+});
 let campaignDefinition = campaignLoad.campaign;
 let campaignLoadError = campaignLoad.error;
 let activeCampaignId = requestedCampaign;
@@ -1441,7 +1444,10 @@ async function startCampaignFromMenu() {
   campaignLoading = true;
   setCampaignLoading(true);
   activeCampaignId = "campaign-01";
-  const result = await loadCampaignSafely(activeCampaignId, { version: APP_VERSION });
+  const result = await loadCampaignSafely(activeCampaignId, {
+    version: APP_VERSION,
+    manifestFile: activeCampaignId === "campaign-01" ? "campaign-01.v2" : undefined,
+  });
   campaignLoading = false;
   setCampaignLoading(false);
   if (result.error) {
