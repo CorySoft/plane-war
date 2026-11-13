@@ -597,6 +597,35 @@ export const DAILY_QUESTS = [
   { id: "q_powerups", name: "补给达人", desc: "今日拾取 10 个道具",  type: "powerups", target: 10,   reward: 3 },
 ];
 
+// ---------- 无尽模式「幕」（Phase 5） ----------
+// 注意：at 是【未标定占位】。标定数据来自每帧钉无敌的 farm 上限（P50≈7730@150s），
+// 只能证否 120000 偏高（相差约 15.5×），不能证成任何具体值；短局（150s）内不会触发幕轮换，
+// 属已知设计债，待有「能死但不早死」的观测腿后单独重定尺子。不要写成「已达到的进度」。
+export const ENDLESS_ACTS = Object.freeze([
+  { at: 0, name: "近地轨道", spawnMul: 1.00, eliteMul: 1.00, hpMul: 1.00, bossCycleSec: 0, tint: null },
+  { at: 120000, name: "电离层", spawnMul: 1.03, eliteMul: 0.85, hpMul: 1.10, bossCycleSec: 90, tint: "rgba(40,90,200,.10)" },
+  { at: 300000, name: "深空带", spawnMul: 1.06, eliteMul: 0.70, hpMul: 1.20, bossCycleSec: 75, tint: "rgba(150,60,200,.12)" },
+  { at: 600000, name: "虚空", spawnMul: 1.08, eliteMul: 0.55, hpMul: 1.30, bossCycleSec: 60, tint: "rgba(255,80,140,.10)" },
+]);
+
+/** 按累计得分取当前幕（分段取「at <= score」的最后一段） */
+export function actFromScore(score) {
+  const n = Number(score);
+  const v = Number.isFinite(n) && n > 0 ? n : 0;
+  let index = 0;
+  for (let i = 0; i < ENDLESS_ACTS.length; i++) {
+    if (v >= ENDLESS_ACTS[i].at) index = i;
+    else break;
+  }
+  return { index, act: ENDLESS_ACTS[index] };
+}
+
+/** 幕只作用于默认无尽模式：战役与 Boss Rush 一律返回 null（逐位不变） */
+export function resolveEndlessAct({ campaign = false, bossRush = false, score = 0 } = {}) {
+  if (campaign || bossRush) return null;
+  return actFromScore(score);
+}
+
 // 每日任务刷新用的本地存储 date 键（含时区感知性：按本地日期字符串）
 export function todayKey() {
   const d = new Date();

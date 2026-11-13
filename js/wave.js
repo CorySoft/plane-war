@@ -19,12 +19,15 @@ let swarmTimer = 0;
 let swarmWarned = false;
 let bossWarnPending = false;
 let bossWarnTimer = 0;
+let actBossTimer = 0;
+let actBossWarned = false;
 
 // @param enemyLevel 当前敌方等级（精英波此前漏传 → 后期精英波全是 1 级白板）
-export function updateWaves(dt, level, diff, enemyLevel = 1) {
-  // 精英波计时
+// @param act        无尽模式当前幕（可选；缺省 null = 旧行为逐位不变）
+export function updateWaves(dt, level, diff, enemyLevel = 1, act = null) {
+  // 精英波计时（幕可降低精英频率，缺省乘 1）
   eliteTimer += dt;
-  if (eliteTimer >= DIFFICULTY.eliteWaveInterval && level >= 2) {
+  if (eliteTimer >= DIFFICULTY.eliteWaveInterval * (act?.eliteMul ?? 1) && level >= 2) {
     eliteTimer = 0;
     const count = 2 + Math.min(level, 5);
     for (let i = 0; i < count; i++) spawnEnemy(level, diff, enemyLevel);
@@ -45,6 +48,20 @@ export function updateWaves(dt, level, diff, enemyLevel = 1) {
       return "boss";
     }
     return null;
+  }
+
+  // 幕 Boss 周期（与等级驱动的 Boss 并行；返回同样的 bossWarn/boss 事件字符串）
+  if (act && act.bossCycleSec > 0) {
+    actBossTimer += dt;
+    if (!actBossWarned && actBossTimer >= act.bossCycleSec - 3) {
+      actBossWarned = true;
+      return "bossWarn";
+    }
+    if (actBossTimer >= act.bossCycleSec) {
+      actBossTimer = 0;
+      actBossWarned = false;
+      return "boss";
+    }
   }
 
   // 虫群波（每 swarmInterval 秒，最低 swarmMinLevel 级）
@@ -77,6 +94,8 @@ export function resetWaves() {
   swarmWarned = false;
   bossWarnPending = false;
   bossWarnTimer = 0;
+  actBossTimer = 0;
+  actBossWarned = false;
 }
 
 // ---------- Boss 定义 ----------

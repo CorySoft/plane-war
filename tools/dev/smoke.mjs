@@ -169,6 +169,12 @@ async function main() {
   await page.waitForTimeout(3000);
   await page.evaluate(() => window.__game?.setScore?.(120000));
   await page.waitForTimeout(3000);
+  // 跨幕会打开三选一（幕跃迁刹车）：自动选第一项，确保后续数据采集在 PLAYING 态
+  if (await page.evaluate(() => window.__game?.state?.() === 3)) {
+    await page.keyboard.press("1");
+    await page.waitForFunction(() => window.__game?.state?.() === 1, null, { timeout: 5000 });
+    await page.waitForTimeout(200);
+  }
 
   const mid = await page.evaluate(async () => {
     // 取 1.5s 内的峰值占位：单帧可能恰好没有敌机/子弹，采样峰值才能证明对局在跑

@@ -2,7 +2,7 @@
  * game.js — 主游戏循环 + 状态机 + 碰撞检测
  * =========================================================== */
 
-import { W, H, STATE, BULLET as BCFG, TAU, DIFFICULTY_PRESETS, POWERUP_DROP, POWERUP_DURATION, META, COMBO, XP_BASE, XP_GROWTH, PLAYER, SCORE_AXIS, levelFromScore, computeViewport, setViewport, skillMax, REGEN_RATE } from "./config.js";
+import { W, H, STATE, BULLET as BCFG, TAU, DIFFICULTY_PRESETS, POWERUP_DROP, POWERUP_DURATION, META, COMBO, XP_BASE, XP_GROWTH, PLAYER, SCORE_AXIS, levelFromScore, computeViewport, setViewport, skillMax, REGEN_RATE, resolveEndlessAct } from "./config.js";
 import { clamp, rand, hypot, setf, cachedRadialGradient } from "./utils.js";
 import { glowText } from "./theme.js";
 import { sfx, startMusic, stopMusic, setSfxMuted, setMusicMuted, setMusicIntensity, duckMusic } from "./audio.js";
@@ -162,6 +162,9 @@ let musicStarted = false;
 let reviveUsed = false;    // 本局是否已续命过（技能复活或付费复活，二选一，每局限 1 次）
 let secondWindRevives = 0; // 本局「绝境逢生」实际触发次数（只读观测用）
 let paidRevives = 0;       // 本局付费复活实际触发次数（只读观测用）
+let lastActIndex = -1;     // 无尽模式当前幕索引（-1 = 尚未初始化；用于幕跃迁只触发一次刹车）
+let currentAct = null;     // 当前幕（战役 / Boss Rush 恒 null）
+let actBossCount = 0;      // 幕 Boss 轮换计数（fortress → phantom → mothership）
 // 深空背景固定渐变缓存（基色/地平线/暗角，只依赖 W/H），必须在 loop() 启动前声明，避免 TDZ
 let spaceBgCache = { key: "", base: null, hz: null, vg: null };
 
@@ -567,10 +570,31 @@ function update(dt, realDt = dt) {
       }
     } else {
       // 波次事件（enemyLevel 传入：精英波此前漏传导致后期出 1 级白板敌机）
-      const waveEvent = updateWaves(dt, level, difficulty, enemyLevel);
+      // 无尽「幕」：只在此默认无尽分支生效，战役与 Boss Rush 走各自分支、逐位不变。
+      const nextAct = resolveEndlessAct({ campaign: false, bossRush: false, score });
+      currentAct = nextAct;
+      const act = nextAct?.act ?? null;
+      const actDifficulty = act
+        ? { ...difficulty, hpScale: difficulty.hpScale * act.hpMul, spawnScale: difficulty.spawnScale * act.spawnMul }
+        : difficulty;
+      // 幕跃迁刹车：每次跃迁只触发一次三选一（不涨 pLevel、不涨难度），
+      // 给「涨分 → 涨难度」这条 Garegga 回路留一个回补点。
+      if (nextAct && nextAct.index !== lastActIndex) {
+        const isFirst = lastActIndex < 0;
+        lastActIndex = nextAct.index;
+        if (!isFirst && nextAct.index > 0 && state === STATE.PLAYING && lives > 0) {
+          toast = { text: `进入 ${act.name}`, color: "#66e0ff", t: 2 };
+          doLevelUp();
+          return;   // 本帧不再推进波次：升级面板已打开，避免继续刷怪
+        }
+      }
+      const waveEvent = updateWaves(dt, level, actDifficulty, enemyLevel, act);
       if (waveEvent === "boss") {
         const bossTypes = Object.keys(BOSS_TYPES);
-        const bossType = bossTypes[Math.floor(Math.random() * bossTypes.length)];
+        // 幕 Boss 按固定顺序轮换（可复现）；非幕 Boss 仍随机
+        const bossType = act && act.bossCycleSec > 0
+          ? ["fortress", "phantom", "mothership"][actBossCount++ % 3]
+          : bossTypes[Math.floor(Math.random() * bossTypes.length)];
         spawnBoss(bossType, level);
         toast = { text: "Boss 来袭！", color: "#ff6b6b", t: 2.5 };
         sfx.bossSpawn();
@@ -588,8 +612,8 @@ function update(dt, realDt = dt) {
       }
 
       // 生成敌人
-      const spawnRate = getSpawnRate(level, difficulty.spawnScale);
-      if (Math.random() < spawnRate * dt) spawnEnemy(level, difficulty, enemyLevel);
+      const spawnRate = getSpawnRate(level, actDifficulty.spawnScale);
+      if (Math.random() < spawnRate * dt) spawnEnemy(level, actDifficulty, enemyLevel);
     }
 
     // 敌机开火
@@ -1444,6 +1468,9 @@ function resetGame() {
 reviveUsed = false;
   secondWindRevives = 0;
   paidRevives = 0;
+  lastActIndex = -1;
+  currentAct = null;
+  actBossCount = 0;
 
   const talentFx = getTalentEffects();
   const shopFx = getShopEffects();
@@ -1621,6 +1648,14 @@ function paintSpace(ctx, frame = 0) {
   if (!hasBg) {
     ctx.fillStyle = spaceBgCache.base;
     ctx.fillRect(-10, -10, W + 20, H + 20);
+  }
+
+  // 无尽幕色调：仅默认无尽生效（currentAct 在战役/BossRush 下恒 null），菜单态不叠
+  if (currentAct?.act?.tint && state !== STATE.MENU) {
+    ctx.save();
+    ctx.fillStyle = currentAct.act.tint;
+    ctx.fillRect(-10, -10, W + 20, H + 20);
+    ctx.restore();
   }
 
   // 星云随 frame 缓慢漂移；按 4px 位置桶复用渐变，偏差远小于光晕半径且限制缓存规模。
@@ -2198,6 +2233,8 @@ window.__game = {
   resetGame, freezeAll, startCampaignFromMenu,
   state: () => state, getPlayer: () => player,
   getScore: () => score, getEnemyLevel: () => enemyLevel,
+  // 无尽幕只读观测口（战役 / Boss Rush 返回 null）
+  getEndlessAct: () => (currentAct ? { index: currentAct.index, name: currentAct.act.name, tint: currentAct.act.tint } : null),
   getCampaignStatus: () => ({
     requested: activeCampaignId,
     active: !!campaignRunner,
