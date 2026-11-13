@@ -134,6 +134,10 @@ function runOne(seed, mode) {
   let mixCut = {};
   let maxActiveSeen = 0;
   let dangerFrames = 0, grazeFrames = 0, dangerFramesCut = 0, grazeFramesCut = 0;
+  // 幕跃迁时刻：逐帧问 actFromScore（只读，且函数不存在时整段跳过 —— 早期 commit 无 Phase-5）
+  const readAct = typeof cfg.actFromScore === "function" ? (s) => cfg.actFromScore(s) : null;
+  let actIdxPrev = 0;
+  const actCrossSec = {};
 
   for (let f = 0; f < frames; f++) {
     lock(p, mode);
@@ -179,6 +183,13 @@ function runOne(seed, mode) {
       maxActiveSeen = Math.max(maxActiveSeen, bulletMod.getHostileBulletBudgetStats().active);
     }
     const secsDone = (f + 1) / 60;
+    if (readAct) {
+      const a = readAct(game().getScore());
+      if (a.index > actIdxPrev) {
+        for (let k = actIdxPrev + 1; k <= a.index; k++) if (actCrossSec[k] === undefined) actCrossSec[k] = +secsDone.toFixed(1);
+        actIdxPrev = a.index;
+      }
+    }
     if (samples.has(f + 1)) {
       scoreAt[secsDone] = game().getScore();
       levelAt[secsDone] = game().getPlayer().level;
@@ -215,6 +226,7 @@ function runOne(seed, mode) {
       return all ? +(nw / all * 100).toFixed(1) : 0;
     })(),
     scoreAt, levelAt, enemyLevelAt,
+    幕跃迁时刻: actCrossSec, 分数_终局: game().getScore(),
   };
 }
 
@@ -232,6 +244,7 @@ const out = {
   被测commit提示: "读数只属于跑它的那个 worktree 的 HEAD；用 HEAD_LABEL 显式带出，避免在错误的树上读数",
   head: process.env.HEAD_LABEL || "未标注（跑之前请 HEAD_LABEL=$(git rev-parse --short HEAD)）",
   jsEnemyTypes: Object.keys(cfg.ENEMY_TYPES),
+  幕占位at: Array.isArray(cfg.ENDLESS_ACTS) ? cfg.ENDLESS_ACTS.map((a) => a.at) : null,
   rows, errors,
 };
 const fs = await import("node:fs");
