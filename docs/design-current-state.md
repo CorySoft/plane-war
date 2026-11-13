@@ -421,7 +421,7 @@
 | 敌方等级注释过时 | **已随 `SCORE_AXIS` 重写**：`ENEMY_LEVEL.maxLevel=99` 现明确标注为「理论上限，运行时由得分轴封顶 18」 | `config.js:132`、`config.js:436-438` |
 | `screenCap` 注释称「同屏硬上限」 | **已修**：改为「单轮发射闸」，并写明分裂碎片不经此闸、峰值可能超过它 | `config.js:74-76`、闸门 `game.js:405`、旁路 `bullet.js:224-235` |
 | `freeze` 图鉴文案是玩家可见的假话 | **本轮同批订正（纯文本）**：文案写「冻结全场敌机**与敌方子弹**」，而 `freezeAll()` 只给敌机设 `e.frozen`，`updateBullets` 里没有任何 freeze 分支 ⇒ **敌弹照常飞**。改成「冻结全场敌机（敌方子弹仍会飞行）」。**不去真冻子弹**（那是平衡改动）。另：`js/player.js` 的 `buffs.freeze` 是死 key（freeze 走 `_freeze`/`e.frozen`），本轮不碰，记为债 | `js/ui/codex.js` 的 `powerupDesc.freeze`、`freezeAll` 在 `js/game.js` |
-| `ORBIT_GROW_INTERVAL` 注释与实现不同式（自 §9.1 移入） | **已修（Phase-2 代码提交里，非本轮）**：注释现写「有护体技能时每 30 秒增长一颗（每级 -4s，下限 4s）」，与增长分支的 `Math.max(4, ORBIT_GROW_INTERVAL - guard * 4)` 同式，另有一行「下限保护」注释说明为何不能压到 0；§9.1 旧版并列的 `ORBIT_MAX_BASE` **在 `js/config.js` 与 `js/player.js` 里都已无字样**（`grep -c` 双零，本轮复核）。本行保留为**已关闭项**，供 v0.5.7 重锚时核销 | `js/player.js` 的 `ORBIT_GROW_INTERVAL` 定义处与增长分支 |
+| `ORBIT_GROW_INTERVAL` 注释与实现不同式（自 §9.1 移入） | **已修（Phase-2 代码提交里，非本轮）**：注释现写「有护体技能时每 30 秒增长一颗（每级 -4s，下限 4s）」，与增长分支的 `Math.max(4, ORBIT_GROW_INTERVAL - guard * 4)` 同式，另有一行「下限保护」注释说明为何不能压到 0；§9.1 旧版并列的 `ORBIT_MAX_BASE` **在 `js/config.js` 与 `js/player.js` 里都已无字样**（`grep -c` 双零，本轮复核）。本行保留为**已关闭项**，供 v0.5.7 重锚时核销 | `js/player.js:231-241`（增长分支：`if (orbit.length < maxOrbit)` 起到 `orbitGrowTimer = 0` 的收尾 `}`；裁定 D-1 复核后**唯一真正净丢**的锚点，按「恢复被误删的有效信息」就地补回，非重锚——本行号在现 HEAD 逐行核过。`ORBIT_GROW_INTERVAL` 定义处仍在其上方同函数，`:224`/`:233` 两处锚点未丢，见本页 §开头两张表） |
 
 ---
 
